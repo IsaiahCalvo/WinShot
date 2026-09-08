@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -10,9 +10,16 @@ public sealed class FastSelfTimerWindow : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
     private static readonly SD.Color Border = ThemePalette.BorderStrong;
+    private static readonly SD.Color Ring = ThemePalette.Accent;
     private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
+    // The delay is a real wait, so it stays on a plain one-second timer and keeps working
+    // with animation turned off system-wide; only the ring's sweep and the digit's pop ride
+    // Motion, one tween per second. Shared with the recording countdown through CountdownRing.
     private readonly WF.Timer _timer = new() { Interval = 1000 };
+    private readonly int _totalSeconds;
+    private IDisposable? _second;
+    private double _secondFraction;
     private int _remaining;
 
     // Scales the badge (and its pixel-unit digits) to the cursor monitor, so it
@@ -24,6 +31,7 @@ public sealed class FastSelfTimerWindow : WF.Form
     public FastSelfTimerWindow(int seconds)
     {
         _remaining = SelfTimerOptions.ClampDelaySeconds(seconds);
+        _totalSeconds = _remaining;
         SD.Rectangle timerScreen = WF.Screen.FromPoint(WF.Cursor.Position).Bounds;
         _scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(timerScreen);
         // Create on the target monitor so the OnShown move never fires a WM_DPICHANGED
@@ -53,12 +61,14 @@ public sealed class FastSelfTimerWindow : WF.Form
             if (_remaining <= 0)
             {
                 _timer.Stop();
+                _second?.Dispose();
+                _second = null;
                 Close();
+                return;
             }
-            else
-            {
-                Invalidate();
-            }
+
+            RunSecond();
+            Invalidate();
         };
     }
 
@@ -88,6 +98,29 @@ public sealed class FastSelfTimerWindow : WF.Form
         MakeClickThrough();
         PositionCenterScreen();
         _timer.Start();
+        RunSecond();
+    }
+
+    /// <summary>One tween per second drives the ring's sweep and the digit's landing. It is
+    /// restarted by the tick, so it can never drift away from the clock that owns the delay.</summary>
+    private void RunSecond()
+    {
+        _second?.Dispose();
+        _secondFraction = 0;
+        _second = WinShot.Core.Motion.Run(
+            1000,
+            WinShot.Core.Motion.Linear,
+            amount =>
+            {
+                // With animations off Motion.Run lands 1.0 inline, which parked the ring a
+                // whole second ahead of the digit inside it — a 3-second countdown showed a
+                // third already consumed on its first frame. The step belongs at the START of
+                // the second it describes.
+                _secondFraction = WinShot.Core.Motion.AnimationsEnabled() ? amount : 0;
+                if (!IsDisposed)
+                    Invalidate();
+            },
+            () => _second = null);
     }
 
     protected override void OnResize(EventArgs e)
@@ -98,34 +131,52 @@ public sealed class FastSelfTimerWindow : WF.Form
 
     protected override void OnClosed(EventArgs e)
     {
+        StopClocks();
+        base.OnClosed(e);
+    }
+
+    /// <summary>
+    /// Form.Dispose() does not raise Closed, so the tween handle cannot be released only in
+    /// OnClosed: a Dispose without a Close left timeBeginPeriod(1) raised for the life of the
+    /// process. Every call site closes today; this is what keeps that from mattering.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            StopClocks();
+        base.Dispose(disposing);
+    }
+
+    private void StopClocks()
+    {
+        _second?.Dispose();
+        _second = null;
         _timer.Stop();
         _timer.Dispose();
-        base.OnClosed(e);
     }
 
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.Clear(Back);
-
-        using var pen = new SD.Pen(Border, 1);
-        e.Graphics.DrawEllipse(pen, 1, 1, Width - 3, Height - 3);
 
         // Real bold face — Bold on top of the Semibold family makes GDI synthesize a
         // smeared faux-bold at exactly the size where it shows most.
-        using var font = new SD.Font("Segoe UI", S(72), SD.FontStyle.Bold, SD.GraphicsUnit.Pixel);
-        var flags = WF.TextFormatFlags.HorizontalCenter |
-                    WF.TextFormatFlags.VerticalCenter |
-                    WF.TextFormatFlags.SingleLine |
-                    WF.TextFormatFlags.NoPadding;
-        WF.TextRenderer.DrawText(
+        using var font = WinShot.Core.ThemePalette.UiFontPx(S(72), SD.FontStyle.Bold);
+        WinShot.Core.CountdownRing.Draw(
             e.Graphics,
+            ClientSize,
+            Math.Max(2, S(2)),
+            WinShot.Core.CountdownRing.Progress(_totalSeconds, _remaining, _secondFraction),
             _remaining.ToString(),
             font,
-            new SD.Rectangle(0, 0, Width, Height - 6),
             TextColor,
-            flags);
+            Border,
+            Ring,
+            // The optical-centring nudge rides the same scale as the numeral it lifts; left
+            // raw it was 3 px against a 72 px digit at 100% and against a 144 px one at 200%.
+            new SD.Rectangle(0, 0, Width, Height - S(6)),
+            WinShot.Core.CountdownRing.DigitScale(_secondFraction));
     }
 
     private void PositionCenterScreen()

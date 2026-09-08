@@ -15,7 +15,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="#1E1E1E" CornerRadius="8" ClipToBounds="True">
+        <Border Grid.Row="0" Background="{StaticResource WindowBgBrush}" CornerRadius="8" ClipToBounds="True">
             <MediaElement x:Name="Media" LoadedBehavior="Manual" UnloadedBehavior="Manual"
                           ScrubbingEnabled="True" Stretch="Uniform"
                           AutomationProperties.Name="Video preview"
@@ -24,19 +24,17 @@
 
         <DockPanel Grid.Row="1" Margin="0,12,0,0">
             <Button x:Name="BtnPlay" DockPanel.Dock="Left" Style="{StaticResource PillButtonSecondary}"
-                    Width="72" Margin="0" Content="_Play" Click="OnPlayPause"
+                    Width="72" Margin="0" Content="Play" Click="OnPlayPause"
                     AutomationProperties.Name="Play or pause video"
                     AutomationProperties.HelpText="Plays or pauses the preview. Keyboard shortcut: Space."
                     AutomationProperties.AcceleratorKey="Space"/>
             <TextBlock x:Name="TimeLabel" DockPanel.Dock="Right" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}"
-                       FontFamily="Consolas" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
+                       FontFamily="{StaticResource MonoFamily}" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
                        AutomationProperties.Name="Current position and video duration"/>
-            <Slider x:Name="PositionSlider" Style="{StaticResource DarkSlider}" Margin="10,0,0,0"
-                    Minimum="0" Maximum="1" SmallChange="0.1" LargeChange="5"
-                    Focusable="True" IsTabStop="True"
-                    AutomationProperties.Name="Preview position"
-                    AutomationProperties.HelpText="Use Left and Right Arrow to seek. Page Up and Page Down seek farther."
-                    ValueChanged="OnPositionSliderChanged"/>
+            <TextBlock x:Name="ScrubHint" VerticalAlignment="Center"
+                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
+                       TextTrimming="CharacterEllipsis" Margin="{StaticResource LabelGutterMargin}"
+                       Text="Drag the filmstrip to scrub, or Tab to it and use the arrow keys. Space plays and pauses."/>
         </DockPanel>
 
         <!-- Filmstrip trim timeline: a dark frame-thumbnail track with two
@@ -49,9 +47,30 @@
             </Grid.RowDefinitions>
 
             <Border x:Name="TimelineTrack" Grid.Row="0" Height="56" CornerRadius="6"
-                    Background="#1A1A1A" BorderBrush="#3A3A3A" BorderThickness="1"
+                    Background="{StaticResource ToolbarBgBrush}"
+                    BorderThickness="1"
                     ClipToBounds="True" SizeChanged="OnTimelineSizeChanged"
-                    MouseLeftButtonDown="OnTimelineClicked">
+                    MouseLeftButtonDown="OnTimelineClicked"
+                    MouseMove="OnTimelineDragScrub"
+                    MouseLeftButtonUp="OnTimelineScrubReleased"
+                    LostMouseCapture="OnTimelineScrubReleased"
+                    MouseWheel="OnTimelineWheel"
+                    Focusable="True" KeyboardNavigation.IsTabStop="True" KeyDown="OnTimelineKeyDown"
+                    AutomationProperties.Name="Preview position"
+                    AutomationProperties.HelpText="Use Left and Right Arrow to step a frame, Shift for one second and Control for five. Home and End jump to the ends. Plus and minus zoom the timeline; 0 fits the whole clip.">
+                <Border.Style>
+                    <!-- The filmstrip is the only seek control now, so keyboard focus on it
+                         has to be visible: the same InfoBrush ring every templated control
+                         in Theme.xaml uses. -->
+                    <Style TargetType="Border">
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <Canvas x:Name="TimelineCanvas" ClipToBounds="True">
                     <!-- Frame thumbnails (best-effort) live here, added in code. -->
                     <ItemsControl x:Name="FilmstripItems" Canvas.Left="0" Canvas.Top="0">
@@ -64,9 +83,9 @@
 
                     <!-- Dimmers over the trimmed-away head and tail regions. -->
                     <Rectangle x:Name="LeftDim" Canvas.Left="0" Canvas.Top="0" Height="54"
-                               Fill="#B0000000" Width="0" IsHitTestVisible="False"/>
+                               Fill="{StaticResource BadgeScrimBrush}" Width="0" IsHitTestVisible="False"/>
                     <Rectangle x:Name="RightDim" Canvas.Top="0" Height="54"
-                               Fill="#B0000000" Width="0" IsHitTestVisible="False"/>
+                               Fill="{StaticResource BadgeScrimBrush}" Width="0" IsHitTestVisible="False"/>
 
                     <!-- Accent border around the kept region. -->
                     <Border x:Name="SelectionBorder" Canvas.Top="0" Height="54" Width="0"
@@ -75,7 +94,7 @@
 
                     <!-- Playhead. -->
                     <Rectangle x:Name="Playhead" Canvas.Left="0" Canvas.Top="2" Width="2" Height="50"
-                               Fill="White" IsHitTestVisible="False"/>
+                               Fill="{StaticResource TextPrimaryBrush}" IsHitTestVisible="False"/>
 
                     <!-- In / out drag handles. -->
                     <Thumb x:Name="TrimStartThumb" Canvas.Left="0" Canvas.Top="0" Width="12" Height="54"
@@ -91,7 +110,7 @@
                                     <Border HorizontalAlignment="Right" Width="6" CornerRadius="3,0,0,3"
                                             Background="{StaticResource AccentBrush}"/>
                                     <Rectangle HorizontalAlignment="Right" Margin="0,0,2,0" Width="2" Height="18"
-                                               RadiusX="1" RadiusY="1" Fill="White"/>
+                                               RadiusX="1" RadiusY="1" Fill="{StaticResource TextPrimaryBrush}"/>
                                 </Grid>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsKeyboardFocused" Value="True">
@@ -114,7 +133,7 @@
                                     <Border HorizontalAlignment="Left" Width="6" CornerRadius="0,3,3,0"
                                             Background="{StaticResource AccentBrush}"/>
                                     <Rectangle HorizontalAlignment="Left" Margin="2,0,0,0" Width="2" Height="18"
-                                               RadiusX="1" RadiusY="1" Fill="White"/>
+                                               RadiusX="1" RadiusY="1" Fill="{StaticResource TextPrimaryBrush}"/>
                                 </Grid>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsKeyboardFocused" Value="True">
@@ -129,25 +148,33 @@
 
             <Grid Grid.Row="1" Margin="0,6,0,0">
                 <TextBlock x:Name="TrimStartLabel" HorizontalAlignment="Left" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="In 0:00"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="In 0:00"/>
                 <TextBlock x:Name="TrimRangeLabel" HorizontalAlignment="Center" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="0:00"/>
-                <TextBlock x:Name="TrimEndLabel" HorizontalAlignment="Right" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="Out 0:00"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="0:00"/>
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="BtnZoomFit" Style="{StaticResource PillButtonSecondary}"
+                            Content="Fit" MinWidth="52" Visibility="Collapsed"
+                            Margin="{StaticResource ChipGutterMargin}" Click="OnZoomFit"
+                            AutomationProperties.Name="Fit the whole clip on the timeline"
+                            AutomationProperties.HelpText="Zooms the timeline back out to the whole recording."/>
+                    <TextBlock x:Name="TrimEndLabel" VerticalAlignment="Center"
+                               Style="{StaticResource FieldLabel}"
+                               FontFamily="{StaticResource MonoFamily}" Text="Out 0:00"/>
+                </StackPanel>
             </Grid>
         </Grid>
 
         <WrapPanel Grid.Row="3" Margin="0,10,0,0" VerticalAlignment="Center">
             <StackPanel Orientation="Horizontal" Margin="0,4,12,4">
                 <TextBlock Style="{StaticResource FieldLabel}" Text="Resolution"/>
-                <ComboBox x:Name="ResolutionCombo" Width="86" Margin="8,0,0,0"
+                <!-- Filled in code once the source dimensions are known, so every preset is
+                     labelled with the pixels it actually produces for THIS project. -->
+                <ComboBox x:Name="ResolutionCombo" Width="150" Margin="8,0,0,0"
                           Style="{StaticResource DarkComboBox}" SelectedIndex="0"
                           AutomationProperties.Name="Export resolution"
-                          AutomationProperties.HelpText="Choose 100, 75, or 50 percent of the source resolution."
+                          AutomationProperties.HelpText="Choose the output size. Each option shows the pixel dimensions it produces."
                           SelectionChanged="OnOutputSettingsChanged">
-                    <ComboBoxItem Content="100%"/>
-                    <ComboBoxItem Content="75%"/>
-                    <ComboBoxItem Content="50%"/>
+                    <ComboBoxItem Content="Original"/>
                 </ComboBox>
             </StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,4,12,4">
@@ -173,17 +200,17 @@
                     <ComboBoxItem Content="15"/>
                 </ComboBox>
             </StackPanel>
-            <CheckBox x:Name="MuteCheck" Content="_Mute" Margin="0,4,10,4"
+            <CheckBox x:Name="MuteCheck" Content="Mute" Margin="0,4,10,4"
                       Style="{StaticResource DarkCheckBox}" FontSize="{StaticResource TextBody}"
                       AutomationProperties.Name="Mute exported audio"
                       AutomationProperties.HelpText="Removes audio from the exported video."
                       Checked="OnMuteChanged" Unchecked="OnMuteChanged"/>
-            <CheckBox x:Name="MonoCheck" Content="Mo_no" Margin="0,4,12,4"
+            <CheckBox x:Name="MonoCheck" Content="Mono" Margin="0,4,12,4"
                       Style="{StaticResource DarkCheckBox}" FontSize="{StaticResource TextBody}"
                       AutomationProperties.Name="Export mono audio"
                       AutomationProperties.HelpText="Mixes exported audio down to one channel."
                       Checked="OnOutputSettingsChanged" Unchecked="OnOutputSettingsChanged"/>
-            <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+            <StackPanel Orientation="Horizontal" Margin="0,4,12,4">
                 <TextBlock Style="{StaticResource FieldLabel}" Text="Volume" Margin="{StaticResource ChipGutterMargin}"/>
                 <Slider x:Name="VolumeSlider" Width="90" MinWidth="90" Style="{StaticResource DarkSlider}" VerticalAlignment="Center"
                         Minimum="0" Maximum="1" Value="1" SmallChange="0.05" LargeChange="0.1"
@@ -191,6 +218,18 @@
                         AutomationProperties.Name="Export volume"
                         AutomationProperties.HelpText="Use Left and Right Arrow to adjust export volume."
                         ValueChanged="OnVolumeChanged"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                <TextBlock Style="{StaticResource FieldLabel}" Text="Save to"/>
+                <ComboBox x:Name="DestinationCombo" Width="150" Margin="8,0,0,0"
+                          Style="{StaticResource DarkComboBox}" SelectedIndex="0"
+                          AutomationProperties.Name="Export destination"
+                          AutomationProperties.HelpText="Choose the folder the exported video is written to."
+                          SelectionChanged="OnDestinationChanged">
+                    <ComboBoxItem Content="Beside the original"/>
+                    <ComboBoxItem Content="Save folder"/>
+                    <ComboBoxItem Content="Choose folder…"/>
+                </ComboBox>
             </StackPanel>
         </WrapPanel>
 
@@ -213,20 +252,25 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <Button x:Name="BtnClose" Style="{StaticResource PillButtonSecondary}"
-                        Content="_Cancel" Margin="{StaticResource ChipGutterMargin}"
+                        Content="Cancel" Margin="{StaticResource ChipGutterMargin}"
                         AutomationProperties.Name="Cancel editing"
                         AutomationProperties.HelpText="Closes the editor without changing the source video."
                         Click="OnCloseEditor"/>
                 <Button x:Name="BtnCancelExport" Style="{StaticResource PillButtonSecondary}"
-                        Content="_Cancel export" Margin="{StaticResource ChipGutterMargin}" Visibility="Collapsed"
+                        Content="Cancel export" Margin="{StaticResource ChipGutterMargin}" Visibility="Collapsed"
                         AutomationProperties.Name="Cancel export"
                         AutomationProperties.HelpText="Stops the current export and removes any partial output. Keyboard shortcut: Escape."
                         AutomationProperties.AcceleratorKey="Escape"
                         Click="OnCancelExport"/>
+                <Button x:Name="BtnTrimOnly" Style="{StaticResource PillButtonSecondary}"
+                        Content="Trim only" Margin="{StaticResource ChipGutterMargin}" Visibility="Collapsed"
+                        Click="OnTrimOnly"
+                        AutomationProperties.Name="Trim without re-encoding"
+                        AutomationProperties.HelpText="Cuts to the trimmed range keeping the original encoding, so nothing is re-compressed."/>
                 <Button x:Name="BtnExport" Style="{StaticResource PillButtonPrimary}"
-                        Content="_Trim &amp; Export" Margin="0" Click="OnExport"
-                        AutomationProperties.Name="Trim and export video"
-                        AutomationProperties.HelpText="Trims and converts the edited video beside the source file. Keyboard shortcut: Control E."
+                        Content="Convert" Margin="0" Click="OnExport"
+                        AutomationProperties.Name="Convert video"
+                        AutomationProperties.HelpText="Re-encodes the video at the chosen size and quality. Keyboard shortcut: Control E."
                         AutomationProperties.AcceleratorKey="Control+E"/>
             </StackPanel>
         </Grid>

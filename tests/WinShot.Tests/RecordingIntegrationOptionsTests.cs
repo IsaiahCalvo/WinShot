@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using WinShot.Recording;
 using SD = System.Drawing;
 using Xunit;
@@ -115,6 +115,8 @@ public class RecordingIntegrationOptionsTests
     [InlineData("1080p", false, 1.0, 1620, 1080)]
     [InlineData("720p", false, 1.0, 1080, 720)]
     [InlineData("4k", false, 1.0, 3000, 2000)]
+    [InlineData("1440p", false, 1.0, 2160, 1440)]
+    [InlineData("480p", false, 1.0, 720, 480)]
     [InlineData("original", true, 2.0, 1500, 1000)]
     [InlineData("1080p", true, 2.0, 1500, 1000)]
     public void VideoSize_HonorsResolutionAndHiDpi(
@@ -130,6 +132,14 @@ public class RecordingIntegrationOptionsTests
                 new SD.Size(3000, 2000), maxResolution, scaleHiDpi, dpiScale));
     }
 
+
+    [Theory]
+    [InlineData("1440p", 2560, 1440)]
+    [InlineData("480p", 854, 480)]
+    [InlineData("4k", 3840, 2160)]
+    [InlineData("nonsense", 0, 0)]
+    public void MaxResolution_MapsEveryOfferedTier(string tier, int width, int height) =>
+        Assert.Equal((width, height), RecordingOutputSize.NormalizeMaxResolution(tier));
 
     [Fact]
     public void VideoSize_UsesPortraitResolutionBoundsForPortraitCapture()
@@ -230,8 +240,9 @@ public class RecordingIntegrationOptionsTests
         Assert.Equal(
             new RecordingAfterActions(false, true, true),
             RecordingAfterActions.FromSettings(settings, isGif: false));
+        // GIFs used to be excluded because there was no GIF editor; there is one now.
         Assert.Equal(
-            new RecordingAfterActions(false, true, false),
+            new RecordingAfterActions(false, true, true),
             RecordingAfterActions.FromSettings(settings, isGif: true));
 
         // The retired OpenVideoEditorAfterRecording checkbox is a MIGRATION seed, folded into
@@ -242,6 +253,7 @@ public class RecordingIntegrationOptionsTests
         settings.RecordingOpenEditor = false;
         settings.OpenVideoEditorAfterRecording = true;
         Assert.False(RecordingAfterActions.FromSettings(settings, isGif: false).OpenEditor);
+        Assert.False(RecordingAfterActions.FromSettings(settings, isGif: true).OpenEditor);
     }
 
     [Fact]

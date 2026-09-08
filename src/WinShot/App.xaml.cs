@@ -125,6 +125,10 @@ public partial class App : Application
             Log.Error("Unhandled WinForms UI exception (continuing)", args.Exception);
 
         _settings.Load();
+        // A take that ended with the process (a crash, a kill, a power loss) left the user's
+        // notification banners switched off. The breadcrumb FocusAssist wrote before touching
+        // them is what puts them back, and this is the first moment the settings folder is known.
+        Core.FocusAssist.RecoverFromCrash();
         _history = new HistoryService(_settings);
         _recordingRecovery = new RecordingRecoveryStartup(
             excludedPaths => RecordingTempRecovery.Discover(excludedPaths: excludedPaths),
@@ -376,7 +380,15 @@ public partial class App : Application
         ScaleMenuGlyphs(menu);
         menu.Opening += (_, _) => ScaleMenuGlyphs(menu);
         _tray.ContextMenuStrip = menu;
-        _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
+        // While a take is running the icon IS a stop square, so double-clicking it has to stop
+        // the recording. It used to launch a region screenshot over the live take instead.
+        _tray.DoubleClick += (_, _) =>
+        {
+            if (_recording is { IsRecording: true } recording)
+                recording.RequestStop();
+            else
+                QueueCaptureCommand("capture-area");
+        };
         _tray.BalloonTipClicked += (_, _) => { if (_pendingUpdate is not null) _ = InstallPendingUpdateAsync(); };
         _settings.Changed += ApplyTrayVisibility;
     }
@@ -1697,8 +1709,20 @@ public partial class App : Application
                 return _recording;
             _recording = new RecordingController(_settings, _history);
             _recording.RecordingElapsedChanged += OnRecordingElapsedChanged;
+            _recording.RecordingActiveChanged += OnRecordingActiveChanged;
             return _recording;
         }
+    }
+
+    /// <summary>Swaps the tray icon to a stop glyph for the length of the take, so the tray
+    /// says a recording is live and one click on it ends the recording.</summary>
+    private void OnRecordingActiveChanged(bool recording)
+    {
+        if (_tray is null)
+            return;
+        _tray.Icon = recording ? TrayIconFactory.CreateRecording() : TrayIconFactory.Create();
+        if (!recording)
+            _tray.Text = "WinShot";
     }
 
     private void OnRecordingElapsedChanged(TimeSpan? elapsed)

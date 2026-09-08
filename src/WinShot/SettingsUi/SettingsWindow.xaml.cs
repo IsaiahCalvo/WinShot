@@ -14,6 +14,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using WinShot.Capture;
 using WinShot.Core;
+using WinShot.Recording;
 using WF = System.Windows.Forms;
 
 namespace WinShot.SettingsUi;
@@ -208,6 +209,17 @@ public partial class SettingsWindow : Window
         OverlayCloseBox.IsEnabled = enabled;
         OverlayActionRow.IsEnabled = enabled; // the row, so the label dims with the combo
 
+    }
+
+    /// <summary>The two keystroke sub-options only mean anything while the pill is on; "Hide
+    /// the cursor while typing" is deliberately independent of it.</summary>
+    private void OnKeystrokesToggled(object sender, RoutedEventArgs e)
+    {
+        if (KeystrokesCheck is null || KeystrokesCommandOnlyCheck is null || KeystrokePositionCombo is null)
+            return;
+        bool enabled = KeystrokesCheck.IsChecked == true;
+        KeystrokesCommandOnlyCheck.IsEnabled = enabled;
+        KeystrokePositionCombo.IsEnabled = enabled;
     }
 
     /// <summary>Maps each input box to the index of the section that contains it.</summary>
@@ -461,15 +473,33 @@ public partial class SettingsWindow : Window
         CaptureCursorCheck.IsChecked = s.CaptureCursor;
         ClickHighlightsCheck.IsChecked = s.ShowClickHighlights;
         KeystrokesCheck.IsChecked = s.ShowKeystrokes;
+        KeystrokesCommandOnlyCheck.IsChecked = s.KeystrokesCommandOnly;
+        KeystrokesCommandOnlyCheck.IsEnabled = s.ShowKeystrokes;
+        KeystrokePositionCombo.IsEnabled = s.ShowKeystrokes;
+        HideCursorWhenTypingCheck.IsChecked = s.HideCursorWhenTyping;
+        SelectByTag(
+            KeystrokePositionCombo,
+            RecordingOptions.NormalizeKeystrokePosition(s.KeystrokePosition),
+            fallbackIndex: 4);
         RememberLastSelectionCheck.IsChecked = s.RememberLastSelection;
         DimScreenCheck.IsChecked = s.DimScreenWhileRecording;
-        ShowCountdownCheck.IsChecked = s.ShowRecordingCountdown;
         CountdownBox.Text = s.RecordingCountdownSeconds.ToString();
         SelectByTag(WebcamCombo, s.WebcamOverlayPosition, fallbackIndex: 0);
         WebcamSizeBox.Text = RecordingOptions.ClampWebcamSizePercent(s.WebcamOverlaySizePercent).ToString();
+        LoadDeviceCombo(WebcamDeviceCombo, RecordingDevices.Cameras(), "First camera found", s.RecordingWebcamDevice);
 
         // Video
         SelectByTag(MaxResolutionCombo, s.RecordingMaxResolution, fallbackIndex: 0);
+        SelectByTag(
+            VideoQualityCombo,
+            RecordingOptions.ClampVideoQuality(s.RecordingVideoQuality) switch
+            {
+                >= 85 => "85",
+                <= 50 => "50",
+                _ => "70",
+            },
+            fallbackIndex: 1);
+        LoadDeviceCombo(MicrophoneDeviceCombo, RecordingDevices.Microphones(), "System default", s.RecordingMicrophoneDevice);
         RecordingFpsBox.Text = s.RecordingFps.ToString();
         RecordAudioCheck.IsChecked = s.RecordAudio;
         SystemAudioCheck.IsChecked = s.RecordSystemAudio;
@@ -1055,13 +1085,25 @@ public partial class SettingsWindow : Window
         s.ShowRecordingControls = ShowRecordingControlsCheck.IsChecked == true;
         s.ShowRecordingTimer = ShowRecordingTimerCheck.IsChecked == true;
         s.ScaleHiDpiVideo = ScaleHiDpiVideoCheck.IsChecked == true;
+        s.DoNotDisturbWhileRecording = DoNotDisturbCheck.IsChecked == true;
         s.CaptureCursor = CaptureCursorCheck.IsChecked == true;
         s.ShowClickHighlights = ClickHighlightsCheck.IsChecked == true;
         s.ShowKeystrokes = KeystrokesCheck.IsChecked == true;
+        s.KeystrokesCommandOnly = KeystrokesCommandOnlyCheck.IsChecked == true;
+        s.HideCursorWhenTyping = HideCursorWhenTypingCheck.IsChecked == true;
+        s.KeystrokePosition = RecordingOptions.NormalizeKeystrokePosition(
+            SelectedTag(KeystrokePositionCombo, RecordingOptions.KeystrokeDefaultPosition));
         s.RememberLastSelection = RememberLastSelectionCheck.IsChecked == true;
         s.DimScreenWhileRecording = DimScreenCheck.IsChecked == true;
-        s.WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(SelectedTag(WebcamCombo, "off"));
+        // Through the setter, never the property: it keeps WebcamOverlayCorner in step, so
+        // switching the overlay off still remembers the corner to restore it to.
+        s.SetWebcamOverlayPosition(SelectedTag(WebcamCombo, "off"));
+        s.RecordingWebcamDevice = SelectedTag(WebcamDeviceCombo, "");
         s.RecordingMaxResolution = SelectedTag(MaxResolutionCombo, "original");
+        s.RecordingVideoQuality = int.TryParse(SelectedTag(VideoQualityCombo, "70"), out int quality)
+            ? RecordingOptions.ClampVideoQuality(quality)
+            : RecordingOptions.DefaultVideoQuality;
+        s.RecordingMicrophoneDevice = SelectedTag(MicrophoneDeviceCombo, "");
         s.RecordAudio = RecordAudioCheck.IsChecked == true;
         s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
         s.RecordAudioMono = RecordAudioMonoCheck.IsChecked == true;
@@ -1383,12 +1425,23 @@ public partial class SettingsWindow : Window
         Accessible(CaptureCursorCheck, "Record cursor", "Include the mouse pointer in recordings.");
         Accessible(ClickHighlightsCheck, "Highlight recording clicks", "Show a visual highlight for mouse clicks.");
         Accessible(KeystrokesCheck, "Show recording keystrokes", "Show pressed keys in recordings.");
+        Accessible(KeystrokesCommandOnlyCheck, "Show only command keys",
+            "Show keyboard shortcuts in recordings but not plain typing.");
+        Accessible(KeystrokePositionCombo, "Keystroke position",
+            "Choose which corner of the recorded area the keystroke pill sits in.");
+        Accessible(HideCursorWhenTypingCheck, "Hide the cursor while typing",
+            "Keeps the pointer out of the recording while you type, and brings it back when you stop.");
+        Accessible(DoNotDisturbCheck, "Silence notifications while recording",
+            "Turns notification banners off for the length of the recording and back on afterwards.");
         Accessible(RememberLastSelectionCheck, "Remember recording area", "Reuse the last valid recording rectangle.");
         Accessible(DimScreenCheck, "Dim outside recording area", "Dim the screen outside the selected recording rectangle.");
         Accessible(CountdownBox, "Recording countdown seconds", "Use zero to start immediately.");
         Accessible(WebcamCombo, "Webcam overlay position", "Choose the webcam overlay position or turn it off.");
         Accessible(WebcamSizeBox, "Webcam overlay size", "Enter a value from 10 to 45 percent.");
         Accessible(MaxResolutionCombo, "Maximum video resolution", "Choose the largest output resolution for MP4 recordings.");
+        Accessible(VideoQualityCombo, "Video quality", "Choose the encode quality for MP4 recordings. Lower quality writes a smaller file.");
+        Accessible(MicrophoneDeviceCombo, "Microphone", "Choose which microphone recordings capture.");
+        Accessible(WebcamDeviceCombo, "Camera", "Choose which camera the webcam overlay uses.");
         Accessible(RecordingFpsBox, "Video frames per second", "Enter a value from 10 to 60.");
         Accessible(RecordAudioCheck, "Record microphone", "Capture microphone audio in MP4 recordings.");
         Accessible(SystemAudioCheck, "Record system audio", "Capture Windows system audio in MP4 recordings.");
@@ -1444,10 +1497,13 @@ public partial class SettingsWindow : Window
             OverlayPositionCombo, OverlayMoveToActiveScreenCheck,
             OverlaySizeSlider, OverlayAutoCloseCheck, OverlayActionCombo, OverlayCloseBox,
             OverlayCloseAfterDragCheck, OverlaySaveBehaviorCombo, ShowRecordingControlsCheck,
-            ShowRecordingTimerCheck, ScaleHiDpiVideoCheck, CaptureCursorCheck, ClickHighlightsCheck,
-            KeystrokesCheck, RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
-            WebcamSizeBox, MaxResolutionCombo,
-            RecordingFpsBox, RecordAudioCheck, SystemAudioCheck, RecordAudioMonoCheck,
+            ShowRecordingTimerCheck, ScaleHiDpiVideoCheck, DoNotDisturbCheck,
+            CaptureCursorCheck, ClickHighlightsCheck,
+            KeystrokesCheck, KeystrokesCommandOnlyCheck, KeystrokePositionCombo,
+            HideCursorWhenTypingCheck,
+            RememberLastSelectionCheck, DimScreenCheck, CountdownBox, WebcamCombo,
+            WebcamSizeBox, WebcamDeviceCombo, MaxResolutionCombo, VideoQualityCombo,
+            RecordingFpsBox, RecordAudioCheck, MicrophoneDeviceCombo, SystemAudioCheck, RecordAudioMonoCheck,
             GifFpsBox, GifQualitySlider, OptimizeGifsCheck, GifSizeCombo,
             FormatCombo, HiDpiCheck, BackgroundCombo, BackgroundColorBox, BackgroundShadowCheck, SelfTimerCombo,
             FreezeScreenCheck, CrosshairModeCombo, ShowMagnifierCheck, MeasureToleranceCombo,
@@ -1786,6 +1842,49 @@ public partial class SettingsWindow : Window
                 best = preset;
         }
         return best.ToString();
+    }
+
+    /// <summary>
+    /// Fills a device picker: a "let the system choose" row first, then whatever hardware is
+    /// present right now, with the stored pick re-selected when that device still exists.
+    /// The tag is the recorder's own DeviceName, which is what gets persisted.
+    /// </summary>
+    private static void LoadDeviceCombo(
+        ComboBox combo,
+        IReadOnlyList<RecordingDevice> devices,
+        string defaultLabel,
+        string stored)
+    {
+        combo.Items.Clear();
+        combo.Items.Add(new ComboBoxItem { Content = defaultLabel, Tag = "" });
+        foreach (RecordingDevice device in devices)
+        {
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = device.Label.Length <= 40 ? device.Label : device.Label[..39] + "…",
+                Tag = device.DeviceName,
+            });
+        }
+
+        // A device that is unplugged when Settings opens still gets its own row, greyed and
+        // labelled. Without it the combo fell back to index 0 and Save wrote "" over the pick,
+        // so unplugging a USB mic once and opening Settings lost the choice for good.
+        string keep = stored ?? "";
+        if (keep.Length > 0 && !devices.Any(d => string.Equals(d.DeviceName, keep, StringComparison.Ordinal)))
+        {
+            var missing = new ComboBoxItem
+            {
+                Content = (keep.Length <= 40 ? keep : keep[..39] + "…") + " (not connected)",
+                Tag = keep,
+            };
+            // Dimmed, not disabled: it has to stay selectable, because it is the selected row —
+            // disabling it is exactly what would drop the pick the row exists to keep.
+            if (combo.TryFindResource("TextDisabledBrush") is System.Windows.Media.Brush dim)
+                missing.Foreground = dim;
+            combo.Items.Add(missing);
+        }
+
+        SelectByTag(combo, keep, fallbackIndex: 0);
     }
 
     // Delegates to the shared helper so Settings and the boot-time self-heal write the

@@ -10,14 +10,17 @@ public readonly record struct RecordingAfterActions(
     bool CopyFile,
     bool OpenEditor)
 {
+    // GIFs used to be excluded from the editor because there was no GIF editor; there is one
+    // now, so the preference means the same thing for both formats.
     public static RecordingAfterActions FromSettings(Settings settings, bool isGif) => new(
         settings.RecordingShowOverlay,
         settings.RecordingCopy,
         // RecordingOpenEditor alone. The retired OpenVideoEditorAfterRecording checkbox is a
         // MIGRATION seed, folded into this field once by PostCaptureMigration — OR-ing it in
         // here as well made the matrix checkbox undismissable for anyone upgrading: unticking
-        // it wrote false, the seed on disk stayed true, and the editor kept opening.
-        !isGif && settings.RecordingOpenEditor);
+        // it wrote false, the seed on disk stayed true, and the editor kept opening. isGif no
+        // longer gates it either: there is a GIF editor now.
+        settings.RecordingOpenEditor);
 }
 
 public readonly record struct RecordingSessionUiOptions(
@@ -146,11 +149,15 @@ public static class RecordingOutputSize
         return Math.Clamp(16 + (int)Math.Round(normalized * 240 / 100.0), 16, 256);
     }
 
-    private static (int Width, int Height) NormalizeMaxResolution(string? value) => value?.ToLowerInvariant() switch
+    /// <summary>Landscape pixel budget for a max-resolution tier; (0, 0) means "no cap".
+    /// Portrait sources swap the pair in <see cref="CalculateVideo"/>.</summary>
+    internal static (int Width, int Height) NormalizeMaxResolution(string? value) => value?.ToLowerInvariant() switch
     {
         "4k" => (3840, 2160),
+        "1440p" => (2560, 1440),
         "1080p" => (1920, 1080),
         "720p" => (1280, 720),
+        "480p" => (854, 480),
         _ => (0, 0),
     };
 
@@ -167,6 +174,97 @@ public static class RecordingControlBarPlacement
     public static SD.Point BottomCenter(SD.Rectangle workingArea, SD.Size barSize, int margin = 24) => new(
         workingArea.Left + Math.Max(0, (workingArea.Width - barSize.Width) / 2),
         workingArea.Bottom - barSize.Height - margin);
+
+    /// <summary>
+    /// Centres the bar just below the recorded rectangle, so the controls belong to the take
+    /// instead of to the monitor. Falls back above the region when there is no room below,
+    /// and to the working area's bottom edge when neither side fits (a full-height region).
+    /// Always clamped fully inside <paramref name="workingArea"/>.
+    /// </summary>
+    public static SD.Point UnderRegion(
+        SD.Rectangle recordingRegion,
+        SD.Rectangle workingArea,
+        SD.Size barSize,
+        int margin = 12)
+    {
+        int x = recordingRegion.Left + ((recordingRegion.Width - barSize.Width) / 2);
+        x = Math.Clamp(
+            x,
+            workingArea.Left,
+            Math.Max(workingArea.Left, workingArea.Right - barSize.Width));
+
+        int below = recordingRegion.Bottom + margin;
+        int above = recordingRegion.Top - margin - barSize.Height;
+        int y = below + barSize.Height <= workingArea.Bottom
+            ? below
+            : above >= workingArea.Top
+                ? above
+                : workingArea.Bottom - barSize.Height - margin;
+        y = Math.Clamp(
+            y,
+            workingArea.Top,
+            Math.Max(workingArea.Top, workingArea.Bottom - barSize.Height));
+        return new SD.Point(x, y);
+    }
+}
+
+/// <summary>The cells of the recording control pill, in visual order.</summary>
+public enum RecordingControlBarCell
+{
+    Timer,
+    PauseResume,
+    Restart,
+    Stop,
+    Discard,
+}
+
+/// <summary>
+/// Geometry of the recording control pill: a capsule of equal glyph cells butted against each
+/// other and split by full-height hairlines, optionally preceded by a wider timer cell. Pure so
+/// the cell rects can be pinned at 100/125/150/200 % without a monitor at that DPI.
+/// </summary>
+public static class RecordingControlBarLayout
+{
+    public const int HeightDip = 40;
+    public const int SidePadDip = 9;
+    public const int TimerWidthDip = 68;
+    public const int CellWidthDip = 38;
+
+    public static IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> Build(
+        bool showTimer,
+        double scale)
+    {
+        int height = RecordingMonitorDpi.Px(HeightDip, scale);
+        int pad = RecordingMonitorDpi.Px(SidePadDip, scale);
+        int cell = RecordingMonitorDpi.Px(CellWidthDip, scale);
+        var cells = new List<(RecordingControlBarCell, SD.Rectangle)>(5);
+        int x = pad;
+        if (showTimer)
+        {
+            int timer = RecordingMonitorDpi.Px(TimerWidthDip, scale);
+            cells.Add((RecordingControlBarCell.Timer, new SD.Rectangle(x, 0, timer, height)));
+            x += timer;
+        }
+        foreach (RecordingControlBarCell id in new[]
+        {
+            RecordingControlBarCell.PauseResume,
+            RecordingControlBarCell.Restart,
+            RecordingControlBarCell.Stop,
+            RecordingControlBarCell.Discard,
+        })
+        {
+            cells.Add((id, new SD.Rectangle(x, 0, cell, height)));
+            x += cell;
+        }
+        return cells;
+    }
+
+    public static SD.Size Size(bool showTimer, double scale)
+    {
+        IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> cells = Build(showTimer, scale);
+        int pad = RecordingMonitorDpi.Px(SidePadDip, scale);
+        return new SD.Size(cells[^1].Bounds.Right + pad, RecordingMonitorDpi.Px(HeightDip, scale));
+    }
 }
 
 public static class RecordingMonitorDpi
@@ -179,8 +277,17 @@ public static class RecordingMonitorDpi
     /// </summary>
     public static int Px(int logical, double scale) => (int)Math.Round(logical * scale);
 
+    /// <summary>
+    /// Test seam. The render tests pixel-scan the recording chrome at 100% and 150% and the
+    /// suite has no 150% monitor to draw on; null in the app, where the real DPI answers.
+    /// </summary>
+    internal static Func<SD.Rectangle, double>? ScaleSource;
+
     public static double ScaleFor(SD.Rectangle screenRect)
     {
+        if (ScaleSource is { } source)
+            return source(screenRect);
+
         try
         {
             var nativeRect = new NativeRect(screenRect.Left, screenRect.Top, screenRect.Right, screenRect.Bottom);

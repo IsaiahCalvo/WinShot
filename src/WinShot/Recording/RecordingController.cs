@@ -33,6 +33,7 @@ public sealed class RecordingController
     private bool _paused;
     private bool _isGif;
     private bool _desktopIconsHidden; // we hid the desktop icons; restore them on teardown
+    private bool _notificationsSilenced; // we turned notification banners off; restore on teardown
     private Recorder? _recorder;
     private GifRecorder? _gifRecorder;
     private FastRecordingControlBar? _bar;
@@ -43,6 +44,10 @@ public sealed class RecordingController
     private DispatcherTimer? _trayTimer;
     private bool _elapsedEnabled;
     private string? _tempPath;
+    // The sources the active MP4 recorder is composing, so cursor capture can be toggled on
+    // each of them while a take runs. Held as the objects rather than their IDs because the
+    // live-update API takes a source carrying the new values, matched back by its ID.
+    private DisplayRecordingSource[] _recordingSources = Array.Empty<DisplayRecordingSource>();
 
     // Cached region + chosen options so Restart can re-run capture without
     // re-showing the options/region/countdown dialogs.
@@ -57,6 +62,8 @@ public sealed class RecordingController
         bool CaptureCursor,
         bool ShowClickHighlights,
         bool ShowKeystrokes,
+        KeystrokeOverlayOptions KeystrokeOptions,
+        bool HideCursorWhenTyping,
         string WebcamPosition,
         int WebcamSizePercent,
         string? WebcamDeviceName,
@@ -99,6 +106,11 @@ public sealed class RecordingController
 
     public event Action<TimeSpan?>? RecordingElapsedChanged;
 
+    /// <summary>Raised whenever a take starts or ends. Separate from the elapsed event, which
+    /// only fires while "Display recording time" is on — the tray icon has to say a recording
+    /// is live regardless of whether the user asked for a clock.</summary>
+    public event Action<bool>? RecordingActiveChanged;
+
     public void Shutdown()
     {
         _restarting = false; // never spin up a fresh recording while tearing down
@@ -128,6 +140,7 @@ public sealed class RecordingController
         if (_stopping && !_discard)
         {
             Log.Info($"Exiting during recording finalization; keeping {_tempPath} for startup recovery");
+            RestoreNotifications(); // the app is going away; never leave banners switched off
             CloseBar();
             CloseOverlays();
             CloseDimOverlay();
@@ -136,6 +149,7 @@ public sealed class RecordingController
         }
 
         TryDelete(_tempPath);
+        RestoreNotifications();
         CloseBar();
         CloseOverlays();
         CloseDimOverlay();
@@ -144,6 +158,14 @@ public sealed class RecordingController
     }
 
     /// <summary>Hotkey/tray entry point: starts the recording flow, or stops the active recording.</summary>
+    /// <summary>Stops and saves the running take. For the tray's stop-square icon, which is an
+    /// affordance and has to do what it shows.</summary>
+    public void RequestStop()
+    {
+        if (IsRecording)
+            StopRecording(discard: false);
+    }
+
     public void ToggleFlow() => ToggleFlow(pickDisplay: false, selectedVirtualRegion: null);
 
     public void ToggleFlowWithRegion(SD.Rectangle selectedVirtualRegion) =>
@@ -175,107 +197,151 @@ public sealed class RecordingController
         }
     }
 
+    /// <summary>
+    /// Region first, options second. The selector opens straight away — with the remembered or
+    /// pre-picked region already pending where there is one — and the two-card HUD anchored to
+    /// that selection carries the toggles and the two record actions. Everything the HUD does
+    /// not show (frame rates, quality, devices, countdown) is a persisted setting and stays in
+    /// Settings, which is where the old fifteen-row modal was reading it from anyway.
+    ///
+    /// Picking whole displays keeps the modal: there is no selection to anchor a HUD to.
+    /// </summary>
     private async Task StartFlowAsync(bool pickDisplay, SD.Rectangle? selectedVirtualRegion)
     {
-        var dialog = FastRecordingOptionsDialog.Create(_settings.Current);
-        PerfLog.TrackFirstShown(dialog, "record options");
-        bool isGif;
-        bool recordMicrophone;
-        bool recordSystemAudio;
-        bool captureCursor;
-        bool showClickHighlights;
-        bool showKeystrokes;
-        int countdownSeconds;
-        string webcamPosition;
-        int webcamSizePercent;
-        string? webcamDeviceName;
-        string? microphoneDeviceName;
-        int recordingFps;
-        int videoQuality;
-        int gifFps;
+        Settings s = _settings.Current;
+
+        if (pickDisplay)
+        {
+            await StartDisplayFlowAsync(s);
+            return;
+        }
+
+        // A remembered or All-in-One region opens the HUD already framed rather than skipping
+        // straight past the options.
+        SD.Rectangle? initialSelection = null;
+        if (RecordingAreaMemory.TryResolve(
+                selectedVirtualRegion,
+                s.RememberLastSelection,
+                s.LastRecordingRegion,
+                CaptureService.VirtualScreen,
+                out RecordingRegionSelection remembered) &&
+            remembered.IsUsable)
+        {
+            initialSelection = remembered.ScreenRect;
+            Log.Info(selectedVirtualRegion is not null
+                ? "Opening the recording HUD on the area selected in All-in-One"
+                : "Opening the recording HUD on the remembered recording area");
+        }
+
+        RecordingHudChoice choice;
+        SD.Rectangle region;
+        var selector = FastRegionSelectorDialog.Rent(
+            () => Task.Run(() => WindowEnumerator.GetTopLevelWindows()),
+            settings: null);
+        PerfLog.TrackFirstShown(selector, "record selector");
         try
         {
-            if (await dialog.ShowAsync() != WF.DialogResult.OK) return;
+            // Same feel as screenshot area capture: hover snaps to windows/elements, click
+            // takes the snap, click-drag draws a marquee — but a click frames the take rather
+            // than starting it, because the HUD still has to be answered.
+            WF.DialogResult result = await selector.ShowAsync(
+                elementHover: true,
+                hint: "Drag to record part of the screen, or click a window to record it.",
+                recordingHud: RecordingHudToggles.FromSettings(s),
+                initialSelection: initialSelection);
+            if (result != WF.DialogResult.OK ||
+                selector.SelectedRegionPx is not SD.Rectangle selected ||
+                selector.RecordingChoice is not RecordingHudChoice picked)
+            {
+                return;
+            }
+            region = selected;
+            choice = picked;
+        }
+        finally
+        {
+            FastRegionSelectorDialog.Return(selector);
+        }
+
+        // Remember the HUD's answers as the new defaults. Deliberately no Save() here — the
+        // orchestrating app persists settings (Save re-registers hotkeys).
+        s.RecordAudio = choice.Toggles.Microphone;
+        s.RecordSystemAudio = choice.Toggles.SystemAudio;
+        s.ShowClickHighlights = choice.Toggles.Clicks;
+        s.ShowKeystrokes = choice.Toggles.Keystrokes;
+        s.SetWebcamOverlayPosition(
+            WebcamPositionFor(choice.Toggles.Webcam, s.WebcamOverlayPosition, s.WebcamOverlayCorner));
+
+        RecordingRegionSelection selection =
+            RecordingRegionSelection.FromVirtualSelection(region, CaptureService.VirtualScreen);
+        await BeginTakeAsync(s, selection, sourceDisplays: null, choice.IsGif, choice.Toggles);
+    }
+
+    /// <summary>
+    /// Whole-display recording: the region-first HUD has nothing to anchor to, so this keeps
+    /// the options modal as the fallback the sweep called for.
+    /// </summary>
+    private async Task StartDisplayFlowAsync(Settings s)
+    {
+        var dialog = FastRecordingOptionsDialog.Create(s);
+        PerfLog.TrackFirstShown(dialog, "record options");
+        bool isGif;
+        RecordingHudToggles toggles;
+        try
+        {
+            if (await dialog.ShowAsync() != WF.DialogResult.OK)
+                return;
 
             isGif = dialog.IsGif;
-            recordMicrophone = dialog.RecordMicrophone;
-            recordSystemAudio = dialog.RecordSystemAudio;
-            captureCursor = dialog.CaptureCursor;
-            showClickHighlights = dialog.ShowClickHighlights;
-            showKeystrokes = dialog.ShowKeystrokes;
-            countdownSeconds = dialog.CountdownSeconds;
-            webcamPosition = dialog.WebcamPosition;
-            webcamSizePercent = dialog.WebcamSizePercent;
-            webcamDeviceName = dialog.WebcamDeviceName;
-            microphoneDeviceName = dialog.MicrophoneDeviceName;
-            recordingFps = dialog.RecordingFps;
-            videoQuality = dialog.VideoQuality;
-            gifFps = dialog.GifFps;
+            toggles = new RecordingHudToggles(
+                dialog.RecordMicrophone,
+                dialog.RecordSystemAudio,
+                !string.Equals(dialog.WebcamPosition, RecordingOptions.WebcamOff, StringComparison.Ordinal),
+                dialog.ShowClickHighlights,
+                dialog.ShowKeystrokes);
+
+            s.RecordAudio = dialog.RecordMicrophone;
+            s.RecordSystemAudio = dialog.RecordSystemAudio;
+            s.CaptureCursor = dialog.CaptureCursor;
+            s.ShowClickHighlights = dialog.ShowClickHighlights;
+            s.ShowKeystrokes = dialog.ShowKeystrokes;
+            s.RecordingCountdownSeconds = dialog.CountdownSeconds;
+            s.SetWebcamOverlayPosition(dialog.WebcamPosition);
+            s.WebcamOverlaySizePercent = dialog.WebcamSizePercent;
+            s.RecordingFps = dialog.RecordingFps;
+            s.GifFps = dialog.GifFps;
+            // The modal is the only surface with live device pickers, so its picks become the
+            // persisted ones the region-first flow reads.
+            s.RecordingMicrophoneDevice = dialog.MicrophoneDeviceName ?? "";
+            s.RecordingWebcamDevice = dialog.WebcamDeviceName ?? "";
+            s.RecordingVideoQuality = RecordingOptions.ClampVideoQuality(dialog.VideoQuality);
         }
         finally
         {
             FastRecordingOptionsDialog.Return(dialog);
         }
 
-        // Remember the choices as new defaults. Deliberately no Save() here —
-        // the orchestrating app persists settings (Save re-registers hotkeys).
-        var s = _settings.Current;
-        s.RecordAudio = recordMicrophone;
-        s.RecordSystemAudio = recordSystemAudio;
-        s.CaptureCursor = captureCursor;
-        s.ShowClickHighlights = showClickHighlights;
-        s.ShowKeystrokes = showKeystrokes;
-        s.RecordingCountdownSeconds = countdownSeconds;
-        s.WebcamOverlayPosition = webcamPosition;
-        s.WebcamOverlaySizePercent = webcamSizePercent;
-        s.RecordingFps = recordingFps;
-        s.GifFps = gifFps;
+        SD.Rectangle[]? displays = FastDisplayPickerDialog.ChooseDisplays();
+        if (displays is null || displays.Length == 0)
+            return;
 
-        RecordingRegionSelection selection;
-        SD.Rectangle[]? sourceDisplays = null;
-        if (pickDisplay)
-        {
-            SD.Rectangle[]? displays = FastDisplayPickerDialog.ChooseDisplays();
-            if (displays is null || displays.Length == 0)
-                return;
-            selection = RecordingRegionSelection.FromDisplays(displays);
-            sourceDisplays = displays;
-        }
-        else if (RecordingAreaMemory.TryResolve(
-            selectedVirtualRegion,
-            s.RememberLastSelection,
-            s.LastRecordingRegion,
-            CaptureService.VirtualScreen,
-            out selection))
-        {
-            Log.Info(selectedVirtualRegion is not null
-                ? "Using the area selected in All-in-One for recording"
-                : "Reusing the remembered recording area");
-        }
-        else
-        {
-            var selector = FastRegionSelectorDialog.Rent(
-                () => Task.Run(() => WindowEnumerator.GetTopLevelWindows()),
-                settings: null);
-            PerfLog.TrackFirstShown(selector, "record selector");
-            SD.Rectangle region;
-            try
-            {
-                // Same feel as screenshot area capture: hover snaps to windows/elements,
-                // click takes the snap, click-drag draws a marquee.
-                if (await selector.ShowAsync(elementHover: true) != WF.DialogResult.OK ||
-                    selector.SelectedRegionPx is not SD.Rectangle selected)
-                    return;
-                region = selected;
-            }
-            finally
-            {
-                FastRegionSelectorDialog.Return(selector);
-            }
+        await BeginTakeAsync(
+            s,
+            RecordingRegionSelection.FromDisplays(displays),
+            displays,
+            isGif,
+            toggles);
+    }
 
-            selection = RecordingRegionSelection.FromVirtualSelection(region, CaptureService.VirtualScreen);
-        }
-
+    /// <summary>Everything both entry points share: the countdown, the region bookkeeping, and
+    /// building the capture parameters out of settings plus the chosen toggles.</summary>
+    private async Task BeginTakeAsync(
+        Settings s,
+        RecordingRegionSelection selection,
+        SD.Rectangle[]? sourceDisplays,
+        bool isGif,
+        RecordingHudToggles toggles)
+    {
         await Task.Delay(OverlayDismissDelayMs);
 
         // H.264 needs even dimensions; region selections also need the virtual
@@ -284,12 +350,19 @@ public sealed class RecordingController
         if (!selection.IsUsable)
         {
             Log.Error($"Recording region too small after rounding: {screenRect}");
+            // Every other way a take can fail says so. This one used to close the overlay and
+            // do nothing at all, which is indistinguishable from the hotkey not firing.
+            App.Toast(
+                "Nothing to record",
+                "That selection is too small. Drag a larger area and try again.",
+                severity: ToastSeverity.Error);
             return;
         }
 
         if (s.RememberLastSelection)
             s.LastRecordingRegion = PreviousRegion.Format(screenRect);
 
+        int countdownSeconds = RecordingOptions.ClampCountdownSeconds(s.RecordingCountdownSeconds);
         if (countdownSeconds > 0)
         {
             using var countdown = new FastRecordingCountdownWindow(countdownSeconds, screenRect);
@@ -302,18 +375,20 @@ public sealed class RecordingController
             screenRect,
             sourceDisplays,
             isGif,
-            recordMicrophone,
-            recordSystemAudio,
-            captureCursor,
-            showClickHighlights,
-            showKeystrokes,
-            webcamPosition,
-            webcamSizePercent,
-            webcamDeviceName,
-            microphoneDeviceName,
-            recordingFps,
-            videoQuality,
-            gifFps,
+            toggles.Microphone,
+            toggles.SystemAudio,
+            s.CaptureCursor,
+            toggles.Clicks,
+            toggles.Keystrokes,
+            KeystrokeOverlayOptions.FromSettings(s) with { Render = toggles.Keystrokes },
+            s.HideCursorWhenTyping,
+            WebcamPositionFor(toggles.Webcam, s.WebcamOverlayPosition, s.WebcamOverlayCorner),
+            s.WebcamOverlaySizePercent,
+            WebcamDeviceName: NullIfBlank(s.RecordingWebcamDevice),
+            MicrophoneDeviceName: NullIfBlank(s.RecordingMicrophoneDevice),
+            s.RecordingFps,
+            RecordingOptions.ClampVideoQuality(s.RecordingVideoQuality),
+            s.GifFps,
             sessionUi.ShowControls,
             sessionUi.ShowTimer,
             sessionUi.DimScreen,
@@ -325,6 +400,29 @@ public sealed class RecordingController
             s.OptimizeGifs);
 
         StartCapture(parameters, trackBarPerf: true);
+    }
+
+    /// <summary>A blank device name means "whatever the system picks", which is what the
+    /// recorder wants as null.</summary>
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// The HUD's webcam cell is a plain on/off, so turning it on restores whatever corner was
+    /// last chosen and falls back to the default corner the first time. The corner comes from
+    /// <see cref="Settings.WebcamOverlayCorner"/>, not from the position — the position is
+    /// "off" exactly when this needs the memory, which is what used to lose it.
+    /// </summary>
+    internal static string WebcamPositionFor(
+        bool enabled, string? storedPosition, string? rememberedCorner)
+    {
+        if (!enabled)
+            return RecordingOptions.WebcamOff;
+
+        string stored = RecordingOptions.NormalizeWebcamPosition(storedPosition);
+        return string.Equals(stored, RecordingOptions.WebcamOff, StringComparison.Ordinal)
+            ? RecordingOptions.RememberedWebcamCorner(null, rememberedCorner)
+            : stored;
     }
 
     /// <summary>
@@ -360,14 +458,35 @@ public sealed class RecordingController
             }
         }
 
+        // Same save/restore shape: a toast banner landing mid-take is exactly what this
+        // setting exists to prevent, and the absence of the banner IS the whole feature.
+        if (_settings.Current.DoNotDisturbWhileRecording)
+        {
+            FocusAssist.Suppress();
+            _notificationsSilenced = true;
+        }
+
         // Overlays go up before capture starts so the first frames already
         // have them. Both are click-through and intentionally visible to the
         // capture (rings/pills belong in the output).
+        // The keystroke overlay is also the only thing in the app that knows when typing is
+        // happening, so "hide the cursor while typing" starts it in render-off mode even when
+        // the pill itself is turned off.
+        // CaptureCursor is part of the condition because it is part of the subscription below:
+        // without it nothing consumes TypingChanged, and the hook would be a WH_KEYBOARD_LL on
+        // every keystroke of the take for no effect at all.
+        bool needsKeyHook = p.ShowKeystrokes || (p.HideCursorWhenTyping && p.CaptureCursor);
         var overlays = RecordingOverlayStartup.Start(
             p.ShowClickHighlights,
-            p.ShowKeystrokes,
+            needsKeyHook,
             () => new FastClickHighlightOverlayWindow(screenRect),
-            () => new FastKeystrokeOverlayWindow(screenRect),
+            () =>
+            {
+                var overlay = new FastKeystrokeOverlayWindow(screenRect, p.KeystrokeOptions);
+                if (p.HideCursorWhenTyping && p.CaptureCursor)
+                    overlay.TypingChanged += OnTypingChanged;
+                return overlay;
+            },
             Log.Error);
         _clickOverlay = overlays.ClickOverlay;
         _keyOverlay = overlays.KeyOverlay;
@@ -381,21 +500,21 @@ public sealed class RecordingController
         }
         catch
         {
-            // Make sure icons come back even if the recorder failed to start.
+            // Make sure icons and notifications come back even if the recorder failed to start.
             RestoreDesktopIcons();
+            RestoreNotifications();
             CloseOverlays();
             throw;
         }
 
-        if (p.DimScreen)
-        {
-            _dimOverlay = new FastRecordingDimOverlay(screenRect);
-            _dimOverlay.Show();
-        }
+        // Always one or the other: with dimming off the region used to have no on-screen
+        // marker at all, so nothing said what was being recorded.
+        _dimOverlay = new FastRecordingDimOverlay(screenRect, p.DimScreen);
+        _dimOverlay.Show();
 
         if (p.ShowControls)
         {
-            _bar = new FastRecordingControlBar(screenRect, p.ShowTimer);
+            _bar = new FastRecordingControlBar(screenRect, p.ShowTimer, _settings.Current.HotkeyRecord);
             _bar.StopRequested += () => StopRecording(discard: false);
             _bar.CancelRequested += () => StopRecording(discard: true);
             _bar.PauseRequested += PauseRecording;
@@ -409,6 +528,7 @@ public sealed class RecordingController
         StartElapsedTimer(p.ShowTimer);
 
         IsRecording = true;
+        RecordingActiveChanged?.Invoke(true);
         Log.Info($"Recording started ({(_isGif ? "GIF" : "MP4")}) {screenRect}");
     }
 
@@ -505,6 +625,10 @@ public sealed class RecordingController
 
         ApplyWebcamOverlay(options, p.WebcamPosition, p.WebcamSizePercent, p.WebcamDeviceName, crop);
 
+        _recordingSources = options.SourceOptions.RecordingSources
+            .OfType<DisplayRecordingSource>()
+            .Where(source => !string.IsNullOrEmpty(source.ID))
+            .ToArray();
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnMp4Complete;
         _recorder.OnRecordingFailed += OnMp4Failed;
@@ -591,6 +715,15 @@ public sealed class RecordingController
                 _sessionElapsed.Stop();
             Log.Info("Recording paused");
         }
+        else if (IsRecording && !_stopping)
+        {
+            // SyncPaused snaps the glyph and the clock back; on its own that is
+            // indistinguishable from a misclick, so the refusal has to say so.
+            App.Toast(
+                "Could not pause",
+                "The recorder kept running. The take is still being captured.",
+                severity: ToastSeverity.Error);
+        }
     }
 
     private void ResumeRecording()
@@ -612,6 +745,13 @@ public sealed class RecordingController
                 _sessionElapsed.Start();
             Log.Info("Recording resumed");
         }
+        else if (IsRecording && !_stopping)
+        {
+            App.Toast(
+                "Could not resume",
+                "The take is still paused. Stop it to keep what has been recorded.",
+                severity: ToastSeverity.Error);
+        }
     }
 
     private void PauseActiveRecorder()
@@ -630,6 +770,41 @@ public sealed class RecordingController
             _recorder?.Resume();
     }
 
+    /// <summary>
+    /// Takes the cursor out of the recording while the user is typing and puts it back when
+    /// they stop — nobody wants to watch a pointer sit in the middle of a sentence. Applied
+    /// live through the recorder's dynamic options (MP4) or the GIF encoder's own flag.
+    /// </summary>
+    private void OnTypingChanged(bool typing)
+    {
+        bool showCursor = !typing;
+        try
+        {
+            if (_isGif)
+            {
+                if (_gifRecorder is { } gif)
+                    gif.CaptureCursor = showCursor;
+                return;
+            }
+
+            if (_recorder is not { } recorder || _recordingSources.Length == 0)
+                return;
+
+            var builder = recorder.GetDynamicOptionsBuilder();
+            foreach (DisplayRecordingSource source in _recordingSources)
+            {
+                source.IsCursorCaptureEnabled = showCursor;
+                builder.SetUpdatedRecordingSource(source);
+            }
+            builder.Apply();
+        }
+        catch (Exception ex)
+        {
+            // Best effort: a recorder that refuses the change simply keeps showing the cursor.
+            Log.Error("Failed to change cursor capture while typing", ex);
+        }
+    }
+
     private void SetOverlaysPaused(bool paused)
     {
         _clickOverlay?.SetPaused(paused);
@@ -641,9 +816,27 @@ public sealed class RecordingController
         if (!IsRecording || _stopping) return;
         _stopping = true;
         _discard = discard;
-        CloseBar();
+        // The click/keystroke overlays are deliberately visible to the capture, so they have
+        // to go the instant the recorder stops. Everything else leaves on a fade: the bar
+        // stays put in a "Saving…" state until the completion card replaces it (or, when the
+        // take is being thrown away, fades out at once because there is nothing to wait for).
         CloseOverlays(); // also releases the mouse/keyboard hooks
-        CloseDimOverlay();
+        FadeOutDimOverlay();
+        if (discard || _restarting)
+            FadeOutBar();
+        // Throwing the take away is the one irreversible branch and it was the only silent
+        // one: the bar and the marker faded and the screen looked exactly as it does after a
+        // stop-and-save with the completion card turned off. A toast, not a confirm dialog —
+        // the discard cell is deliberately a one-press affordance.
+        if (discard && !_restarting)
+        {
+            App.Toast(
+                "Recording discarded",
+                "Nothing was saved.",
+                severity: ToastSeverity.Info);
+        }
+        else if (_bar is { IsDisposed: false })
+            _bar.BeginSaving();
         try
         {
             if (_isGif)
@@ -728,9 +921,9 @@ public sealed class RecordingController
             Log.Error($"MP4 recording failed: {e.Error}");
             DisposeRecorder();
             string? tempPath = _tempPath;
-            CloseBar(); // failure can happen without the user pressing Stop
+            FadeOutBar(); // failure can happen without the user pressing Stop
             CloseOverlays();
-            CloseDimOverlay();
+            FadeOutDimOverlay();
             EndSession();
             ShowRecordingFailure(RecordingFailureMessage.ForRecorderFailure(tempPath, e.Error));
         });
@@ -763,7 +956,9 @@ public sealed class RecordingController
             string savedPath = finalPath;
             bool isGif = extension.Equals("gif", StringComparison.OrdinalIgnoreCase);
             RecordingAfterActions actions = RecordingAfterActions.FromSettings(_settings.Current, isGif);
-            Action? onEdit = isGif ? null : () => OpenVideoEditor(savedPath);
+            Action onEdit = isGif
+                ? () => OpenGifEditor(savedPath)
+                : () => OpenVideoEditor(savedPath);
 
             if (actions.CopyFile)
             {
@@ -783,8 +978,8 @@ public sealed class RecordingController
 
             if (actions.OpenEditor)
             {
-                try { OpenVideoEditor(savedPath); }
-                catch (Exception ex) { Log.Error("Failed to open the video editor after recording", ex); }
+                try { onEdit(); }
+                catch (Exception ex) { Log.Error("Failed to open the editor after recording", ex); }
             }
 
             Log.Info($"Recording saved to {finalPath}");
@@ -800,6 +995,13 @@ public sealed class RecordingController
         }
     }
 
+    private void OpenGifEditor(string filePath)
+    {
+        var editor = new GifEditorWindow(filePath, _settings, _history);
+        TrackFirstRender(editor, "gif editor window");
+        editor.Show();
+    }
+
     private void OpenVideoEditor(string filePath)
     {
         var editor = new VideoEditorWindow(filePath, _settings, _history);
@@ -809,14 +1011,22 @@ public sealed class RecordingController
 
     private void EndSession()
     {
+        bool wasRecording = IsRecording;
         IsRecording = false;
         _stopping = false;
         _discard = false;
         _paused = false;
         _tempPath = null;
+        _recordingSources = Array.Empty<DisplayRecordingSource>(); // never carry a dead session's sources forward
         CloseDimOverlay();
         StopElapsedTimer();
         RestoreDesktopIcons();
+        RestoreNotifications();
+        // Finalization is done and the completion card (if any) is already on screen, so the
+        // "Saving…" pill has said everything it had to say.
+        FadeOutBar();
+        if (wasRecording)
+            RecordingActiveChanged?.Invoke(false);
 
         if (_restarting && _lastCapture is { } capture)
         {
@@ -858,6 +1068,13 @@ public sealed class RecordingController
         catch (Exception ex) { Log.Error("Failed to restore desktop icons after recording", ex); }
     }
 
+    private void RestoreNotifications()
+    {
+        if (!_notificationsSilenced) return;
+        _notificationsSilenced = false;
+        FocusAssist.Restore();
+    }
+
     private void CleanupAfterFailure(bool preserveTemp = false)
     {
         DisposeRecorder();
@@ -878,14 +1095,17 @@ public sealed class RecordingController
         {
             TryDelete(temp);
         }
-        CloseBar();
+        FadeOutBar();
         CloseOverlays();
-        CloseDimOverlay();
+        FadeOutDimOverlay();
         EndSession();
     }
 
-    private static void ShowRecordingFailure(string message)
+    private void ShowRecordingFailure(string message)
     {
+        // The bar is TopMost, so a "Saving…" spinner would sit on top of the dialog saying the
+        // save failed. It leaves before the bad news arrives.
+        FadeOutBar();
         try
         {
             ThemedMessageDialog.Show(null, "Recording failed", message);
@@ -920,6 +1140,17 @@ public sealed class RecordingController
         _bar = null;
     }
 
+    /// <summary>Lets the bar play its exit and close itself. The reference is dropped now, so
+    /// nothing can close it out from under the tween.</summary>
+    private void FadeOutBar()
+    {
+        FastRecordingControlBar? bar = _bar;
+        _bar = null;
+        if (bar is null || bar.IsDisposed) return;
+        try { bar.FadeOutAndClose(); }
+        catch (Exception ex) { Log.Error("Failed to fade out the recording bar", ex); }
+    }
+
     private void CloseOverlays()
     {
         if (_clickOverlay is not null)
@@ -942,6 +1173,17 @@ public sealed class RecordingController
         try { _dimOverlay.Dispose(); }
         catch (Exception ex) { Log.Error("Failed to close recording dim overlay", ex); }
         _dimOverlay = null;
+    }
+
+    /// <summary>Same, but on a fade. The reference is dropped now so a later teardown cannot
+    /// dispose the overlay mid-tween.</summary>
+    private void FadeOutDimOverlay()
+    {
+        FastRecordingDimOverlay? overlay = _dimOverlay;
+        _dimOverlay = null;
+        if (overlay is null) return;
+        try { overlay.FadeOutAndDispose(); }
+        catch (Exception ex) { Log.Error("Failed to fade out the recording dim overlay", ex); }
     }
 
     private void StartElapsedTimer(bool enabled)

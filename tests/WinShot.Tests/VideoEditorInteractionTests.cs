@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Xml.Linq;
 using WinShot.Recording;
 using Xunit;
@@ -89,15 +89,18 @@ public class VideoEditorInteractionTests
 
         Assert.Equal("True", (string?)document.Root!.Attribute("UseLayoutRounding"));
         Assert.Equal("OnWindowKeyDown", (string?)document.Root.Attribute("KeyDown"));
-        Assert.Equal("True", (string?)Named("PositionSlider").Attribute("Focusable"));
         Assert.Equal("True", (string?)Named("VolumeSlider").Attribute("Focusable"));
         Assert.Equal("OnTrimStartKeyDown", (string?)Named("TrimStartThumb").Attribute("KeyDown"));
         Assert.Equal("OnTrimEndKeyDown", (string?)Named("TrimEndThumb").Attribute("KeyDown"));
         Assert.False(string.IsNullOrWhiteSpace((string?)Named("TrimStartThumb").Attribute("AutomationProperties.HelpText")));
         Assert.False(string.IsNullOrWhiteSpace((string?)Named("BtnCancelExport").Attribute("AutomationProperties.HelpText")));
         Assert.Equal("Collapsed", (string?)Named("BtnCancelExport").Attribute("Visibility"));
-        Assert.Equal("_Cancel", (string?)Named("BtnClose").Attribute("Content"));
-        Assert.Equal("_Trim & Export", (string?)Named("BtnExport").Attribute("Content"));
+        Assert.Equal("Cancel", (string?)Named("BtnClose").Attribute("Content"));
+        // The primary starts as "Convert" and is relabelled once a trim exists.
+        Assert.Equal("Convert", (string?)Named("BtnExport").Attribute("Content"));
+        Assert.Equal("Collapsed", (string?)Named("BtnTrimOnly").Attribute("Visibility"));
+        Assert.False(string.IsNullOrWhiteSpace((string?)Named("BtnTrimOnly").Attribute("AutomationProperties.HelpText")));
+        Assert.Equal("OnDestinationChanged", (string?)Named("DestinationCombo").Attribute("SelectionChanged"));
         Assert.Equal("Output summary", (string?)Named("OutputSummaryText").Attribute("AutomationProperties.Name"));
         Assert.Contains(document.Descendants(presentation + "WrapPanel"), panel =>
             (string?)panel.Attribute("Grid.Row") == "3");
@@ -109,6 +112,42 @@ public class VideoEditorInteractionTests
         Assert.Contains("PillButtonPrimary", xamlText, StringComparison.Ordinal);
         Assert.Contains("PillButtonSecondary", xamlText, StringComparison.Ordinal);
         Assert.Contains("DarkComboBox", xamlText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The editor draws from the one palette: no hex literals, no bare colour names, and no
+    /// Alt-key mnemonics (the app has none anywhere else, and an underscore in a label reads
+    /// as a typo).
+    /// </summary>
+    [Fact]
+    public void VideoEditorXaml_UsesTokensAndSentenceCaseLabels()
+    {
+        string xamlText = File.ReadAllText(FindRepoFile("src", "WinShot", "Recording", "VideoEditorWindow.xaml"));
+
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex("=\"#[0-9A-Fa-f]{3,8}\""), xamlText);
+        Assert.DoesNotContain("=\"White\"", xamlText, StringComparison.Ordinal);
+        Assert.DoesNotContain("=\"Black\"", xamlText, StringComparison.Ordinal);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex("Content=\"[^\"]*_[A-Za-z]"), xamlText);
+    }
+
+    /// <summary>The filmstrip is the only scrub control now; the duplicate slider above it
+    /// said the same thing twice and showed nothing about the trim range.</summary>
+    [Fact]
+    public void VideoEditorXaml_HasOneScrubControlAndItIsTheFilmstrip()
+    {
+        string xamlPath = FindRepoFile("src", "WinShot", "Recording", "VideoEditorWindow.xaml");
+        string xamlText = File.ReadAllText(xamlPath);
+        var document = XDocument.Load(xamlPath);
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        Assert.DoesNotContain("PositionSlider", xamlText, StringComparison.Ordinal);
+        XElement track = document
+            .Descendants()
+            .Single(element => (string?)element.Attribute(xaml + "Name") == "TimelineTrack");
+        Assert.Equal("OnTimelineClicked", (string?)track.Attribute("MouseLeftButtonDown"));
+        Assert.Equal("OnTimelineDragScrub", (string?)track.Attribute("MouseMove"));
+        Assert.Equal("OnTimelineScrubReleased", (string?)track.Attribute("MouseLeftButtonUp"));
+        Assert.Equal("OnTimelineScrubReleased", (string?)track.Attribute("LostMouseCapture"));
     }
 
     private static string FindRepoFile(params string[] parts)

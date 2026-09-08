@@ -37,10 +37,16 @@ internal static class SettingsTruthCatalog
             "RecordSystemAudio",
             "ShowClickHighlights",
             "ShowKeystrokes",
+            "KeystrokesCommandOnly",
+            "KeystrokePosition",
+            "HideCursorWhenTyping",
             "RecordingCountdownSeconds",
             "CaptureCursor",
             "WebcamOverlayPosition",
             "WebcamOverlaySizePercent",
+            "RecordingMicrophoneDevice",
+            "RecordingWebcamDevice",
+            "RecordingVideoQuality",
             "OcrJoinLines",
             "HistoryEnabled",
             "HistoryRetentionDays",
@@ -85,6 +91,7 @@ internal static class SettingsTruthCatalog
             "ScaleHiDpiVideo",
             "RememberLastSelection",
             "DimScreenWhileRecording",
+            "DoNotDisturbWhileRecording",
             "RecordingMaxResolution",
             "RecordAudioMono",
             "GifQuality",
@@ -139,8 +146,7 @@ internal static class SettingsTruthCatalog
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "AddPixelBorder", "ConvertToSrgb",
-            "DoNotDisturbWhileRecording", "ShowRecordingCountdown",
+            "AddPixelBorder", "ConvertToSrgb", "ShowRecordingCountdown",
             "InverseArrowDirection", "SmoothPencil", "RememberLastTool", "DrawShadowOnObjects",
             "AutoExpandCanvas", "ShowColorNames", "AlwaysOnTop", "ShowDockIcon",
             "AddRetinaSuffix", "CopyToClipboardFormat",
@@ -164,5 +170,8 @@ internal static class SettingsTruthCatalog
             "LastRecordingRegion",
             "ShortcutBindings",
             "SavedColors",
+            // The corner to restore the webcam overlay to; written beside the position, never
+            // presented as its own control.
+            "WebcamOverlayCorner",
         };
 }

@@ -14,6 +14,11 @@ public enum TrayIconVariant
 
     /// <summary>A slash — desktop icons are hidden by the tray toggle.</summary>
     Slashed,
+
+    /// <summary>A red stop badge — a take is running. Double-clicking the tray while it
+    /// shows this stops and saves the recording (App wires that), so the square is an
+    /// action and not only a status light.</summary>
+    Recording,
 }
 
 internal static class TrayIconFactory
@@ -70,6 +75,10 @@ internal static class TrayIconFactory
         return Cache.GetOrAdd((variant, step), key => Render(key.Item1, key.Item2 / (double)BadgeSteps));
     }
 
+    /// <summary>The mark while a take is running. Same cache, same mark — the recording
+    /// state is a badge, not a second logo.</summary>
+    public static SD.Icon CreateRecording() => Create(TrayIconVariant.Recording);
+
     private static SD.Icon Render(TrayIconVariant variant, double badgeScale)
     {
         // 32 px covers the shell's small-icon request at 100–200% scaling; Windows
@@ -99,6 +108,9 @@ internal static class TrayIconFactory
                     break;
                 case TrayIconVariant.Slashed:
                     DrawSlash(g, size);
+                    break;
+                case TrayIconVariant.Recording:
+                    DrawRecordingBadge(g, size);
                     break;
             }
         }
@@ -130,6 +142,27 @@ internal static class TrayIconFactory
             new SD.PointF(x + d * 0.44f, y + d * 0.68f),
             new SD.PointF(x + d * 0.73f, y + d * 0.34f),
         ]);
+    }
+
+    /// <summary>A red disc wearing a white stop square, in the same corner the confirmation
+    /// badge uses. A filled square is the stop glyph at any size; tinting the whole mark red
+    /// would read as the idle icon at 16 px and would break the one-mark rule besides.</summary>
+    private static void DrawRecordingBadge(SD.Graphics g, int size)
+    {
+        float d = size * 0.62f;
+        float x = size - d - size * 0.03f;
+        float y = size - d - size * 0.03f;
+        using var rim = new SD.SolidBrush(SD.Color.White);
+        g.FillEllipse(rim, x, y, d, d);
+        using var disc = new SD.SolidBrush(ThemePalette.Red);
+        float inset = d * 0.12f;
+        g.FillEllipse(disc, x + inset, y + inset, d - inset * 2, d - inset * 2);
+
+        float s = d * 0.38f;
+        var stopBox = SD.Rectangle.Round(new SD.RectangleF(x + (d - s) / 2, y + (d - s) / 2, s, s));
+        using var stop = new SD.SolidBrush(SD.Color.White);
+        using var path = GdiPaths.RoundedRect(stopBox, Math.Max(1, (int)(s * 0.2f)));
+        g.FillPath(stop, path);
     }
 
     private static void DrawSlash(SD.Graphics g, int size)

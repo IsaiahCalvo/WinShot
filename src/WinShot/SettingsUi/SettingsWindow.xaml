@@ -798,10 +798,12 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                         <CheckBox x:Name="ScaleHiDpiVideoCheck" Content="Scale HiDPI videos to 1x"/>
                                     </DockPanel>
-                                    <DockPanel x:Name="UnavailableDoNotDisturbRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Notifications"/>
                                         <CheckBox x:Name="DoNotDisturbCheck" Content="Silence notifications while recording"/>
                                     </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Notification banners are turned back on when the recording ends."/>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
@@ -815,8 +817,32 @@
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Keyboard"/>
-                                        <CheckBox x:Name="KeystrokesCheck" Content="Show keystrokes"/>
+                                        <CheckBox x:Name="KeystrokesCheck" Content="Show keystrokes"
+                                                  Checked="OnKeystrokesToggled" Unchecked="OnKeystrokesToggled"/>
                                     </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
+                                        <CheckBox x:Name="KeystrokesCommandOnlyCheck" Content="Show only command keys"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Shortcuts are shown; plain typing is not."/>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Keystrokes at"/>
+                                        <ComboBox x:Name="KeystrokePositionCombo" HorizontalAlignment="Stretch">
+                                            <ComboBoxItem Content="Top left" Tag="top-left"/>
+                                            <ComboBoxItem Content="Top center" Tag="top-center"/>
+                                            <ComboBoxItem Content="Top right" Tag="top-right"/>
+                                            <ComboBoxItem Content="Bottom left" Tag="bottom-left"/>
+                                            <ComboBoxItem Content="Bottom center" Tag="bottom-center"/>
+                                            <ComboBoxItem Content="Bottom right" Tag="bottom-right"/>
+                                        </ComboBox>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
+                                        <CheckBox x:Name="HideCursorWhenTypingCheck" Content="Hide the cursor while typing"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Keeps the pointer out of the recording while you type, and brings it back when you stop."/>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
@@ -827,10 +853,6 @@
                                     <DockPanel x:Name="DimScreenRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="DimScreenCheck" Content="Dim screen while recording"/>
-                                    </DockPanel>
-                                    <DockPanel x:Name="UnavailableShowCountdownRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="ShowCountdownCheck" Content="Show countdown"/>
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Countdown"/>
@@ -860,6 +882,12 @@
                                             <TextBlock Style="{StaticResource Hint}" Text="10-45%"/>
                                         </StackPanel>
                                     </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Camera"/>
+                                        <ComboBox x:Name="WebcamDeviceCombo" HorizontalAlignment="Stretch"/>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Cameras are re-listed each time this pane opens."/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -874,8 +902,10 @@
                                         <ComboBox x:Name="MaxResolutionCombo" HorizontalAlignment="Stretch">
                                             <ComboBoxItem Content="Original" Tag="original"/>
                                             <ComboBoxItem Content="4K" Tag="4k"/>
+                                            <ComboBoxItem Content="1440p" Tag="1440p"/>
                                             <ComboBoxItem Content="1080p" Tag="1080p"/>
                                             <ComboBoxItem Content="720p" Tag="720p"/>
+                                            <ComboBoxItem Content="480p" Tag="480p"/>
                                         </ComboBox>
                                     </DockPanel>
                                     <TextBlock x:Name="MaxResolutionHint" Style="{StaticResource SubHint}"
@@ -888,12 +918,26 @@
                                             <TextBlock Style="{StaticResource Hint}" Text="10-60 fps"/>
                                         </StackPanel>
                                     </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Quality"/>
+                                        <ComboBox x:Name="VideoQualityCombo" HorizontalAlignment="Stretch">
+                                            <ComboBoxItem Content="High" Tag="85"/>
+                                            <ComboBoxItem Content="Medium" Tag="70"/>
+                                            <ComboBoxItem Content="Low" Tag="50"/>
+                                        </ComboBox>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SubHint}"
+                                               Text="Lower quality writes a smaller file at the same resolution."/>
 
                                     <Rectangle Style="{StaticResource GroupSep}"/>
 
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Audio"/>
                                         <CheckBox x:Name="RecordAudioCheck" Content="Capture microphone while recording"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Microphone"/>
+                                        <ComboBox x:Name="MicrophoneDeviceCombo" HorizontalAlignment="Stretch"/>
                                     </DockPanel>
                                     <DockPanel Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>

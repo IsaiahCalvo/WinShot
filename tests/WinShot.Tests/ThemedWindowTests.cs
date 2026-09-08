@@ -75,7 +75,8 @@ public class ThemedWindowTests
                 ShowAndClose(FastClickHighlightOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(FastKeystrokeOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 80, 60)));
                 ShowAndClose(new ResizeDialog(80, 50));
-                ShowAndClose(new VideoEditorWindow(previewFile.Path, settings, history));
+                VideoEditorResolutionSmoke(previewFile.Path, settings, history);
+                ShowAndClose(new GifEditorWindow(previewFile.Path, settings, history));
                 ShowAndClose(new RecordingRecoveryWindow(new List<RecoverableRecordingTempFile>
                 {
                     new(previewFile.Path, ".mp4", 1024, DateTime.UtcNow),
@@ -124,11 +125,40 @@ public class ThemedWindowTests
         window.Close();
     }
 
+    /// <summary>
+    /// The video editor's resolution picker has to offer every preset for the source it is
+    /// looking at. 1920x1080 is the size that used to fail: the field seeds itself with
+    /// <c>For(1920, 1080)</c>, the old "skip when the list has not changed" guard compared the
+    /// resolved presets against that seed rather than against the combo, and the combo kept the
+    /// single "Original" placeholder the XAML declares — so 75 %, 50 % and 720p were unreachable
+    /// on the most common recording size there is. Lives here because it needs a real window,
+    /// and this test owns the assembly's one <see cref="Application"/>.
+    /// </summary>
+    private static void VideoEditorResolutionSmoke(string path, SettingsService settings, HistoryService history)
+    {
+        var window = new VideoEditorWindow(path, settings, history);
+        window.Show();
+
+        // The call OnMediaOpened makes. The stub source reports 0x0, and For(0, 0) falls back to
+        // the same 1920x1080 list the field is seeded with — the collision the old guard tripped on.
+        typeof(VideoEditorWindow)
+            .GetMethod("PopulateResolutions", NP)!
+            .Invoke(window, null);
+        var combo = (ComboBox)typeof(VideoEditorWindow).GetField("ResolutionCombo", NP)!.GetValue(window)!;
+
+        Assert.Equal(
+            VideoResolutionPresets.For(1920, 1080).Select(preset => preset.Label),
+            combo.Items.Cast<ComboBoxItem>().Select(item => (string)item.Content));
+
+        window.Close();
+    }
+
+    private const System.Reflection.BindingFlags NP =
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+
     private static void HistorySelectionInteractionSmoke(HistoryService history, SettingsService settings)
     {
         var window = new HistoryWindow(history, settings);
-        const System.Reflection.BindingFlags NP =
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
         var items = Enumerable.Range(0, 5)
             .Select(index => new HistoryItem($@"C:\sanitized-history\20260803-12000{index}-000.png"))

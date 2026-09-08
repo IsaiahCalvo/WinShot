@@ -249,6 +249,10 @@ internal static class SelectorChrome
     public static void DrawHint(
         SD.Graphics g, SD.Size clientSize, string text, double opacity, double scale, int? top = null)
     {
+        // No sentence, no pill. DrawLabel measures a blank string to a real box and would
+        // otherwise paint an empty capsule at whatever the caller last had to say.
+        if (string.IsNullOrEmpty(text))
+            return;
         SD.Rectangle at = HintPillRect(clientSize, text, scale);
         DrawLabel(g, clientSize, text, at.X, top ?? at.Y, scale, opacity);
     }

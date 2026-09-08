@@ -174,6 +174,16 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         AddRow(4, 22, null, (_keystrokeCheck, 0));
         AddRow(16, 26, null, (countdownLabel, 4), (_countdownBox, 0), (countdownHint, 5));
         AddRow(20, 32, null, (cancel, 0), (start, 0));
+        // CleanShot renders its shortcuts on the action rows themselves; the dialog is the
+        // only place either key is discoverable, so it says both once under the buttons.
+        var shortcutHint = Label(
+            "Enter starts  ·  Alt+Enter records a GIF",
+            PadX,
+            DialogWidth - PadX * 2,
+            color: HintText,
+            size: ThemePalette.TextCaptionPt);
+        shortcutHint.TextAlign = SD.ContentAlignment.MiddleCenter;
+        AddRow(6, 18, null, (shortcutHint, 0));
 
         // Center the action pair on the card.
         int pairWidth = 88 + 10 + 88;
@@ -319,11 +329,9 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         {
             // Re-enumerate devices on every open — the cached dialog otherwise shows
             // the hardware set from first open forever (a webcam plugged in later
-            // would stay invisible). Keep the user's picks when they still exist.
-            string? mic = dialog.MicrophoneDeviceName;
-            string? cam = dialog.WebcamDeviceName;
+            // would stay invisible). ApplySettings then re-selects the persisted picks
+            // where those devices still exist.
             dialog.LoadDevices();
-            dialog.RestoreDeviceSelection(mic, cam);
             dialog.ApplySettings(settings);
             dialog.Opacity = 1;
             dialog.ShowInTaskbar = false;
@@ -448,7 +456,26 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             return;
         }
 
+        // Alt+Enter is the one-key path to a GIF: it switches the format picker over
+        // (so the choice is visible for the frame before the dialog hides) and starts.
+        if (e.KeyCode == WF.Keys.Enter && e.Alt)
+        {
+            SelectGifFormat();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            Complete(WF.DialogResult.OK);
+            return;
+        }
+
         base.OnKeyDown(e);
+    }
+
+    /// <summary>Switches the format picker to GIF. Internal so the Alt+Enter path is
+    /// testable without a message loop.</summary>
+    internal void SelectGifFormat()
+    {
+        if (_format.SelectedIndex != 1)
+            _format.SelectedIndex = 1;
     }
 
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
@@ -520,7 +547,15 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             <= 9 => 3,
             _ => 2,
         };
-        _qualityCombo.SelectedIndex = 1;
+        _qualityCombo.SelectedIndex = RecordingOptions.ClampVideoQuality(settings.RecordingVideoQuality) switch
+        {
+            >= 85 => 0,
+            <= 50 => 2,
+            _ => 1,
+        };
+        // The pickers open on whatever was chosen last, from Settings rather than a
+        // process-local cache, so a device pick survives a restart.
+        RestoreDeviceSelection(settings.RecordingMicrophoneDevice, settings.RecordingWebcamDevice);
         _webcamCombo.SelectedIndex = RecordingOptions.NormalizeWebcamPosition(settings.WebcamOverlayPosition) switch
         {
             "top-left" => 1,

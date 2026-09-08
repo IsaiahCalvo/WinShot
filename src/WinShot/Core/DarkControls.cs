@@ -92,13 +92,23 @@ internal static class DarkControlPalette
 /// </summary>
 internal sealed class StateAmount : IDisposable
 {
-    private readonly WF.Control _owner;
+    private readonly Action _invalidate;
     private IDisposable? _run;
     private double _from;
     private double _target;
     private bool _disposed;
 
-    public StateAmount(WF.Control owner) => _owner = owner;
+    public StateAmount(WF.Control owner)
+        : this(() => { if (!owner.IsDisposed) owner.Invalidate(); })
+    {
+    }
+
+    /// <summary>
+    /// For an owner that is not one control: a form painting many owner-drawn cells repaints
+    /// just the cell's rectangle, and a selector spanning monitors has to repaint the right
+    /// surface rather than only its own.
+    /// </summary>
+    public StateAmount(Action invalidate) => _invalidate = invalidate;
 
     public double Value { get; private set; }
 
@@ -117,8 +127,7 @@ internal sealed class StateAmount : IDisposable
         _run = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic, eased =>
         {
             Value = _from + ((_target - _from) * eased);
-            if (!_owner.IsDisposed)
-                _owner.Invalidate();
+            _invalidate();
         });
     }
 
@@ -139,6 +148,55 @@ internal sealed class StateAmount : IDisposable
         _disposed = true;
         _run?.Dispose();
         _run = null;
+    }
+}
+
+/// <summary>
+/// A hover (or press) wash handed between the cells of one owner-drawn surface: the cell
+/// being entered rises while the cell being left falls, so a pointer swept along a row
+/// cross-fades instead of the plate teleporting. Two <see cref="StateAmount"/>s are enough
+/// because only one cell can be under the pointer at a time.
+/// </summary>
+internal sealed class HoverWash<T> : IDisposable
+    where T : struct
+{
+    private readonly StateAmount _rising;
+    private readonly StateAmount _falling;
+    private T? _current;
+    private T? _previous;
+
+    public HoverWash(Action invalidate)
+    {
+        _rising = new StateAmount(invalidate);
+        _falling = new StateAmount(invalidate);
+    }
+
+    public T? Current => _current;
+
+    public void To(T? cell)
+    {
+        if (Nullable.Equals(cell, _current))
+            return;
+
+        _previous = _current;
+        // The outgoing amount picks up exactly where the incoming one had reached, so the
+        // hand-off has no seam.
+        _falling.Reset(_rising.Value);
+        _falling.To(0);
+        _current = cell;
+        _rising.Reset(0);
+        _rising.To(cell is null ? 0 : 1);
+    }
+
+    public double this[T cell] =>
+        Nullable.Equals(cell, _current) ? _rising.Value
+        : Nullable.Equals(cell, _previous) ? _falling.Value
+        : 0d;
+
+    public void Dispose()
+    {
+        _rising.Dispose();
+        _falling.Dispose();
     }
 }
 
