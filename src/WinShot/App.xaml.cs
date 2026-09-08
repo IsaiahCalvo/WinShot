@@ -34,7 +34,14 @@ public partial class App : Application
     private RecordingRecoveryStartup? _recordingRecovery;
     private bool _captureInProgress;
     private string? _pendingCaptureCommand;
+    /// <summary>Process that owned the foreground window when the current capture was asked
+    /// for. Stamped into the history file name so the tile can show a source-app badge.</summary>
+    private string? _captureSourceApp;
     private bool _pendingCaptureDrainActive;
+
+    /// <summary>One-shot, run when the current capture flow ends: the History window that hid
+    /// itself for the shot puts itself back.</summary>
+    private Action? _afterCaptureFlow;
     private long _autoCopySuppressedUntilTick;
     internal DirectEditCaptureTestHooks? DirectEditTestHooks { get; set; }
     internal SettingsService SettingsForTest => _settings;
@@ -300,7 +307,7 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling")));
         menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal")));
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("History…", null, OpenHistory));
+        menu.Items.Add(MenuItem("History…", s.HotkeyHistory, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
         menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
         menu.Items.Add(new WF.ToolStripSeparator());
@@ -351,6 +358,7 @@ public partial class App : Application
         Reg(s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"));
         Reg(s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"));
         Reg(s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"));
+        Reg(s.HotkeyHistory, OpenHistory);
 
         if (failed.Count == 0)
         {
@@ -438,15 +446,22 @@ public partial class App : Application
         "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
-    private void QueueCaptureCommand(string cmd)
+    /// <summary>Queues a capture command, or returns false when one was already running and this
+    /// press is dropped — callers that moved a window out of the way need to know which.</summary>
+    private bool QueueCaptureCommand(string cmd)
     {
         // A capture flow is already active (selector open, overlay finishing): drop the
         // command instead of parking it in the pending slot. Every caller is user-initiated
         // (hotkey, tray, winshot://), and replaying a press made while the selector was
         // already open reads as a ghost re-trigger right after the user cancels with Esc.
-        if (_captureInProgress || Recording.SelectionUiActive) return;
+        if (_captureInProgress || Recording.SelectionUiActive) return false;
+        // Read the owning app now, while the user's window is still foreground — once the
+        // selector overlay is up, or the history write runs on the thread pool, the answer
+        // is WinShot. History tags the file with it so the card can wear an app badge.
+        _captureSourceApp = FileNamer.GetForegroundInfo().App;
         _pendingCaptureCommand = cmd;
         SchedulePendingCaptureDrain();
+        return true;
     }
 
     private void ExecuteCaptureCommand(string cmd)
@@ -522,6 +537,7 @@ public partial class App : Application
     {
         _captureInProgress = false;
         MemoryCleanup.Request();
+        ResumeAfterCaptureFlow();
         SchedulePendingCaptureDrain();
     }
 
@@ -537,7 +553,15 @@ public partial class App : Application
     {
         // The recording chooser/selector counts as an active capture UI: letting a second
         // full-screen selector open on top made the two overlays z-order-fight at 66 fps.
-        if (_captureInProgress || Recording.SelectionUiActive) return;
+        if (_captureInProgress || Recording.SelectionUiActive)
+        {
+            // FinishCaptureFlow is the only thing that runs the pending restore, and this return
+            // never reaches it. A flow that IS in progress will run it on its own way out; with
+            // nothing in progress, nothing ever would — History would stay hidden with no way
+            // back but the hotkey.
+            if (!_captureInProgress) ResumeAfterCaptureFlow();
+            return;
+        }
         _captureInProgress = true;
         try
         {
@@ -552,6 +576,15 @@ public partial class App : Application
         {
             FinishCaptureFlow();
         }
+    }
+
+    /// <summary>Whoever stepped out of the frame for a capture comes back now — whether the user
+    /// took one, pressed Escape, or the command was dropped before a flow ever started.</summary>
+    private void ResumeAfterCaptureFlow()
+    {
+        Action? after = _afterCaptureFlow;
+        _afterCaptureFlow = null;
+        after?.Invoke();
     }
 
     private void SchedulePendingCaptureDrain()
@@ -881,10 +914,14 @@ public partial class App : Application
     private void OpenDirectEditCapture(SD.Bitmap bmp, HistoryCaptureKind historyKind)
     {
         DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
+        // Read the tag NOW, on the caller's thread. The field is overwritten by the next
+        // QueueCaptureCommand and this write runs later on the thread pool, so a second hotkey
+        // press straight after a capture used to stamp capture B's "@app" onto capture A's file.
+        string? sourceApp = _captureSourceApp;
         Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
             Task.Run(() =>
             {
-                try { _history.Add(source, historyKind); }
+                try { _history.Add(source, historyKind, sourceApp); }
                 catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
             }));
         Func<SD.Bitmap, Task>? autoCopyWork = _settings.Current.AutoCopyToClipboard
@@ -933,12 +970,13 @@ public partial class App : Application
             }
         }
 
+        string? sourceApp = _captureSourceApp;
         return Task.Run(() =>
         {
             try
             {
                 using var copy = CaptureService.CloneBitmap(bmp);
-                return _history.Add(copy, historyKind);
+                return _history.Add(copy, historyKind, sourceApp);
             }
             catch (Exception ex)
             {
@@ -952,11 +990,12 @@ public partial class App : Application
         SD.Bitmap copy,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
     {
+        string? sourceApp = _captureSourceApp;
         return Task.Run(() =>
         {
             using (copy)
             {
-                try { return _history.Add(copy, historyKind); }
+                try { return _history.Add(copy, historyKind, sourceApp); }
                 catch (Exception ex)
                 {
                     Log.Error("Failed to add capture to history", ex);
@@ -1102,12 +1141,13 @@ public partial class App : Application
     {
         try
         {
+            string? sourceApp = _captureSourceApp;
             string? historyPath = await Task.Run(() =>
             {
                 try
                 {
                     using var copy = CaptureService.CloneBitmap(bmp);
-                    return _history.Add(copy, historyKind);
+                    return _history.Add(copy, historyKind, sourceApp);
                 }
                 catch (Exception ex)
                 {
@@ -1391,6 +1431,25 @@ public partial class App : Application
         win.RestoreRequested += RestoreFromHistory;
         win.MultiPinRequested -= PinMultipleFromHistory;
         win.MultiPinRequested += PinMultipleFromHistory;
+        win.NewCaptureRequested -= NewCaptureFromHistory;
+        win.NewCaptureRequested += NewCaptureFromHistory;
+    }
+
+    /// <summary>
+    /// The empty grid's "New capture" button. The region selector freezes the screen as it is and
+    /// History is a 1200x760 window in the middle of it, so History has to be out of the frame or
+    /// the primary call to action captures the window it lives in. The grid is empty by definition
+    /// while that button is reachable, so there is nothing on screen worth keeping.
+    /// </summary>
+    private async void NewCaptureFromHistory(HistoryWindow win)
+    {
+        win.HideForCapture();
+        // Let the compositor actually take the window off screen before the selector freezes it.
+        await WaitForOverlayDismissAsync();
+        if (QueueCaptureCommand("capture-area"))
+            _afterCaptureFlow = win.ShowAfterCapture;
+        else
+            win.ShowAfterCapture();
     }
 
     private void OpenSettings()

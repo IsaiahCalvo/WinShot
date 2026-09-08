@@ -521,6 +521,15 @@ public class DarkControlPaletteTests
                         (Duration)theme[token] == new Duration(TimeSpan.Zero),
                         $"{token} still reads {theme[token]} with animations turned off, so any " +
                         "window-local storyboard spending it goes on animating");
+
+                // MotionShimmer is the exception, and has to be: it is a loop period on a
+                // RepeatBehavior="Forever" storyboard whose surfaces gate themselves on
+                // Motion.AnimationsEnabled read LIVE, not once at startup. Turn animation off,
+                // then on, then open History, and a zeroed period would be a spinning clock
+                // rather than the still gradient the zeroing pass is trying to produce.
+                Assert.True(
+                    (Duration)theme[ThemeResources.ShimmerDurationKey] > new Duration(TimeSpan.Zero),
+                    "MotionShimmer was zeroed, so a Forever storyboard spending it now spins");
             });
         }
         finally

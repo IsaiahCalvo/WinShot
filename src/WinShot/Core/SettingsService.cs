@@ -58,7 +58,10 @@ public class Settings
     public string OcrLanguage { get; set; } = "auto";  // TODO: wire behavior — OCR recognition language ("auto" = detect)
 
     // History
+    public bool HistoryEnabled { get; set; } = true;   // false = keep nothing; the privacy stop
     public int HistoryRetentionDays { get; set; } = 0; // 0 = count-based pruning only
+    // 1-8 are taken by the capture hotkeys and 9 is reserved for measure mode.
+    public string HotkeyHistory { get; set; } = "Ctrl+Shift+0";
 
     // Quick Access overlay (post-capture)
     public bool OverlayAutoClose { get; set; } = false; // CleanShot "Auto-close: Enable"; gates OverlayAutoCloseSeconds

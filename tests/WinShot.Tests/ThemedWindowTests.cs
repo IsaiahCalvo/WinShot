@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -56,6 +56,13 @@ public class ThemedWindowTests
                 ShowAndClose(new FastQuickPreviewWindow(previewFile.Path));
                 ShowAndClose(new HistoryWindow(history, settings));
                 HistorySelectionInteractionSmoke(history, settings);
+                HistoryActivationSmoke(history, settings);
+                HistoryThumbnailLoadSmoke(settings);
+                HistoryReflowSmoke(history, settings);
+                HistoryReflowCloseSmoke(history, settings);
+                HistoryRotateRefreshSmoke(settings);
+                HistoryOverlayActionsBaseStateSmoke(history, settings);
+                HistoryCaptureRoundTripRefreshSmoke(settings);
                 ShowAndClose(new SettingsWindow(settings));
                 SettingsWindowShowCloseSmoke(settings);
                 HistoryWindowShowCloseSmoke(history, settings);
@@ -130,32 +137,514 @@ public class ThemedWindowTests
         window.Show();
         window.UpdateLayout();
 
-        ((Button)window.FindName("SelectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        var applyClick = typeof(HistoryWindow).GetMethod("ApplySelectionClick", NP)!;
-        var list = (ListBox)window.FindName("ItemsList");
+        try
+        {
+            ((Button)window.FindName("SelectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var applyClick = typeof(HistoryWindow).GetMethod("ApplySelectionClick", NP)!;
+            var list = (ListBox)window.FindName("ItemsList");
 
-        applyClick.Invoke(window, new object[] { items[0], ModifierKeys.None });
-        applyClick.Invoke(window, new object[] { items[2], ModifierKeys.None });
-        Assert.Equal(2, list.SelectedItems.Count);
+            applyClick.Invoke(window, new object[] { items[0], ModifierKeys.None });
+            applyClick.Invoke(window, new object[] { items[2], ModifierKeys.None });
+            Assert.Equal(2, list.SelectedItems.Count);
 
-        applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Control });
-        applyClick.Invoke(window, new object[] { items[0], ModifierKeys.Control });
-        Assert.Equal(2, list.SelectedItems.Count);
-        Assert.DoesNotContain(items[0], list.SelectedItems.Cast<HistoryItem>());
+            applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Control });
+            applyClick.Invoke(window, new object[] { items[0], ModifierKeys.Control });
+            Assert.Equal(2, list.SelectedItems.Count);
+            Assert.DoesNotContain(items[0], list.SelectedItems.Cast<HistoryItem>());
 
-        applyClick.Invoke(window, new object[] { items[4], ModifierKeys.Shift });
-        Assert.Equal(5, list.SelectedItems.Count);
-        applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Shift });
-        Assert.Equal(3, list.SelectedItems.Count);
+            applyClick.Invoke(window, new object[] { items[4], ModifierKeys.Shift });
+            Assert.Equal(5, list.SelectedItems.Count);
+            applyClick.Invoke(window, new object[] { items[1], ModifierKeys.Shift });
+            Assert.Equal(3, list.SelectedItems.Count);
 
-        ((Button)window.FindName("AllSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Equal(5, list.SelectedItems.Count);
-        ((Button)window.FindName("AllSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Empty(list.SelectedItems.Cast<HistoryItem>());
-        ((Button)window.FindName("SelectAllButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Equal(5, list.SelectedItems.Count);
+            // One button does the whole gesture, and says which half it will do next.
+            var selectAll = (Button)window.FindName("AllSelectionButton");
+            var selectAllText = (TextBlock)window.FindName("SelectAllText");
+            Assert.Equal("Select all", selectAllText.Text);
+            selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(5, list.SelectedItems.Count);
+            Assert.Equal("Clear selection", selectAllText.Text);
+            selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Empty(list.SelectedItems.Cast<HistoryItem>());
+            Assert.Equal("Select all", selectAllText.Text);
+            selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(5, list.SelectedItems.Count);
 
-        window.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>Enter restores a still image to the Quick Access card and leaves History open;
+    /// an MP4 has no card, so Enter must not raise the restore handoff.</summary>
+    private static void HistoryActivationSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        var items = new List<HistoryItem>
+        {
+            new(@"C:\sanitized-history\20260803-120000-000.png"),
+            new(@"C:\sanitized-history\20260803-120001-000.mp4"),
+        };
+        paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        try
+        {
+            var restored = new List<string>();
+            window.RestoreRequested += restored.Add;
+            var list = (ListBox)window.FindName("ItemsList");
+
+            list.SelectedItem = items[0];
+            Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+            Assert.Equal(new[] { items[0].FilePath }, restored);
+            Assert.True(window.IsVisible);
+
+            // Enter on the same image again stacks a second card rather than closing History.
+            Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+            Assert.Equal(2, restored.Count);
+
+            list.SelectedItem = items[1];
+            Assert.True(window.HandleKey(Key.Enter, ModifierKeys.None));
+            Assert.Equal(2, restored.Count);
+
+            // The video tile wears a bar across the whole card, not a badge in one corner: the
+            // clip length is what tells two recordings apart.
+            System.Windows.Controls.Border? mediaBar = null;
+            WaitUntil(() =>
+            {
+                list.UpdateLayout();
+                mediaBar = list.ItemContainerGenerator.ContainerFromItem(items[1]) is FrameworkElement card
+                    ? FindVisualNamed<System.Windows.Controls.Border>(card, "MediaBar")
+                    : null;
+                return mediaBar is { ActualWidth: > 200 };
+            });
+            Assert.NotNull(mediaBar);
+            Assert.Equal(System.Windows.Visibility.Visible, mediaBar!.Visibility);
+            Assert.True(
+                mediaBar.ActualWidth > 200,
+                $"the media bar should span the card, not sit in a corner: {mediaBar.ActualWidth}");
+
+            // Ctrl+C claims the key for a still image and leaves it alone for a video.
+            list.SelectedItem = items[0];
+            Assert.True(window.HandleKey(Key.C, ModifierKeys.Control));
+            list.SelectedItem = items[1];
+            Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
+            Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
+
+            // Rotate, Rename, Print and Open-with are only on the tile's context menu, and that
+            // menu hangs off the card inside the item template - so the Menu key, which looks up
+            // from the focused CONTAINER, found nothing until the grid opened it explicitly.
+            list.SelectedItem = items[0];
+            list.UpdateLayout();
+            Assert.True(window.HandleKey(Key.Apps, ModifierKeys.None));
+            var opened = (System.Windows.Controls.ContextMenu?)null;
+            if (list.ItemContainerGenerator.ContainerFromItem(items[0]) is FrameworkElement tile)
+                opened = FindVisualNamed<System.Windows.Controls.Border>(tile, "Card")?.ContextMenu;
+            Assert.NotNull(opened);
+            Assert.True(opened!.IsOpen, "the Menu key should open the tile's own context menu");
+            opened.IsOpen = false;
+            Assert.True(window.HandleKey(Key.F10, ModifierKeys.Shift));
+            opened.IsOpen = false;
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>Every card on a page ends up with a decoded thumbnail. The decode now runs
+    /// several files at a time and marshals each result back to the UI thread, so this also
+    /// guards the shape that would deadlock if it were ever awaited from the UI thread.</summary>
+    private static void HistoryThumbnailLoadSmoke(SettingsService settings)
+    {
+        string dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            for (int index = 0; index < 12; index++)
+            {
+                using var bitmap = new SD.Bitmap(40, 30);
+                using (var graphics = SD.Graphics.FromImage(bitmap))
+                    graphics.Clear(SD.Color.FromArgb(20 + (index * 5), 60, 90));
+                bitmap.Save(
+                    System.IO.Path.Combine(dir, $"20260803-1200{index:00}-000.png"),
+                    System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var scoped = new HistoryService(settings, () => dir);
+            var window = new HistoryWindow(scoped, settings);
+            window.Show();
+            var list = (ListBox)window.FindName("ItemsList");
+            // Showing the window starts its own refresh; wait it out so the explicit reload
+            // below is the only one in flight and its task really is the one to await.
+            WaitForCondition(
+                () => list.Items.Count == 12 && list.Items.Cast<HistoryItem>().All(i => i.Thumbnail is not null),
+                "the twelve captures should be on screen with a decoded thumbnail each");
+
+            const System.Reflection.BindingFlags NP =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var reload = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(reload);
+            reload.GetAwaiter().GetResult();
+
+            Assert.Equal(12, list.Items.Count);
+            Assert.All(list.Items.Cast<HistoryItem>(), item => Assert.NotNull(item.Thumbnail));
+
+            // A capture lands while the window is open (the folder watcher's refresh, a rotate,
+            // or re-opening the window): the twelve files that are still there must keep the very
+            // same HistoryItem, decoded thumbnail and all. Rebuilding them made every visible tile
+            // a removal plus an insertion, so the whole grid blanked to shimmer and faded back in
+            // for one new file.
+            var before = list.Items.Cast<HistoryItem>().ToDictionary(item => item.FilePath);
+            using (var extra = new SD.Bitmap(40, 30))
+                extra.Save(
+                    System.IO.Path.Combine(dir, "20260803-120099-000.png"),
+                    System.Drawing.Imaging.ImageFormat.Png);
+
+            var again = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(again);
+            again.GetAwaiter().GetResult();
+
+            Assert.Equal(13, list.Items.Count);
+            foreach (HistoryItem item in list.Items.Cast<HistoryItem>())
+            {
+                if (!before.TryGetValue(item.FilePath, out HistoryItem? kept)) continue;
+                Assert.Same(kept, item);
+                Assert.NotNull(item.Thumbnail);
+            }
+
+            window.Close();
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// A rotate rewrites a history file under its own name. The refresh keeps the HistoryItem
+    /// behind any path that is still there — right for a folder that gained a file, wrong here,
+    /// because the item carries the thumbnail decoded from the pixels the rotate replaced. The
+    /// tile used to stay landscape for the life of the window.
+    /// </summary>
+    private static void HistoryRotateRefreshSmoke(SettingsService settings)
+    {
+        string dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            string file = System.IO.Path.Combine(dir, "20260803-120000-000.png");
+            using (var bitmap = new SD.Bitmap(200, 60))
+            {
+                using (var graphics = SD.Graphics.FromImage(bitmap))
+                {
+                    graphics.Clear(SD.Color.Teal);
+                    graphics.FillRectangle(SD.Brushes.White, 4, 4, 60, 18);
+                }
+
+                bitmap.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            var scoped = new HistoryService(settings, () => dir);
+            var window = new HistoryWindow(scoped, settings);
+            window.Show();
+            var list = (ListBox)window.FindName("ItemsList");
+            // Let the show-refresh finish; it would otherwise cancel the explicit reload below.
+            WaitForCondition(
+                () => list.Items.Count == 1 && ((HistoryItem)list.Items[0]!).Thumbnail is not null,
+                "the fixture capture should be on screen with a decoded thumbnail");
+
+            const System.Reflection.BindingFlags NP =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var reload = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(reload);
+            reload.GetAwaiter().GetResult();
+
+            Assert.Single(list.Items);
+            var before = (System.Windows.Media.Imaging.BitmapSource)((HistoryItem)list.Items[0]!).Thumbnail!;
+            Assert.True(before.PixelWidth > before.PixelHeight, "the fixture should start landscape");
+
+            // Exactly what OnRotate does: rotate, stage outside the folder, move over the top.
+            using (var image = HistoryImageLoader.LoadDetachedBitmap(file))
+            {
+                image.RotateFlip(SD.RotateFlipType.Rotate90FlipNone);
+                string staging = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(), $"winshot-test-{Guid.NewGuid():N}.png");
+                ImageSaver.Save(image, staging);
+                System.IO.File.Move(staging, file, overwrite: true);
+            }
+
+            var again = (Task)typeof(HistoryWindow).GetMethod("ReloadAsync", NP)!.Invoke(window, null)!;
+            WaitForTask(again);
+            again.GetAwaiter().GetResult();
+
+            var after = (System.Windows.Media.Imaging.BitmapSource)((HistoryItem)list.Items[0]!).Thumbnail!;
+            Assert.NotSame(before, after);
+            Assert.True(
+                after.PixelHeight > after.PixelWidth,
+                $"the rotated tile should read portrait, was {after.PixelWidth}x{after.PixelHeight}");
+
+            window.Close();
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// The hover action row's TEMPLATE base has to be the shown state. A container generated while
+    /// the pointer is already inside its grid slot evaluates the "neither hovered nor focused"
+    /// condition as false on its very first pass, and WPF runs neither EnterActions nor ExitActions
+    /// on an initial evaluation — so the tile keeps whatever the base value says until the pointer
+    /// leaves and comes back. With a hidden base that was an undrawn, fully clickable Delete button
+    /// across the bottom 56 DIP of the tile. The hidden state belongs in setters, which do apply on
+    /// the first evaluation, and hit-testing has to travel with it.
+    /// </summary>
+    private static void HistoryOverlayActionsBaseStateSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        paging.ReplaceAll(
+            new List<HistoryItem> { new(@"C:\sanitized-history\20260803-120000-000.png") },
+            static _ => true,
+            selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        try
+        {
+            var list = (ListBox)window.FindName("ItemsList");
+
+            var bare = (FrameworkElement)list.ItemTemplate.LoadContent();
+            var baseRow = (Border)LogicalTreeHelper.FindLogicalNode(bare, "OverlayActions")!;
+            Assert.Equal(1d, baseRow.Opacity);
+            Assert.True(baseRow.IsHitTestVisible);
+
+            // And the at-rest tile still hides it, from the setters rather than the storyboard.
+            var container = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0)!;
+            container.ApplyTemplate();
+            window.UpdateLayout();
+            var restingRow = (Border)FindDescendantByName(container, "OverlayActions")!;
+            Assert.Equal(0d, restingRow.Opacity);
+            Assert.False(restingRow.IsHitTestVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static FrameworkElement? FindDescendantByName(DependencyObject root, string name)
+    {
+        if (root is FrameworkElement element && element.Name == name) return element;
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            FrameworkElement? hit = FindDescendantByName(
+                System.Windows.Media.VisualTreeHelper.GetChild(root, index), name);
+            if (hit is not null) return hit;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// "New capture" from the empty state hides History, and hiding stops the folder watcher — so
+    /// the capture the button just asked for is written while nothing is listening, and Show()
+    /// builds a fresh watcher that by definition knows nothing about it. Coming back has to
+    /// re-read the folder, or the grid stays on "No captures yet" behind a card holding the shot.
+    /// </summary>
+    private static void HistoryCaptureRoundTripRefreshSmoke(SettingsService settings)
+    {
+        string dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            var scoped = new HistoryService(settings, () => dir);
+            var window = new HistoryWindow(scoped, settings);
+            window.Show();
+            var list = (ListBox)window.FindName("ItemsList");
+            WaitForCondition(() => list.Items.Count == 0, "the fixture folder starts empty");
+
+            window.HideForCapture();
+            using (var bitmap = new SD.Bitmap(120, 80))
+            {
+                using (var graphics = SD.Graphics.FromImage(bitmap)) graphics.Clear(SD.Color.Teal);
+                bitmap.Save(
+                    System.IO.Path.Combine(dir, "20260803-120500-000.png"),
+                    System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            window.ShowAfterCapture();
+            WaitForCondition(
+                () => list.Items.Count == 1,
+                "the capture taken while History was hidden should be on the grid when it returns");
+
+            window.Close();
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>Closing History on top of a running slide hands the high-resolution clock back
+    /// straight away, rather than leaving an orphaned tween to finish on its own.</summary>
+    private static void HistoryReflowCloseSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        paging.ReplaceAll(
+            Enumerable.Range(0, 8)
+                .Select(index => new HistoryItem(index % 2 == 0
+                    ? $@"C:\sanitized-history6080{index}-120000-000.png"
+                    : $@"C:\sanitized-history6080{index}-120000-000.mp4"))
+                .ToList(),
+            static _ => true,
+            selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        try
+        {
+            Motion.AnimationsEnabled = () => true;
+            int holdersBefore = Motion.Holders;
+            var panel = FindVisualChild<ReflowWrapPanel>((ListBox)window.FindName("ItemsList"));
+            Assert.NotNull(panel);
+
+            ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipImages")).IsChecked = true;
+            window.UpdateLayout();
+            Assert.True(panel!.IsReflowing, "the slide should still be running when the window closes");
+
+            window.Close();
+
+            Assert.False(panel.IsReflowing);
+            Assert.Equal(holdersBefore, Motion.Holders);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+        }
+    }
+
+    /// <summary>Filtering the grid slides the survivors into their new slots instead of
+    /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>
+    private static void HistoryReflowSmoke(HistoryService history, SettingsService settings)
+    {
+        var window = new HistoryWindow(history, settings);
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        var items = new List<HistoryItem>
+        {
+            new(@"C:\sanitized-history\20260803-120000-000.png"),
+            new(@"C:\sanitized-history\20260803-120001-000.mp4"),
+            new(@"C:\sanitized-history\20260803-120002-000.png"),
+            new(@"C:\sanitized-history\20260803-120003-000.mp4"),
+            new(@"C:\sanitized-history\20260803-120004-000.png"),
+        };
+        paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        window.Show();
+        window.UpdateLayout();
+
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        try
+        {
+            Motion.AnimationsEnabled = () => true;
+            var list = (ListBox)window.FindName("ItemsList");
+            var panel = FindVisualChild<ReflowWrapPanel>(list);
+            Assert.NotNull(panel);
+            int holdersBefore = Motion.Holders;
+
+            ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipImages")).IsChecked = true;
+            window.UpdateLayout();
+
+            // The videos leave from the middle of the grid, so the stills behind them slide into
+            // the gap rather than being torn down and rebuilt in place.
+            Assert.Equal(3, list.Items.Count);
+            Assert.True(panel!.LastReflowCount > 0, $"expected cards to slide, moved {panel.LastReflowCount}");
+            Assert.True(panel.IsReflowing, "the slide should be running, not already over");
+
+            // With animation off system-wide the same change lands on its end state inside the
+            // arrange pass and takes no clock at all.
+            Motion.AnimationsEnabled = () => false;
+            ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipAll")).IsChecked = true;
+            window.UpdateLayout();
+
+            Assert.Equal(5, list.Items.Count);
+            Assert.False(panel.IsReflowing);
+            Assert.True(
+                Motion.Holders <= holdersBefore,
+                $"reflow leaked a Motion holder: {holdersBefore} -> {Motion.Holders}");
+
+            // Dragging the window edge re-wraps every row for reasons that have nothing to do
+            // with the content, so it must stay silent — the same width test that has to let a
+            // filter through when the scrollbar comes or goes with it.
+            Motion.AnimationsEnabled = () => true;
+            window.Width -= 120;
+            window.UpdateLayout();
+
+            Assert.Equal(0, panel.LastReflowCount);
+            Assert.False(panel.IsReflowing, "a resize must not start a slide");
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+            // A failed assertion must not leave a window open: the STA thread would end with a
+            // live WPF window and take the whole test host down with it.
+            window.Close();
+        }
+    }
+
+    private static void WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            PumpDispatcherOnce();
+            Thread.Sleep(10);
+        }
+    }
+
+    private static T? FindVisualNamed<T>(System.Windows.DependencyObject root, string name)
+        where T : System.Windows.FrameworkElement
+    {
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, index);
+            if (child is T match && match.Name == name) return match;
+            if (FindVisualNamed<T>(child, name) is T nested) return nested;
+        }
+
+        return null;
+    }
+
+    private static T? FindVisualChild<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
+    {
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < count; index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, index);
+            if (child is T match) return match;
+            if (FindVisualChild<T>(child) is T nested) return nested;
+        }
+
+        return null;
     }
 
     private static void ShowAndClose(WF.Form form)
@@ -290,14 +779,66 @@ public class ThemedWindowTests
         }
     }
 
+    /// <summary>The window fades in instead of appearing between two frames, Escape plays that
+    /// backwards instead of blinking it away, and with animation off system-wide both land on
+    /// their end state immediately.</summary>
     private static void HistoryWindowShowCloseSmoke(HistoryService history, SettingsService settings)
     {
         var window = HistoryWindow.Show(history, settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
-        window.Close();
+
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var fadeIn = typeof(HistoryWindow).GetMethod("FadeIn", NP)!;
+        void FadeIn(double from) => fadeIn.Invoke(window, new object[] { from });
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        try
+        {
+            Motion.AnimationsEnabled = () => false;
+            FadeIn(0d);
+            Assert.Equal(1d, window.Opacity, 3);
+
+            Motion.AnimationsEnabled = () => true;
+            FadeIn(0d);
+            Assert.Equal(0d, window.Opacity, 3);
+
+            // A window caught part-way through the entrance ramps on from where it got to rather
+            // than restarting from black.
+            FadeIn(0.4d);
+            Assert.Equal(0.4d, window.Opacity, 3);
+
+            // Escape starts the exit tween, so the window is still there on the next line — and
+            // it starts from the opacity the entrance had reached, not from fully opaque.
+            Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.True(window.IsVisible, "Escape should fade the window out, not blink it away");
+            Assert.True(
+                window.Opacity <= 0.4d,
+                $"Escape mid-entrance must not brighten the window first, was {window.Opacity:0.000}");
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+            window.Close();
+        }
+
         WaitUntilHidden(window);
         Assert.False(window.IsVisible);
+
+        // With animation off, Escape has to close the window on the spot rather than waiting
+        // for a tween that will never run.
+        var second = HistoryWindow.Show(history, settings);
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            Assert.True(second.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.False(second.IsVisible);
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = previousAnimations;
+            second.Close();
+        }
     }
 
     private static T CreatePrivate<T>(params object[] args) where T : Window =>
@@ -678,6 +1219,24 @@ public class ThemedWindowTests
             PumpDispatcherOnce();
             Thread.Sleep(10);
         }
+    }
+
+    /// <summary>
+    /// Pumps until <paramref name="settled"/> holds. Showing a HistoryWindow kicks off its own
+    /// refresh (prune, then reload) and that reload cancels any other one in flight — which is
+    /// right for the app and murder for a test that awaits its OWN ReloadAsync task and finds it
+    /// returned early because the show-refresh took ownership. Let the window settle first.
+    /// </summary>
+    private static void WaitForCondition(Func<bool> settled, string because)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!settled() && DateTime.UtcNow < deadline)
+        {
+            PumpDispatcherOnce();
+            Thread.Sleep(10);
+        }
+
+        Assert.True(settled(), because);
     }
 
     private static void WaitForTask(Task task)

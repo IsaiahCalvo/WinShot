@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
@@ -7,7 +7,8 @@ namespace WinShot.Core;
 
 /// <summary>
 /// Persists every capture to a local history folder and prunes old items
-/// past the configured limit. File names sort chronologically.
+/// past the configured limit. Everything is ordered by capture time, never by name —
+/// a renamed capture has no timestamp prefix left to sort on.
 /// </summary>
 public class HistoryService
 {
@@ -24,14 +25,21 @@ public class HistoryService
     public static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinShot", "History");
 
-    public string Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular)
+    /// <summary>
+    /// Writes a capture into history, or returns null when history is switched off.
+    /// <paramref name="sourceApp"/> is the process the capture came from; it rides along in
+    /// the file name, which is the only metadata channel this flat folder has.
+    /// </summary>
+    public string? Add(Bitmap bmp, HistoryCaptureKind kind = HistoryCaptureKind.Regular, string? sourceApp = null)
     {
+        if (!_settings.Current.HistoryEnabled) return null;
         lock (_gate)
         {
             string dir = _directoryProvider();
             Directory.CreateDirectory(dir);
             string suffix = kind == HistoryCaptureKind.Scrolling ? "-scroll" : string.Empty;
-            string path = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}{suffix}.png");
+            string path = Path.Combine(
+                dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}{suffix}{SourceAppSuffix(sourceApp)}.png");
             bmp.Save(path, ImageFormat.Png);
             PruneCore();
             PruneByAgeCore(_settings.Current.HistoryRetentionDays);
@@ -39,9 +47,11 @@ public class HistoryService
         }
     }
 
-    /// <summary>Copies an existing file (e.g. a finished recording) into history.</summary>
-    public string AddFile(string sourcePath)
+    /// <summary>Copies an existing file (e.g. a finished recording) into history,
+    /// or returns null when history is switched off.</summary>
+    public string? AddFile(string sourcePath)
     {
+        if (!_settings.Current.HistoryEnabled) return null;
         lock (_gate)
         {
             string dir = _directoryProvider();
@@ -53,6 +63,35 @@ public class HistoryService
             PruneByAgeCore(_settings.Current.HistoryRetentionDays);
             return path;
         }
+    }
+
+    /// <summary>
+    /// "@chrome" for a capture taken over Chrome, empty when the owning app is unknown.
+    /// Everything Windows disallows in a name — and '@' itself, so the last '@' always
+    /// starts the tag — is dropped rather than replaced, since this is a label, not a name
+    /// the user typed. WinShot's own windows are not a source worth badging.
+    /// </summary>
+    internal static string SourceAppSuffix(string? app)
+    {
+        if (string.IsNullOrWhiteSpace(app)) return string.Empty;
+
+        var invalid = Path.GetInvalidFileNameChars();
+        // Dots survive: dropping them turned "Microsoft.Photos" into "MicrosoftPhotos", which
+        // never matches the live process again, so those captures could never wear a badge. Only
+        // a trailing one has to go — Windows will not keep a file name that ends with a dot.
+        string cleaned = new string(app.Trim()
+                .Where(c => c != '@' && !invalid.Contains(c))
+                .Take(32)
+                .ToArray())
+            .TrimEnd('.');
+        if (cleaned.Length == 0 ||
+            cleaned.Equals("Desktop", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("WinShot", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return "@" + cleaned;
     }
 
     /// <summary>All history items, newest first.</summary>
@@ -141,7 +180,14 @@ public class HistoryService
     {
         string dir = _directoryProvider();
         if (!Directory.Exists(dir)) return new List<string>();
-        return Directory.GetFiles(dir).OrderByDescending(f => f, StringComparer.Ordinal).ToList();
+        // Newest first by CAPTURE TIME. Ordering by name was the same thing until rename
+        // shipped: a renamed file drops its timestamp prefix, so "1099 tax form.png" sorts
+        // below every "2026…" name and PruneCore would delete it on the very next capture,
+        // however recent it is. Name order is only the tie-break now.
+        return Directory.GetFiles(dir)
+            .OrderByDescending(FileTimestamp)
+            .ThenByDescending(f => f, StringComparer.Ordinal)
+            .ToList();
     }
 
     private void PruneCore()

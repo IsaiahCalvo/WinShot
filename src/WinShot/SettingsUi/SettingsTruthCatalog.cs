@@ -21,6 +21,7 @@ internal static class SettingsTruthCatalog
             "HotkeyScrolling",
             "HotkeyCapturePrevious",
             "HotkeyAllInOne",
+            "HotkeyHistory",
             "RecordingFps",
             "GifFps",
             "RecordAudio",
@@ -38,6 +39,7 @@ internal static class SettingsTruthCatalog
             "WebcamOverlayPosition",
             "WebcamOverlaySizePercent",
             "OcrJoinLines",
+            "HistoryEnabled",
             "HistoryRetentionDays",
             "CheckForUpdatesOnStartup",
             "FreezeScreen",
@@ -81,6 +83,7 @@ internal static class SettingsTruthCatalog
         "record-screen",
         "scrolling-capture",
         "capture-text",
+        "history",
     ];
 
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
