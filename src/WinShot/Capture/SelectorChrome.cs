@@ -15,6 +15,43 @@ internal static class SelectorChrome
     private const int CrosshairGapPx = 10;
     private const double LiveDesktopOpacity = 0.45;
 
+    /// <summary>Logical padding around a pill's text, and its corner radius.</summary>
+    private const int PillPadX = 16;
+    private const int PillPadY = 8;
+    private const int PillRadius = 6;
+
+    /// <summary>Gap between a labelled rectangle and the size pill parked off its corner.</summary>
+    private const int PillGap = 8;
+
+    private static double Clean(double scale) => scale is > 0d and < 100d ? scale : 1d;
+
+    private static int Px(int logical, double scale) =>
+        WinShot.Recording.RecordingMonitorDpi.Px(logical, Clean(scale));
+
+    /// <summary>
+    /// The chrome font, in PIXELS for the monitor at <paramref name="scale"/>.
+    ///
+    /// The pills measure with <c>TextRenderer.MeasureText</c> (GDI) and draw with
+    /// <c>Graphics.DrawString</c> (GDI+, the only one of the two that honours alpha — see
+    /// <see cref="DrawCenteredText"/>). A GraphicsUnit.Point font resolves that point size
+    /// against the screen DC captured when the Font was built — the primary monitor — on the
+    /// GDI side, and against the target Graphics' own DpiY on the GDI+ side. Under
+    /// PerMonitorV2 those are two different monitors, so every pill on a display whose DPI
+    /// differs from the primary's was measured at one text size and painted at another:
+    /// clipped when the painting monitor was the coarser, padded out when it was the finer.
+    /// Pixels have no such ambiguity, which is exactly what
+    /// <c>FastRegionSelectorDialog.ActionBarFont</c> already does for the Cancel/Done bar.
+    /// </summary>
+    private static SD.Font PillFont(double scale) =>
+        ThemePalette.UiFontPx(ThemePalette.PxForPt(ThemePalette.TextBodyPt, Clean(scale)), SD.FontStyle.Bold);
+
+    /// <summary>How far down-and-right of the pointer a pill that FOLLOWS the pointer sits,
+    /// on a monitor at <paramref name="scale"/>. One relationship, one pair of numbers:
+    /// window mode places its size readout with these too, and the user switches between the
+    /// two surfaces with Space.</summary>
+    public static SD.Size ReadoutOffset(double scale) =>
+        new(Px(CursorReadoutOffsetX, scale), Px(CursorReadoutOffsetY, scale));
+
     /// <summary>
     /// Centred text that actually honours the alpha in <paramref name="color"/>.
     ///
@@ -76,9 +113,9 @@ internal static class SelectorChrome
     }
 
     /// <summary>Draws the crosshair guide lines (shadow + white) with a gap around the cursor.</summary>
-    public static void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor)
+    public static void DrawCrosshair(SD.Graphics g, SD.Size clientSize, SD.Point cursor, double scale)
     {
-        var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, CrosshairGapPx);
+        var guides = FastSelectorGuideLayout.Calculate(clientSize, cursor, Px(CrosshairGapPx, scale));
         if (!guides.IsVisible)
             return;
 
@@ -102,23 +139,24 @@ internal static class SelectorChrome
     /// magnifier is off — before this the coordinates lived only inside the loupe, so turning
     /// the magnifier off (or tapping Alt) left the selector with no position readout at all.
     /// </summary>
-    public static void DrawCursorReadout(SD.Graphics g, SD.Size clientSize, string text, SD.Point cursor)
+    public static void DrawCursorReadout(
+        SD.Graphics g, SD.Size clientSize, string text, SD.Point cursor, double scale)
     {
-        SD.Size pill = MeasureLabel(text);
-        int left = cursor.X + CursorReadoutOffsetX;
-        int top = cursor.Y + CursorReadoutOffsetY;
+        SD.Size pill = MeasureLabel(text, scale);
+        SD.Size offset = ReadoutOffset(scale);
+        int left = cursor.X + offset.Width;
+        int top = cursor.Y + offset.Height;
         if (left + pill.Width > clientSize.Width)
-            left = cursor.X - CursorReadoutOffsetX - pill.Width;
+            left = cursor.X - offset.Width - pill.Width;
         if (top + pill.Height > clientSize.Height)
-            top = cursor.Y - CursorReadoutOffsetY - pill.Height;
-        DrawLabel(g, clientSize, text, left, top);
+            top = cursor.Y - offset.Height - pill.Height;
+        DrawLabel(g, clientSize, text, left, top, scale);
     }
 
-    /// <summary>How far down-and-right of the pointer a pill that FOLLOWS the pointer sits.
-    /// One relationship, one pair of numbers: window mode places its size readout with these
-    /// too, and the user switches between the two surfaces with Space.</summary>
-    internal const int CursorReadoutOffsetX = 16;
-    internal const int CursorReadoutOffsetY = 20;
+    /// <summary>The pointer-follow offset in LOGICAL px. Callers want
+    /// <see cref="ReadoutOffset"/>, which scales it for the monitor it lands on.</summary>
+    private const int CursorReadoutOffsetX = 16;
+    private const int CursorReadoutOffsetY = 20;
 
     /// <summary>
     /// Where the size pill for a detected element sits, in the same space as the rectangle it
@@ -128,10 +166,12 @@ internal static class SelectorChrome
     /// flush with the right or bottom edge of a monitor painted its pill pulled inward while
     /// the hit rect stayed off screen, so the shutter was dead in exactly that corner.
     /// </summary>
-    public static SD.Rectangle SizePillRect(SD.Rectangle labelled, SD.Size pill, SD.Rectangle bounds)
+    public static SD.Rectangle SizePillRect(
+        SD.Rectangle labelled, SD.Size pill, SD.Rectangle bounds, double scale)
     {
-        int left = Math.Clamp(labelled.Right + 8, bounds.Left, Math.Max(bounds.Left, bounds.Right - pill.Width));
-        int top = Math.Clamp(labelled.Bottom + 8, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - pill.Height));
+        int gap = Px(PillGap, scale);
+        int left = Math.Clamp(labelled.Right + gap, bounds.Left, Math.Max(bounds.Left, bounds.Right - pill.Width));
+        int top = Math.Clamp(labelled.Bottom + gap, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - pill.Height));
         return new SD.Rectangle(left, top, pill.Width, pill.Height);
     }
 
@@ -145,40 +185,42 @@ internal static class SelectorChrome
     /// down to about 180 at the midpoint, so the chrome visibly thinned over whatever was
     /// behind it for the ~70 ms it was changing — the one moment it is being looked at.
     /// </summary>
-    public static void DrawShutterPill(SD.Graphics g, SD.Size clientSize, string text, SD.Point at, double swap)
+    public static void DrawShutterPill(
+        SD.Graphics g, SD.Size clientSize, string text, SD.Point at, double swap, double scale)
     {
         double amount = Math.Clamp(swap, 0d, 1d);
-        SD.Size pill = MeasureLabel(text);
+        SD.Size pill = MeasureLabel(text, scale);
         int left = Math.Clamp(at.X, 0, Math.Max(0, clientSize.Width - pill.Width));
         int top = Math.Clamp(at.Y, 0, Math.Max(0, clientSize.Height - pill.Height));
         var bounds = new SD.Rectangle(left, top, pill.Width, pill.Height);
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bounds, 6))
+        using (var path = GdiPaths.RoundedRect(bounds, Px(PillRadius, scale)))
         using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;
 
         if (amount < 1d)
         {
-            using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+            using var font = PillFont(scale);
             DrawCenteredText(g, text, font, bounds,
                 SD.Color.FromArgb((int)Math.Round(255 * (1d - amount)), ThemePalette.TextPrimary));
         }
 
         if (amount > 0d)
         {
-            using var glyphFont = ThemePalette.IconFont(ThemePalette.GlyphBadgePt);
+            using var glyphFont = ThemePalette.IconFontPx(
+                ThemePalette.PxForPt(ThemePalette.GlyphBadgePt, scale));
             DrawCenteredText(g, "", glyphFont, bounds,
                 SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.TextPrimary));
         }
     }
 
     /// <summary>Where the hint/message pill sits by default: centred, one eighth down.</summary>
-    public static SD.Rectangle HintPillRect(SD.Size clientSize, string text)
+    public static SD.Rectangle HintPillRect(SD.Size clientSize, string text, double scale)
     {
-        SD.Size pill = MeasureLabel(text);
+        SD.Size pill = MeasureLabel(text, scale);
         return new SD.Rectangle(
             (clientSize.Width - pill.Width) / 2, Math.Max(0, clientSize.Height / 8),
             pill.Width, pill.Height);
@@ -186,45 +228,47 @@ internal static class SelectorChrome
 
     /// <summary>Draws the first-run hint pill centred near the top of a monitor, or at
     /// <paramref name="top"/> when the caller has to dodge something (the action bar).</summary>
-    public static void DrawHint(SD.Graphics g, SD.Size clientSize, string text, double opacity, int? top = null)
+    public static void DrawHint(
+        SD.Graphics g, SD.Size clientSize, string text, double opacity, double scale, int? top = null)
     {
-        SD.Rectangle at = HintPillRect(clientSize, text);
-        DrawLabel(g, clientSize, text, at.X, top ?? at.Y, opacity);
+        SD.Rectangle at = HintPillRect(clientSize, text, scale);
+        DrawLabel(g, clientSize, text, at.X, top ?? at.Y, scale, opacity);
     }
 
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
     /// that place the pill by an edge other than its top-left.</summary>
-    public static SD.Size MeasureLabel(string text)
+    public static SD.Size MeasureLabel(string text, double scale)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+        using var font = PillFont(scale);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        return new SD.Size(size.Width + 16, size.Height + 8);
+        return new SD.Size(size.Width + Px(PillPadX, scale), size.Height + Px(PillPadY, scale));
     }
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
-    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y) =>
-        DrawLabel(g, clientSize, text, x, y, 1d);
+    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y, double scale) =>
+        DrawLabel(g, clientSize, text, x, y, scale, 1d);
 
     /// <summary>
     /// The label pill at a given opacity, for chrome that fades in and out. Both the pill and
     /// its text carry the alpha, so a fading pill never leaves ghost text behind.
     /// </summary>
-    public static void DrawLabel(SD.Graphics g, SD.Size clientSize, string text, int x, int y, double opacity)
+    public static void DrawLabel(
+        SD.Graphics g, SD.Size clientSize, string text, int x, int y, double scale, double opacity)
     {
         int alpha = (int)Math.Round(255 * Math.Clamp(opacity, 0d, 1d));
         if (alpha <= 0)
             return;
-        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+        using var font = PillFont(scale);
         SD.Size size = WF.TextRenderer.MeasureText(text, font);
-        int w = size.Width + 16;
-        int h = size.Height + 8;
+        int w = size.Width + Px(PillPadX, scale);
+        int h = size.Height + Px(PillPadY, scale);
         int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));
         int top = Math.Clamp(y, 0, Math.Max(0, clientSize.Height - h));
         var bg = new SD.Rectangle(left, top, w, h);
 
         var prev = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bg, 6))
+        using (var path = GdiPaths.RoundedRect(bg, Px(PillRadius, scale)))
         using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(alpha * 235 / 255, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prev;

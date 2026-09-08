@@ -44,6 +44,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// session is over.</summary>
     private bool _sessionEnded;
 
+    /// <summary>This session spent one of the first-run hint's five showings and has not
+    /// written the new count to disk yet.</summary>
+    private bool _hintSessionUnsaved;
+
     /// <summary>True for the sessions the first-run hint is shown in.</summary>
     private bool _hintEnabled;
 
@@ -328,6 +332,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             _settings.Current.SelectorHintSessions =
                 SelectorHint.NextSessionCount(_settings.Current.SelectorHintSessions);
+            _hintSessionUnsaved = true;
             _hintEnabled = true;
             _hintText = SelectorHint.Text(_mode == SelectorMode.Window);
             _hintIsMessage = false;
@@ -889,6 +894,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
     {
+        // Same guard the key handler carries: a pooled selector is parked-but-alive after
+        // Complete(), and only WS_EX_TRANSPARENT keeps mouse messages off it today.
+        if (_sessionEnded)
+            return;
         SD.Point screen = CursorScreen();
         _currentScreen = screen;
 
@@ -971,6 +980,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     _movingPending = true;
                     _adjustAnchor = screen;
                     _adjustStartRect = pending;
+                }
+                else
+                {
+                    // The grab band reaches the same distance OUTSIDE the border as inside,
+                    // so a press in those few pixels arms the edge snap but has nothing to
+                    // move. Arming nothing else made the whole band dead: no move, no new
+                    // marquee, and mouse-up re-hit-tested under a pointer that had travelled
+                    // and so did not snap either. A fresh marquee is armed alongside the
+                    // snap; whichever the gesture turns out to be, mouse-up picks it.
+                    _dragStartScreen = screen;
+                    _dragging = true;
+                    _dragMoved = false;
                 }
                 return;
             }
@@ -1152,9 +1173,12 @@ public sealed class FastRegionSelectorDialog : WF.Form
         string text = $"{pane.Width} × {pane.Height}";
         // Clamped to the monitor the element is on, matching how the painted pill is clamped
         // to its surface's client area — otherwise an element against the right or bottom
-        // edge hit-tests somewhere the pill is not drawn.
+        // edge hit-tests somewhere the pill is not drawn. Sized at that monitor's scale for
+        // the same reason: the pill you can click has to be the pill you can see.
+        SD.Rectangle pillMonitor = WF.Screen.FromRectangle(pane).Bounds;
+        double pillScale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(pillMonitor);
         return SelectorChrome.SizePillRect(
-            pane, SelectorChrome.MeasureLabel(text), WF.Screen.FromRectangle(pane).Bounds);
+            pane, SelectorChrome.MeasureLabel(text, pillScale), pillMonitor, pillScale);
     }
 
     /// <summary>
@@ -1365,7 +1389,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
     {
         if (_pendingScreen is not SD.Rectangle pending)
             return null;
-        SD.Rectangle pill = SelectorChrome.HintPillRect(clientSize, _hintText);
+        SD.Rectangle pill = SelectorChrome.HintPillRect(
+            clientSize, _hintText, WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
         var (bar, _, _, _) = ActionBarRects(BarAnchor ?? pending);
         SD.Rectangle barLocal = ToLocal(bar, monitorBounds);
         if (!pill.IntersectsWith(barLocal))
@@ -1405,6 +1430,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal void HandleMouseMove()
     {
+        if (_sessionEnded)
+            return;
         _currentScreen = CursorScreen();
 
         if (_dragging)
@@ -1419,6 +1446,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
             if (!_dragMoved)
             {
                 _dragMoved = true;
+                // A drag armed in the band just outside a framed selection still carries
+                // that selection; it replaces it, exactly like a drag started further out.
+                _pendingScreen = null;
                 // The hint has done its job the moment a drag starts — once, on the
                 // transition. Re-running it every move restarted a 140 ms tween per frame,
                 // so the fade never finished and each frame cost a timer plus a full-width
@@ -1573,7 +1603,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
     internal void HandleMouseUp(WF.MouseEventArgs e)
     {
-        if (e.Button != WF.MouseButtons.Left)
+        if (_sessionEnded || e.Button != WF.MouseButtons.Left)
             return;
 
         _currentScreen = CursorScreen();
@@ -1635,19 +1665,27 @@ public sealed class FastRegionSelectorDialog : WF.Form
         {
             MarqueeSide pressed = _pressedEdge;
             _pressedEdge = MarqueeSide.None;
-            bool moved = _movingPending && HasTravelled(_currentScreen);
-            _movingPending = false;
-            if (!moved && _pendingScreen is SD.Rectangle onEdge &&
-                MarqueeEdge.HitTest(onEdge, _currentScreen, EdgeToleranceAt(_currentScreen)) == pressed)
+            if (!HasTravelled(_currentScreen))
             {
-                SD.Rectangle snapped = MarqueeEdge.SnapEdge(onEdge, pressed, _snapEdgesX, _snapEdgesY);
-                if (snapped != onEdge)
-                    GlideSelectionTo(snapped);
-                else
-                    FlashMessage("Nothing on screen to line that edge up with.");
+                // A press that stayed put is the click-one-edge gesture.
+                _movingPending = false;
+                _dragging = false;
+                _dragMoved = false;
+                if (_pendingScreen is SD.Rectangle onEdge &&
+                    MarqueeEdge.HitTest(onEdge, _currentScreen, EdgeToleranceAt(_currentScreen)) == pressed)
+                {
+                    SD.Rectangle snapped = MarqueeEdge.SnapEdge(onEdge, pressed, _snapEdgesX, _snapEdgesY);
+                    if (snapped != onEdge)
+                        GlideSelectionTo(snapped);
+                    else
+                        FlashMessage("Nothing on screen to line that edge up with.");
+                }
+                InvalidateAllSurfaces();
+                return;
             }
-            InvalidateAllSurfaces();
-            return;
+
+            // It travelled, so it was a move of the selection body or a new marquee drawn
+            // from just outside the border. Both are settled by the paths below.
         }
 
         // A Ctrl-held press that grabbed a handle, an edge or the selection body is an
@@ -1656,13 +1694,21 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_paneHover &&
             (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control &&
             _resizeHandle < 0 && !_movingPending &&
-            !HasTravelled(_currentScreen) &&
-            SnapRectAt(_currentScreen) is SD.Rectangle element)
+            !HasTravelled(_currentScreen))
         {
             _dragging = false;
             _dragMoved = false;
             _resizeHandle = -1;
             _movingPending = false;
+            if (SnapRectAt(_currentScreen) is not SD.Rectangle element)
+            {
+                // The other three retargets pair success with a failure line — A, an edge
+                // press, Pad edges. Ctrl+click is the least discoverable of the four, so
+                // failing mute read as the modifier simply not being wired at all.
+                FlashMessage("Nothing under the pointer to snap to.");
+                InvalidateAllSurfaces();
+                return;
+            }
             if (_pendingScreen is null)
             {
                 SetPendingRegion(element);
@@ -1729,6 +1775,9 @@ public sealed class FastRegionSelectorDialog : WF.Form
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
         SD.Size clientSize = monitorBounds.Size;
         bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
+        // THIS surface's monitor scale. Every pill measures and draws through it, so the
+        // chrome is sized for the display it lands on and not for the primary.
+        double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds);
 
         // Advance the glide on the paint clock, not on a timer tick. Update() reads a
         // stopwatch, so calling it once per surface in a multi-monitor frame is harmless.
@@ -1826,10 +1875,10 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 // name twice, each centred in that display's slice of it.
                 if (_hoverAppName.Length > 0 && cursorOnThisSurface)
                 {
-                    SD.Size pill = SelectorChrome.MeasureLabel(_hoverAppName);
+                    SD.Size pill = SelectorChrome.MeasureLabel(_hoverAppName, s);
                     SelectorChrome.DrawLabel(g, clientSize, _hoverAppName,
                         local.Left + (local.Width - pill.Width) / 2,
-                        local.Top + (local.Height - pill.Height) / 2);
+                        local.Top + (local.Height - pill.Height) / 2, s);
                 }
             }
 
@@ -1846,13 +1895,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 // not be clicked for the whole 200 ms glide.
                 SD.Rectangle labelLocal = ToLocal(sized, monitorBounds);
                 string sizeText = $"{sized.Width} × {sized.Height}";
-                SD.Point at = new(labelLocal.Right + 8, labelLocal.Bottom + 8);
+                int pillGap = WinShot.Recording.RecordingMonitorDpi.Px(8, s);
+                SD.Point at = new(labelLocal.Right + pillGap, labelLocal.Bottom + pillGap);
                 if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
                 {
                     SD.Point atCursor = ToLocal(_currentScreen, monitorBounds);
-                    at = new SD.Point(
-                        atCursor.X + SelectorChrome.CursorReadoutOffsetX,
-                        atCursor.Y + SelectorChrome.CursorReadoutOffsetY);
+                    SD.Size follow = SelectorChrome.ReadoutOffset(s);
+                    at = new SD.Point(atCursor.X + follow.Width, atCursor.Y + follow.Height);
                 }
                 else if (_pendingScreen is not null)
                 {
@@ -1860,15 +1909,15 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     // selection the pill would land on Cancel — so the readout rides the
                     // selection's top-right, flipped just inside when the region touches the
                     // monitor top.
-                    SD.Size pill = SelectorChrome.MeasureLabel(sizeText);
-                    int pillTop = labelLocal.Top - pill.Height - 8;
-                    if (pillTop < 0) pillTop = labelLocal.Top + 8;
+                    SD.Size pill = SelectorChrome.MeasureLabel(sizeText, s);
+                    int pillTop = labelLocal.Top - pill.Height - pillGap;
+                    if (pillTop < 0) pillTop = labelLocal.Top + pillGap;
                     at = new SD.Point(Math.Max(0, labelLocal.Right - pill.Width), pillTop);
                 }
                 if (labelScreen is not null)
-                    SelectorChrome.DrawShutterPill(g, clientSize, sizeText, at, _pillSwap);
+                    SelectorChrome.DrawShutterPill(g, clientSize, sizeText, at, _pillSwap, s);
                 else
-                    SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y);
+                    SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y, s);
             }
         }
 
@@ -1888,7 +1937,8 @@ public sealed class FastRegionSelectorDialog : WF.Form
 
         if (_hintOpacity > 0d && cursorOnThisSurface && (_hintIsMessage || !_dragging))
         {
-            SelectorChrome.DrawHint(g, clientSize, _hintText, _hintOpacity, MessagePillTop(clientSize, monitorBounds));
+            SelectorChrome.DrawHint(
+                g, clientSize, _hintText, _hintOpacity, s, MessagePillTop(clientSize, monitorBounds));
         }
 
         // Crosshair + loupe only when drawing/idle in Area mode (not while adjusting a pending
@@ -1899,7 +1949,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             // Crosshair guide lines honor the "Crosshair mode" setting; the magnifier/color
             // loupe honors "Show magnifier". Both default on when no settings are attached.
             if (CrosshairLinesVisible())
-                SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
+                SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds), s);
 
             // While dragging, the readout says how big the selection is; idle, where the
             // pointer is. The loupe carries it when the magnifier is on, and the crosshair
@@ -1918,7 +1968,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                 // Mid-drag the selection's own size pill already sits at the corner the
                 // cursor is on; a second copy 16 px away is the same number twice.
                 SelectorChrome.DrawCursorReadout(g, clientSize,
-                    SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds));
+                    SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds), s);
             }
         }
     }
@@ -2362,6 +2412,18 @@ public sealed class FastRegionSelectorDialog : WF.Form
         _hoverEdge = MarqueeSide.None;
         _pressedEdge = MarqueeSide.None;
         _sessionEnded = true;
+        // The hint counter reaches disk when the session that spent one ENDS, not at app
+        // exit. WinShot is a tray app that usually dies with the Windows session rather than
+        // leaving through the tray — and killing it is the documented pre-install step — so
+        // App.OnExit's save routinely never ran and the five hint sessions restarted after
+        // every reboot, which is the one counter whose whole job is to stop. Saved here
+        // rather than at open so the Changed handlers (hotkey re-registration) fire with no
+        // selector on screen, and fire-and-forget so nothing waits on a disk write.
+        if (_hintSessionUnsaved && _settings is not null)
+        {
+            _hintSessionUnsaved = false;
+            _ = _settings.SaveAsync();
+        }
         Capture = false;
         DisposeFrozen(); // free the full snapshot now; _capturedRegion stays for the caller
         Park();

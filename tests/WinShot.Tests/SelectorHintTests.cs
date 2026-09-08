@@ -51,10 +51,14 @@ public class SelectorHintTests
         Assert.DoesNotContain("!", text, StringComparison.Ordinal);
     }
 
+    /// <summary>The two area gestures with no visual footprint of their own: Alt, and C,
+    /// whose hex the loupe shows without ever saying it can be taken.</summary>
     [Fact]
-    public void TheAreaHintNamesTheMagnifierBecauseAltIsTheLeastGuessableKey()
+    public void TheAreaHintNamesTheKeysNothingOnScreenAdvertises()
     {
-        Assert.Contains("Alt", SelectorHint.Text(windowMode: false), StringComparison.Ordinal);
+        string text = SelectorHint.Text(windowMode: false);
+        Assert.Contains("Alt", text, StringComparison.Ordinal);
+        Assert.Contains("C copies", text, StringComparison.Ordinal);
     }
 
     /// <summary>

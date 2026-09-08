@@ -1,4 +1,4 @@
-namespace WinShot.Capture;
+﻿namespace WinShot.Capture;
 
 /// <summary>One aspect-ratio choice on the all-in-one size bar.</summary>
 /// <param name="Label">Menu text.</param>
@@ -24,8 +24,10 @@ public static class AspectRatioPresets
         new("3:2", 3d / 2d, "3:2"),
         new("16:10", 16d / 10d, "16:10"),
         new("16:9", 16d / 9d, "16:9"),
-        new("1.85:1", 1.85d, "1.85"),
-        new("2.35:1", 2.35d, "2.35"),
+        // Every badge carries the same notation. Ten reading "16:9" beside two reading
+        // "1.85" made the reader switch grammar halfway down a 14 px row.
+        new("1.85:1", 1.85d, "1.85:1"),
+        new("2.35:1", 2.35d, "2.35:1"),
         new("2:3", 2d / 3d, "2:3"),
         new("9:16", 9d / 16d, "9:16"),
     ];

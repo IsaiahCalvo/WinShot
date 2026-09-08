@@ -212,7 +212,7 @@ public class SelectorInteractionTests
         var element = new SD.Rectangle(100, 200, 400, 300);
         var pill = new SD.Size(64, 24);
 
-        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill, monitor);
+        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill, monitor, 1d);
 
         // Paint and hit-test call this same function, so the pill you can click is exactly
         // the pill you can see — the shutter affordance was the only missing half.
@@ -223,7 +223,7 @@ public class SelectorInteractionTests
         // the monitor, so the clickable one has to be clamped with it or the shutter is dead
         // on exactly the elements most likely to sit against an edge.
         SD.Rectangle corner = SelectorChrome.SizePillRect(
-            new SD.Rectangle(1500, 900, 420, 180), pill, monitor);
+            new SD.Rectangle(1500, 900, 420, 180), pill, monitor, 1d);
         Assert.True(monitor.Contains(corner), corner.ToString());
     }
 

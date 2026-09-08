@@ -283,7 +283,7 @@ public class SelectorRenderTests
         // Where the pill WOULD have gone when it was placed off the interpolated border —
         // the bug this test exists for. Well clear of the hit rect while the glide is young.
         SD.Rectangle strayed = SelectorChrome.SizePillRect(
-            tween.Current, SelectorChrome.MeasureLabel($"{to.Width} × {to.Height}"), Monitor);
+            tween.Current, SelectorChrome.MeasureLabel($"{to.Width} × {to.Height}", 1d), Monitor, 1d);
         Assert.False(hit.IntersectsWith(strayed), "the two candidate spots must be distinguishable");
 
         using SD.Bitmap painted = Paint(selector);

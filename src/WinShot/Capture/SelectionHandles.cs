@@ -1,4 +1,4 @@
-using WinShot.Core;
+﻿using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -71,6 +71,12 @@ public static class SelectionHandles
         }
         var rect = SD.Rectangle.FromLTRB(Math.Min(l, r), Math.Min(t, b), Math.Max(l, r), Math.Max(t, b));
         rect.Intersect(bounds);
+        // Rectangle.Intersect answers Rectangle.Empty — (0,0,0,0) — when the two do not
+        // overlap at all, and the min-size clamp below would turn that into an 8x8 selection
+        // parked at the desktop origin instead of anywhere near the drag. Keep the rect the
+        // drag started from instead.
+        if (rect.IsEmpty)
+            return start;
         // A handle dragged onto its opposite corner used to leave a 0x0 rect that Enter and
         // Done then silently refused to confirm — a dead end with all eight handles stacked
         // on one point and nothing on screen saying why nothing happened.

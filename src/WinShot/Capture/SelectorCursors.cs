@@ -43,7 +43,12 @@ internal static class SelectorCursors
         try
         {
             using SD.Bitmap bmp = BuildCameraBitmap(scale);
-            // One cursor per scale for the process lifetime; the GDI handle is freed at exit.
+            // GetHicon hands back a handle the caller owns, and Cursor(IntPtr) does not take
+            // ownership — so this handle lives until the process does. That is deliberate,
+            // not a leak that grows: the cache key is the clamped scale, so a run holds one
+            // HICON per distinct monitor scale (100/125/150/175/200 in practice) and every
+            // one of them is still in use by a live Cursor. Destroying it here would blank
+            // the cursor; there is nowhere later to destroy it from.
             return new WF.Cursor(bmp.GetHicon());
         }
         catch (Exception ex)
@@ -105,9 +110,13 @@ internal static class SelectorCursors
         }
     }
 
-    /// <summary>Where the glyph is drawn inside a <paramref name="size"/>-px cursor bitmap.</summary>
+    /// <summary>The glyph's content box inside a <paramref name="size"/>-px cursor bitmap:
+    /// inset on all four sides, so the extent loses TWO insets, not one. As
+    /// <c>size - inset</c> the box ran one inset past the bitmap on the right and bottom —
+    /// invisible while only the origin is read, a silent shift the moment anything centres
+    /// in it.</summary>
     internal static SD.Rectangle GlyphBox(int size, int inset) =>
-        new(inset, inset, size - inset, size - inset);
+        new(inset, inset, Math.Max(1, size - inset * 2), Math.Max(1, size - inset * 2));
 
     /// <summary>Segoe Fluent Icons "Camera" (U+E722), the same family every other glyph uses.</summary>
     private const string CameraGlyph = "";

@@ -927,7 +927,7 @@
                                     <CheckBox x:Name="CursorOnScreenshotsCheck" Content="Show on screenshots"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Applies to every capture the overlay does not draw itself: fullscreen, display, self-timer, repeat region, and an area capture taken with Freeze screen off."/>
+                                           Text="Applies to captures taken without the selection overlay."/>
                             </StackPanel>
                         </Border>
 

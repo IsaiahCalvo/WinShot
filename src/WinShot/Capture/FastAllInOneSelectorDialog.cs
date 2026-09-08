@@ -994,6 +994,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
         SD.Size clientSize = monitorBounds.Size;
         bool cursorOnThisSurface = monitorBounds.Contains(_currentScreen);
+        // THIS surface's monitor scale — see SelectorChrome.PillFont for why the chrome is
+        // measured and drawn in pixels off it rather than in points.
+        double s = WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds);
 
         // Frozen desktop slice + uniform dim, baked once and blitted as one opaque copy.
         var dimmed = GetDimmedBackground(monitorBounds);
@@ -1040,18 +1043,20 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                     : _pendingPx is SD.Rectangle settled && !_dragging
                         ? settled
                         : VirtualFromScreen(bright);
+                SD.Size follow = SelectorChrome.ReadoutOffset(s);
+                int pillGap = WinShot.Recording.RecordingMonitorDpi.Px(8, s);
                 SD.Point at = _dragging || _pendingPx is not null
-                    ? new SD.Point(local.Right + 8, local.Bottom + 8)
+                    ? new SD.Point(local.Right + pillGap, local.Bottom + pillGap)
                     : new SD.Point(
-                        ToLocal(_currentScreen, monitorBounds).X + SelectorChrome.CursorReadoutOffsetX,
-                        ToLocal(_currentScreen, monitorBounds).Y + SelectorChrome.CursorReadoutOffsetY);
-                SelectorChrome.DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y);
+                        ToLocal(_currentScreen, monitorBounds).X + follow.Width,
+                        ToLocal(_currentScreen, monitorBounds).Y + follow.Height);
+                SelectorChrome.DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y, s);
             }
         }
 
         bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;
         if (cursorOnThisSurface && _options.IsCrosshairVisible(controlPressed))
-            SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds));
+            SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds), s);
 
         SD.Size dragSize = _dragging && _dragMoved
             ? MakeDragRect(_currentScreen).Size
@@ -1065,7 +1070,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             // With the magnifier off nothing else on screen says where the pointer is.
             SelectorChrome.DrawCursorReadout(g, clientSize,
-                SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds));
+                SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds), s);
         }
     }
 
@@ -1474,6 +1479,12 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private int _hoverIndex = -1;
         private int _ratioIndex;             // index into AspectRatioPresets.All; 0 = Freeform
         private double _badgeFade = 1d;      // 0..1 ramp on the ratio badge after a change
+
+        /// <summary>The preset the BADGE is drawn from. It lags <see cref="_ratioIndex"/>
+        /// while the badge fades out, so picking Freeform eases the badge and its accent
+        /// chip away instead of dropping both in one frame — the entrance already eased,
+        /// and an asymmetric pair is the one state on this bar that popped.</summary>
+        private int _badgeIndex;
         private IDisposable? _badgeTween;
 
         public ToolbarForm(FastAllInOneSelectorDialog owner)
@@ -1610,6 +1621,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _badgeTween?.Dispose();
             _badgeTween = null;
             _badgeFade = 1d;
+            _badgeIndex = _ratioIndex;
         }
 
         /// <summary>Jumps to a mode with no glide — a pooled reuse is not a mode change the
@@ -1648,6 +1660,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _badgeTween?.Dispose();
             _badgeTween = null;
             _badgeFade = 1d;
+            _badgeIndex = 0;
             if (_ratioIndex == 0)
                 return;
             _ratioIndex = 0;
@@ -1695,15 +1708,35 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             _ratioIndex = index;
             _owner.ApplyAspectRatio(AspectRatioPresets.At(index).Ratio);
 
-            // The badge fades up rather than blinking into place — it is the only thing on
-            // the bar that says what shape the next drag will take.
+            // The badge and its accent chip fade rather than blinking — they are the only
+            // thing on the bar that says what shape the next drag will take. Freeform fades
+            // them OUT over the outgoing preset, which is why the badge paints from
+            // _badgeIndex: entrance and exit are the same 140 ms either way, and a tween
+            // that ran for a badge nobody could see is gone.
             _badgeTween?.Dispose();
-            _badgeFade = 0d;
+            _badgeTween = null;
+            bool chosen = AspectRatioPresets.At(index).Ratio is not null;
+            bool hadBadge = AspectRatioPresets.At(_badgeIndex).Ratio is not null;
+            if (!chosen && !hadBadge)
+            {
+                _badgeIndex = index;
+                _badgeFade = 1d;
+                Invalidate();
+                return;
+            }
+            if (chosen)
+                _badgeIndex = index;
+            _badgeFade = chosen ? 0d : 1d;
             _badgeTween = WinShot.Core.Motion.Run(
                 WinShot.Core.Motion.QuickMs,
                 WinShot.Core.Motion.EaseOutCubic,
-                progress => { _badgeFade = progress; Invalidate(_sizeBar); },
-                () => _badgeTween = null);
+                progress => { _badgeFade = chosen ? progress : 1d - progress; Invalidate(_sizeBar); },
+                () =>
+                {
+                    _badgeTween = null;
+                    if (!chosen)
+                        _badgeIndex = index; // faded out; stop holding the outgoing preset
+                });
             Invalidate();
         }
 
@@ -1844,12 +1877,20 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
 
             // Aspect-ratio menu: crop glyph with the chosen ratio as a badge under it.
-            AspectRatioPreset preset = AspectRatioPresets.At(_ratioIndex);
-            bool ratioChosen = preset.Ratio is not null;
-            if (ratioChosen || _hoverIndex == HoverRatio)
+            AspectRatioPreset preset = AspectRatioPresets.At(_badgeIndex);
+            double badgeFade = Math.Clamp(_badgeFade, 0d, 1d);
+            bool ratioChosen = preset.Ratio is not null && badgeFade > 0d;
+            if (_hoverIndex == HoverRatio)
             {
-                using var path = GdiPaths.RoundedRect(_ratioRect, 8);
-                using var brush = new SD.SolidBrush(ratioChosen ? SelectedFill : HoverFill);
+                using var path = GdiPaths.RoundedRect(_ratioRect, U(8));
+                using var brush = new SD.SolidBrush(HoverFill);
+                g.FillPath(brush, path);
+            }
+            if (ratioChosen)
+            {
+                using var path = GdiPaths.RoundedRect(_ratioRect, U(8));
+                using var brush = new SD.SolidBrush(
+                    SD.Color.FromArgb((int)Math.Round(SelectedFill.A * badgeFade), SelectedFill));
                 g.FillPath(brush, path);
             }
             var ratioGlyphRect = _ratioRect;
@@ -1858,12 +1899,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
             // showing two identical accent-filled crop icons a few cells apart.
             WF.TextRenderer.DrawText(g, "", _glyphFont, ratioGlyphRect,
-                ratioChosen ? SD.Color.White : GlyphColor,
+                ratioChosen
+                    ? WinShot.Core.ThemePalette.Over(
+                        SD.Color.FromArgb((int)Math.Round(255 * badgeFade), SD.Color.White), GlyphColor)
+                    : GlyphColor,
                 WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
                 WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
             if (ratioChosen)
             {
-                int badgeAlpha = (int)Math.Round(255 * Math.Clamp(_badgeFade, 0d, 1d));
+                int badgeAlpha = (int)Math.Round(255 * badgeFade);
                 var badgeRect = new SD.Rectangle(
                     _ratioRect.X, _ratioRect.Bottom - U(13), _ratioRect.Width, U(11));
                 // GDI+ DrawString, not TextRenderer: GDI drops the alpha byte, so the ramp
@@ -1886,7 +1930,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // Expand to full size (diagonal arrows) — it finally does what it looks like.
             if (_hoverIndex == HoverExpand)
             {
-                using var path = GdiPaths.RoundedRect(_expandRect, 8);
+                using var path = GdiPaths.RoundedRect(_expandRect, U(8));
                 using var brush = new SD.SolidBrush(HoverFill);
                 g.FillPath(brush, path);
             }

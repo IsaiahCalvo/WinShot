@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 using WinShot.Core;
 using WinShot.Editor.Background;
@@ -71,8 +71,10 @@ public static class WindowBackdrop
         var full = new SD.Rectangle(0, 0, canvas.Width, canvas.Height);
         if (backdrop is null)
         {
+            // Palette neutrals, not two invented ones: the same Elevated -> WindowBg pair
+            // every other dark surface in the app is built from.
             using var fallback = new SD.Drawing2D.LinearGradientBrush(
-                full, SD.Color.FromArgb(0x24, 0x28, 0x34), SD.Color.FromArgb(0x11, 0x13, 0x1A), 45f);
+                full, WinShot.Core.ThemePalette.Elevated, WinShot.Core.ThemePalette.WindowBg, 45f);
             g.FillRectangle(fallback, full);
             return;
         }
