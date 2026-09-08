@@ -17,7 +17,62 @@ public class HistoryIncrementalCollectionTests
         Assert.Equal(200, model.FilteredCount);
         Assert.Equal(200, model.VisibleCount);
         Assert.False(model.HasMore);
-        Assert.All(model.VisibleItems, item => Assert.False(string.IsNullOrWhiteSpace(item.DayGroup)));
+    }
+
+    [Fact]
+    public void FilterChange_MovesTheVisiblePageInsteadOfRebuildingIt()
+    {
+        var model = new HistoryIncrementalCollection();
+        var items = new List<HistoryItem>
+        {
+            new(@"C:\h\20260803-120000-000.png"),
+            new(@"C:\h\20260803-120001-000.mp4"),
+            new(@"C:\h\20260803-120002-000.png"),
+            new(@"C:\h\20260803-120003-000.mp4"),
+            new(@"C:\h\20260803-120004-000.png"),
+        };
+        model.ReplaceAll(items, static _ => true, selectedPath: null);
+
+        var changes = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        model.VisibleItems.CollectionChanged += (_, e) => changes.Add(e.Action);
+
+        model.ApplyFilter(static item => item.IsImage, selectedPath: null);
+
+        // The three survivors keep their identity — that is what the grid animates from — and
+        // the change never degrades to a Reset, which would tear down every card container.
+        Assert.Equal(new[] { items[0], items[2], items[4] }, model.VisibleItems);
+        Assert.DoesNotContain(System.Collections.Specialized.NotifyCollectionChangedAction.Reset, changes);
+        Assert.Equal(2, changes.Count);
+
+        changes.Clear();
+        model.ApplyFilter(static _ => true, selectedPath: null);
+
+        Assert.Equal(items, model.VisibleItems);
+        Assert.DoesNotContain(System.Collections.Specialized.NotifyCollectionChangedAction.Reset, changes);
+        Assert.Equal(2, changes.Count);
+    }
+
+    [Fact]
+    public void SortChange_ReordersWithMovesAndKeepsEveryCard()
+    {
+        var model = new HistoryIncrementalCollection();
+        List<HistoryItem> items = CreateItems(6).ToList();
+        model.ReplaceAll(items, static _ => true, selectedPath: null);
+
+        var changes = new List<System.Collections.Specialized.NotifyCollectionChangedAction>();
+        model.VisibleItems.CollectionChanged += (_, e) => changes.Add(e.Action);
+
+        model.ApplyFilter(
+            static _ => true,
+            selectedPath: null,
+            Comparer<HistoryItem>.Create((left, right) =>
+                StringComparer.Ordinal.Compare(right.FilePath, left.FilePath)));
+
+        Assert.Equal(6, model.VisibleCount);
+        Assert.All(
+            changes,
+            action => Assert.Equal(System.Collections.Specialized.NotifyCollectionChangedAction.Move, action));
+        Assert.Equal(items.Count, model.VisibleItems.Distinct().Count());
     }
 
     [Fact]
@@ -99,7 +154,6 @@ public class HistoryIncrementalCollectionTests
         Assert.Equal(250, model.FilteredCount);
         Assert.Equal(200, model.VisibleCount);
         Assert.All(model.VisibleItems, item => Assert.True(item.IsImage));
-        Assert.All(model.VisibleItems, item => Assert.False(string.IsNullOrWhiteSpace(item.DayGroup)));
 
         HistoryItem removed = model.VisibleItems[20];
         model.Remove(removed);

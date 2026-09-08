@@ -92,13 +92,23 @@ internal static class DarkControlPalette
 /// </summary>
 internal sealed class StateAmount : IDisposable
 {
-    private readonly WF.Control _owner;
+    private readonly Action _invalidate;
     private IDisposable? _run;
     private double _from;
     private double _target;
     private bool _disposed;
 
-    public StateAmount(WF.Control owner) => _owner = owner;
+    public StateAmount(WF.Control owner)
+        : this(() => { if (!owner.IsDisposed) owner.Invalidate(); })
+    {
+    }
+
+    /// <summary>
+    /// For an owner that is not one control: a form painting many owner-drawn cells repaints
+    /// just the cell's rectangle, and a selector spanning monitors has to repaint the right
+    /// surface rather than only its own.
+    /// </summary>
+    public StateAmount(Action invalidate) => _invalidate = invalidate;
 
     public double Value { get; private set; }
 
@@ -117,8 +127,7 @@ internal sealed class StateAmount : IDisposable
         _run = Motion.Run(Motion.QuickMs, Motion.EaseOutCubic, eased =>
         {
             Value = _from + ((_target - _from) * eased);
-            if (!_owner.IsDisposed)
-                _owner.Invalidate();
+            _invalidate();
         });
     }
 
@@ -139,6 +148,55 @@ internal sealed class StateAmount : IDisposable
         _disposed = true;
         _run?.Dispose();
         _run = null;
+    }
+}
+
+/// <summary>
+/// A hover (or press) wash handed between the cells of one owner-drawn surface: the cell
+/// being entered rises while the cell being left falls, so a pointer swept along a row
+/// cross-fades instead of the plate teleporting. Two <see cref="StateAmount"/>s are enough
+/// because only one cell can be under the pointer at a time.
+/// </summary>
+internal sealed class HoverWash<T> : IDisposable
+    where T : struct
+{
+    private readonly StateAmount _rising;
+    private readonly StateAmount _falling;
+    private T? _current;
+    private T? _previous;
+
+    public HoverWash(Action invalidate)
+    {
+        _rising = new StateAmount(invalidate);
+        _falling = new StateAmount(invalidate);
+    }
+
+    public T? Current => _current;
+
+    public void To(T? cell)
+    {
+        if (Nullable.Equals(cell, _current))
+            return;
+
+        _previous = _current;
+        // The outgoing amount picks up exactly where the incoming one had reached, so the
+        // hand-off has no seam.
+        _falling.Reset(_rising.Value);
+        _falling.To(0);
+        _current = cell;
+        _rising.Reset(0);
+        _rising.To(cell is null ? 0 : 1);
+    }
+
+    public double this[T cell] =>
+        Nullable.Equals(cell, _current) ? _rising.Value
+        : Nullable.Equals(cell, _previous) ? _falling.Value
+        : 0d;
+
+    public void Dispose()
+    {
+        _rising.Dispose();
+        _falling.Dispose();
     }
 }
 
@@ -464,18 +522,49 @@ public sealed class DarkDropDown : WF.Control
         {
         }
 
+        /// <summary>
+        /// A decisive accent row rather than a timid grey wash: a rounded rectangle inset a
+        /// few pixels, the way Win11's own menus draw their selection, filled in the app's
+        /// one accent so the row under the pointer is unmistakable.
+        /// </summary>
         protected override void OnRenderMenuItemBackground(WF.ToolStripItemRenderEventArgs e)
         {
-            if (e.Item.Selected || e.Item.Pressed)
-            {
-                using var brush = new SD.SolidBrush(SD.Color.FromArgb(66, 66, 70));
-                e.Graphics.FillRectangle(brush, new SD.Rectangle(SD.Point.Empty, e.Item.Size));
-            }
+            if (!e.Item.Selected && !e.Item.Pressed)
+                return;
+            if (!e.Item.Enabled)
+                return; // the version header is a disabled row; it must not light up
+
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            // WinForms scales the row height and the font for DPI; device pixels here would
+            // leave the bar proportionally tighter and squarer at 150% than at 100%.
+            double scale = Math.Max(1, e.ToolStrip?.DeviceDpi ?? 96) / 96.0;
+            int inset = (int)Math.Round(HighlightInsetDip * scale);
+            var bounds = new SD.Rectangle(SD.Point.Empty, e.Item.Size);
+            bounds.Inflate(-inset, -inset);
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
+
+            using var path = GdiPaths.RoundedRect(bounds, (int)Math.Round(HighlightRadiusDip * scale));
+            // AccentDeep, not Accent: OnRenderItemText puts white on this fill, and white on
+            // the raw accent is 3.65:1 — under the text floor on the one row the user is by
+            // definition looking at. Same hue, so the menu still reads as the one accent.
+            using var brush = new SD.SolidBrush(
+                e.Item.Pressed ? ThemePalette.AccentPressed : ThemePalette.AccentDeep);
+            g.FillPath(brush, path);
         }
+
+        private const int HighlightInsetDip = 4;
+        private const int HighlightRadiusDip = 5;
 
         protected override void OnRenderItemText(WF.ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? DarkControlPalette.Text : DarkControlPalette.TextMuted;
+            // White on the accent fill; the muted grey would disappear into it.
+            e.TextColor = !e.Item.Enabled
+                ? DarkControlPalette.TextMuted
+                : e.Item.Selected || e.Item.Pressed
+                    ? SD.Color.White
+                    : DarkControlPalette.Text;
             base.OnRenderItemText(e);
         }
 
@@ -907,5 +996,120 @@ public sealed class DarkSegmented : WF.Control
         using var brush = new SD.SolidBrush(DarkControlPalette.Mix(
             DarkControlPalette.Field, DarkControlPalette.FieldHot, amount));
         g.FillPath(brush, path);
+    }
+}
+
+/// <summary>
+/// Owner-drawn dark checkbox: an accent-filled rounded box with a white check, replacing the
+/// stock WinForms flat glyph, which ignores the palette and renders a light box on a dark
+/// surface. Lived inside the recording options dialog until the OCR toast needed one too.
+/// </summary>
+public sealed class DarkCheckBox : WF.CheckBox
+{
+    // Hover and checked both ramp: this control now sits on the toast next to DarkButtons
+    // that ease through StateAmount, and two controls on one card must not behave differently.
+    private readonly StateAmount _hover;
+    private readonly StateAmount _check;
+
+    public DarkCheckBox()
+    {
+        _hover = new StateAmount(this);
+        _check = new StateAmount(this);
+        SetStyle(
+            WF.ControlStyles.UserPaint |
+            WF.ControlStyles.AllPaintingInWmPaint |
+            WF.ControlStyles.OptimizedDoubleBuffer |
+            WF.ControlStyles.ResizeRedraw,
+            true);
+        AutoSize = true;
+        BackColor = DarkControlPalette.Card;
+        Cursor = WF.Cursors.Hand;
+        ForeColor = DarkControlPalette.Text;
+        CheckedChanged += (_, _) => _check.To(Checked ? 1d : 0d);
+        GotFocus += (_, _) => Invalidate();
+        LostFocus += (_, _) => Invalidate();
+        MouseEnter += (_, _) => _hover.To(1d);
+        MouseLeave += (_, _) => _hover.To(0d);
+    }
+
+    /// <summary>A box built already ticked is at rest ticked -- the ramp is for the change,
+    /// not for the arrival.</summary>
+    protected override void OnCreateControl()
+    {
+        base.OnCreateControl();
+        _check.Reset(Checked ? 1d : 0d);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _hover.Dispose();
+            _check.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    /// <summary>Manual DPI scale, like every other hand-laid-out surface in the app.</summary>
+    public double Scale { get; init; } = 1.0;
+
+    private int S(int logical) => (int)Math.Round(logical * Scale);
+
+    public override SD.Size GetPreferredSize(SD.Size proposedSize)
+    {
+        SD.Size text = WF.TextRenderer.MeasureText(Text, Font);
+        int box = S(16);
+        return new SD.Size(box + S(8) + text.Width + 2, Math.Max(box + 2, text.Height + 2));
+    }
+
+    protected override void OnPaint(WF.PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        int box = S(16);
+        var rect = new SD.Rectangle(0, (Height - box) / 2, box, box);
+        int cornerRadius = S(4);
+
+        // The box cross-fades from the empty field to the accent fill, and the tick fades in
+        // over it, so ticking is a change you can see happen rather than one frame of blue.
+        double checkAmount = _check.Value;
+        using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
+        {
+            using (var fill = new SD.SolidBrush(DarkControlPalette.Mix(
+                DarkControlPalette.Field, ThemePalette.Accent, checkAmount)))
+                g.FillPath(fill, path);
+            int borderAlpha = (int)Math.Round((64 + (56 * _hover.Value)) * (1d - checkAmount));
+            if (borderAlpha > 1)
+            {
+                using var pen = new SD.Pen(SD.Color.FromArgb(borderAlpha, 255, 255, 255), 1f);
+                g.DrawPath(pen, path);
+            }
+        }
+        if (checkAmount > 0.004d)
+        {
+            using var pen = new SD.Pen(
+                SD.Color.FromArgb((int)Math.Round(255 * checkAmount), SD.Color.White),
+                Math.Max(2f, box / 8f))
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round,
+            };
+            g.DrawLines(pen, new[]
+            {
+                new SD.PointF(rect.X + box * 0.26f, rect.Y + box * 0.54f),
+                new SD.PointF(rect.X + box * 0.43f, rect.Y + box * 0.72f),
+                new SD.PointF(rect.X + box * 0.75f, rect.Y + box * 0.31f),
+            });
+        }
+
+        int textX = box + S(8);
+        var textRect = new SD.Rectangle(textX, 0, Math.Max(1, Width - textX), Height);
+        WF.TextRenderer.DrawText(g, Text, Font, textRect, ForeColor,
+            WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left | WF.TextFormatFlags.SingleLine);
+        if (Focused)
+            WF.ControlPaint.DrawFocusRectangle(g, textRect);
     }
 }

@@ -46,6 +46,10 @@
 
     <!-- Accent (single blue identity: active tool, primary action, selection) -->
     <Color x:Key="AccentColor">#FF0A84FF</Color>         <!-- macOS dark-mode system blue -->
+    <!-- The same accent, deepened just enough that WHITE text on it clears 4.5:1 (it is
+         3.65:1 on AccentColor). Fill of anything that carries a white label; never a
+         border, a glyph or an indicator — those stay AccentColor. -->
+    <Color x:Key="AccentDeepColor">#FF0A73E0</Color>
     <Color x:Key="AccentPressedColor">#FF0060DF</Color>  <!-- darker blue, pressed of accent -->
 
     <!-- Semantic info/heading (split out from accent-hover; was overloaded #4DA3FF) -->
@@ -53,13 +57,22 @@
 
     <!-- Annotation / destructive red -->
     <Color x:Key="AnnotationRedColor">#FFFF453A</Color>  <!-- default stroke, step counter, record dot, destructive -->
-    <Color x:Key="RedHoverColor">#FFFF6B60</Color>       <!-- brighter red, hover of destructive action -->
-    <Color x:Key="RedPressedColor">#FFE0352B</Color>     <!-- darker red, pressed of destructive action -->
+    <!-- Same story as the accent's pressed shade: white on AnnotationRed is 3.4:1, so a destructive button's
+         FILL deepens while the stroke/dot colour is untouched. Its hover and press are the
+         shared HoverShade/PressedShade dips, NOT a brighter red: lightening the fill under
+         white type is exactly the mistake documented below, and #FF6B60 measured 2.79:1 —
+         a worse reading, hovered, than the 3.4:1 this deepening was here to fix. -->
+    <Color x:Key="RedDeepColor">#FFD42B21</Color>
+    <!-- A red that carries TYPE rather than sitting under it (TextErrorBrush). -->
+    <Color x:Key="RedHoverColor">#FFFF6B60</Color>
 
     <!-- Text -->
     <Color x:Key="TextPrimaryColor">#FFF2F2F4</Color>    <!-- ~95% white -->
     <Color x:Key="TextSecondaryColor">#B3FFFFFF</Color>  <!-- ~70% white, labels/values -->
-    <Color x:Key="TextDisabledColor">#66FFFFFF</Color>   <!-- ~40% white -->
+    <Color x:Key="TextDisabledColor">#66FFFFFF</Color>   <!-- ~40% white: DISABLED controls only (WCAG exempts them) -->
+    <!-- Helper text is not disabled text. At 40% white it measured 3.67:1 on the card
+         surface; 55% clears 4.5:1 and still reads clearly quieter than TextSecondary. -->
+    <Color x:Key="TextHintColor">#8CFFFFFF</Color>
 
     <!-- Interaction fills. Hover lightens, press DARKENS — the same ladder
          DarkControlPalette.HoverPressLighten uses on the WinForms side (+18 hovering,
@@ -107,11 +120,11 @@
     <SolidColorBrush x:Key="FloatingBgBrush"   Color="{StaticResource FloatingBgColor}"/>
 
     <SolidColorBrush x:Key="AccentBrush"        Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentDeepBrush"    Color="{StaticResource AccentDeepColor}"/>
+    <SolidColorBrush x:Key="RedDeepBrush"       Color="{StaticResource RedDeepColor}"/>
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>
     <SolidColorBrush x:Key="InfoBrush"          Color="{StaticResource InfoColor}"/>
     <SolidColorBrush x:Key="AnnotationRedBrush" Color="{StaticResource AnnotationRedColor}"/>
-    <SolidColorBrush x:Key="RedHoverBrush"      Color="{StaticResource RedHoverColor}"/>
-    <SolidColorBrush x:Key="RedPressedBrush"    Color="{StaticResource RedPressedColor}"/>
     <!-- Red as TYPE, not as fill. AnnotationRedColor is a stroke/fill colour and only
          clears 4.5:1 on the darkest ground (4.99:1 on WindowBg, 4.43:1 on ToolbarBg),
          so a failure line on a dialog card - which is ToolbarBg - fell under the bar
@@ -122,11 +135,15 @@
     <SolidColorBrush x:Key="TextPrimaryBrush"   Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
     <SolidColorBrush x:Key="TextDisabledBrush"  Color="{StaticResource TextDisabledColor}"/>
+    <SolidColorBrush x:Key="TextHintBrush"      Color="{StaticResource TextHintColor}"/>
 
     <SolidColorBrush x:Key="HoverFillBrush"     Color="{StaticResource HoverFillColor}"/>
     <SolidColorBrush x:Key="HoverShadeBrush"    Color="{StaticResource HoverShadeColor}"/>
     <SolidColorBrush x:Key="PressedShadeBrush"   Color="{StaticResource PressedShadeColor}"/>
     <SolidColorBrush x:Key="BadgeScrimBrush"    Color="{StaticResource BadgeScrimColor}"/>
+    <!-- Plate behind a source app's own icon, which carries its own colours: a light
+         ground is what keeps a dark monochrome icon legible over a screenshot. -->
+    <SolidColorBrush x:Key="IconPlateBrush" Color="White"/>
 
     <SolidColorBrush x:Key="BorderBrush"        Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="BorderStrongBrush"  Color="{StaticResource BorderStrongColor}"/>
@@ -179,6 +196,11 @@
     <sys:Double x:Key="TextTitle">16</sys:Double>     <!-- section and window headings -->
     <sys:Double x:Key="TextDisplay">22</sys:Double>   <!-- the one big number or wordmark on a pane -->
 
+    <!-- The one monospaced face, for readouts whose digits must not shuffle as they
+         count (timecodes, frame counts). Core/ThemePalette.MonoFamily is the same
+         decision for the WinForms surfaces. -->
+    <FontFamily x:Key="MonoFamily">Consolas</FontFamily>
+
     <!-- Icon-font glyphs used as illustration rather than as type: empty-state art,
          a thumbnail placeholder, the badge on a selected card, the small chevron
          trailing a split button. Sized apart from the type scale — they are
@@ -209,7 +231,17 @@
     <Thickness x:Key="GroupSepMargin">0,8,0,8</Thickness>     <!-- Space2 either side -->
     <Thickness x:Key="LabelGutterMargin">0,0,12,0</Thickness> <!-- Space3 between label and control -->
     <Thickness x:Key="ChipGutterMargin">0,0,8,0</Thickness>   <!-- Space2 between chips in a row -->
+    <Thickness x:Key="HintGutterMargin">8,0,0,0</Thickness>   <!-- Space2 before a hint that TRAILS a control -->
+    <!-- Body copy that wraps gets one ratio, not a per-block guess. 1.4x the largest body
+         step (TextBodyLg 12) covers the caption sizes too: a hint and a notice paragraph
+         breathe the same amount. -->
+    <sys:Double x:Key="LineHeightBody">17</sys:Double>
+    <Thickness x:Key="MatrixCellMargin">12,0,0,0</Thickness> <!-- Space3 from the after-capture matrix's checkbox column to its label -->
     <Thickness x:Key="ThumbInset">2</Thickness>               <!-- scrollbar thumb inside its 8px rail -->
+    <Thickness x:Key="CaptionGapMargin">0,4,0,0</Thickness>   <!-- Space1 between a glyph and its caption -->
+    <Thickness x:Key="LeadGutterMargin">8,0,0,0</Thickness>   <!-- Space2 before text that follows a glyph -->
+    <Thickness x:Key="MediaBarPadding">8,4</Thickness>        <!-- Space2 across, Space1 down: a bar over a thumbnail -->
+    <Thickness x:Key="ActionRowMargin">0,16,0,0</Thickness>   <!-- Space4 above a row of buttons -->
 
     <!-- Settings' two-column geometry. Everything under a labelled row starts at
          the control column: the label width plus one Space3 gutter. That sum was
@@ -233,6 +265,14 @@
     <Duration x:Key="MotionQuick">0:0:0.14</Duration>
     <Duration x:Key="MotionSwap">0:0:0.22</Duration>
     <Duration x:Key="MotionEnter">0:0:0.28</Duration>
+    <!-- A loop period, not a transition, so it sits well outside the 140/220/280 vocabulary: a
+         sweep that reads as unhurried. Surfaces that use it gate it on Motion.AnimationsEnabled
+         themselves — a Forever storyboard has no end state for the zeroing pass to land on. -->
+    <Duration x:Key="MotionShimmer">0:0:1.2</Duration>
+
+    <!-- The one long duration: a breath that repeats while the app waits on something it
+         cannot put a percentage on. Not a transition, so it is not in Motion.cs's ladder. -->
+    <Duration x:Key="MotionPulse">0:0:0.65</Duration>
 
     <!-- How long a transient hint sits on screen before it starts leaving. Not a
          transition length, so it is not one of the three above — but it is still a
@@ -241,6 +281,7 @@
 
     <CubicEase x:Key="EaseOutCubic" EasingMode="EaseOut"/>
     <BackEase  x:Key="EaseOutBack"  EasingMode="EaseOut" Amplitude="0.4"/>
+    <SineEase  x:Key="EaseInOutSine" EasingMode="EaseInOut"/>
 
     <!-- The cross-fade every control template below shares. A template stacks a
          layer named Hover / Press / Chip / Check over its rest fill at Opacity 0
@@ -596,37 +637,59 @@
     </Style>
 
     <!-- ====================================================================
-         SWATCH BUTTON — one colour in the picker's grid, or in "My colours".
-         A bare Button falls to the Aero2 template, whose hover trigger paints
-         the border Windows light-blue — which hides the very colour the user
-         is trying to identify. Same overlay recipe as ColorWellButton, so the
-         swatch keeps its colour and takes the shared 140 ms tint instead.
+         SWATCH BUTTON — one cell of the editor's palette, of "My colors", or
+         the picker's own preview. Its whole appearance is its own Background,
+         so it needs a template that draws nothing else: a bare Button falls to
+         the Aero2 chrome, whose hover trigger paints the border Windows
+         light-blue over the very colour the user is trying to identify, and
+         whose disabled fill beats a locally-set Background, so an empty slot
+         rendered as a near-white square under a dark popup.
          ==================================================================== -->
     <Style x:Key="SwatchButton" TargetType="Button">
         <Setter Property="Width"  Value="22"/>
         <Setter Property="Height" Value="22"/>
         <Setter Property="Margin" Value="2"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Border x:Name="Swatch" CornerRadius="{StaticResource RadiusChip}"
+                        <Border x:Name="Fill"
                                 Background="{TemplateBinding Background}"
-                                BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"/>
-                        <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{StaticResource RadiusChipInner}"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- Above the content, not under it. The palette and My-colors cells
+                             have empty content, so the order is invisible to them; the picker's
+                             preview swatch centres an opaque 20 px rectangle in a 22 px cell,
+                             and under the content the hover wash only ever showed in the 1 px
+                             ring around it. -->
+                        <Border x:Name="Hover" Opacity="0" IsHitTestVisible="False"
+                                CornerRadius="{StaticResource RadiusChipInner}"
                                 Background="{StaticResource HoverFillBrush}"/>
-                        <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusChip}"
+                        <Border x:Name="Press" Opacity="0" IsHitTestVisible="False"
+                                CornerRadius="{StaticResource RadiusChipInner}"
                                 Background="{StaticResource PressedShadeBrush}"/>
-                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChip}"
-                                BorderBrush="Transparent" BorderThickness="2" Margin="-3"/>
+                        <Border x:Name="FocusRing" CornerRadius="{StaticResource RadiusChipInner}"
+                                BorderBrush="Transparent" BorderThickness="2" Margin="-1"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
-                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
-                        </Trigger>
+                        <!-- Gated on IsEnabled: WPF still sets IsMouseOver on a disabled
+                             element, so the ten empty My-colors placeholders used to light up
+                             and press under a pointer they also set to Cursor=Arrow. -->
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsEnabled" Value="True"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <MultiTrigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></MultiTrigger.EnterActions>
+                            <MultiTrigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></MultiTrigger.ExitActions>
+                        </MultiTrigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
@@ -650,13 +713,13 @@
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="{StaticResource AccentBrush}"
+                    <Border x:Name="Bg" Background="{StaticResource AccentDeepBrush}"
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
@@ -700,7 +763,7 @@
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
@@ -749,14 +812,17 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="{StaticResource AnnotationRedBrush}"
+                    <Border x:Name="Bg" Background="{StaticResource RedDeepBrush}"
                             BorderBrush="Transparent" BorderThickness="2"
                             CornerRadius="{StaticResource RadiusButton}">
                         <Grid>
+                            <!-- A saturated fill dips to hover and dips further to press — the
+                                 same ladder PillButtonPrimary uses, for the same reason: white
+                                 13pt type has to stay readable on whatever the fill becomes. -->
                             <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
-                                    Background="{StaticResource RedHoverBrush}"/>
+                                    Background="{StaticResource HoverShadeBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
-                                    Background="{StaticResource RedPressedBrush}"/>
+                                    Background="{StaticResource PressedShadeBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
                                               Margin="{TemplateBinding Padding}"/>
@@ -927,8 +993,11 @@
                         <ContentPresenter/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- AccentDeep, not Accent: the label on top of this fill is white, and
+                             white on AccentColor is 3.65:1. Same rule the WinForms menu renderer
+                             follows, so both menus highlight in one blue. -->
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentDeepBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
@@ -1294,7 +1363,7 @@
                                        FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
                                        VerticalAlignment="Center" Visibility="Hidden"/>
                             <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}"
+                            <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}"
                                        Foreground="{StaticResource TextSecondaryBrush}" Margin="20,0,0,0"/>
                         </Grid>
                     </Border>
@@ -1302,9 +1371,13 @@
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="CheckGlyph" Property="Visibility" Value="Visible"/>
                         </Trigger>
+                        <!-- AccentDeep for the same reason as DarkComboBoxItem, and the shortcut
+                             column gets its own Foreground: TextSecondary over the highlight fill
+                             is 2.51:1, and the row-level Foreground setter never reaches it. -->
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentDeepBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
+                            <Setter TargetName="Gesture" Property="Foreground" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
@@ -1320,6 +1393,78 @@
          selected ring = white, default group color is red (set in markup).
          Reusable for the editor color row and composer plain-color grid.
          ==================================================================== -->
+    <!-- ====================================================================
+         DISCLOSURE TOGGLE — a chevron + label row that reveals a block below it.
+         The chevron rotates on the quick step, so the state change is visible even
+         when the revealed content is off-screen.
+         ==================================================================== -->
+    <Style x:Key="DisclosureToggle" TargetType="ToggleButton">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Padding" Value="6,4"/>
+        <Setter Property="Margin" Value="0,2"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bg" Background="Transparent"
+                            CornerRadius="{StaticResource RadiusChip}">
+                        <Grid>
+                            <!-- The hover wash is its own layer at zero opacity so it can be faded
+                                 in, the way every other row in the theme does it. A bare Background
+                                 setter here snapped beside the chevron it sits next to. -->
+                            <Border x:Name="Hover" Opacity="0" Background="{StaticResource HoverFillBrush}"
+                                    CornerRadius="{StaticResource RadiusChip}"/>
+                            <StackPanel Orientation="Horizontal" Margin="{TemplateBinding Padding}">
+                                <TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
+                                           FontSize="{StaticResource GlyphMicro}" VerticalAlignment="Center"
+                                           Margin="0,0,6,0" RenderTransformOrigin="0.5,0.5"
+                                           Foreground="{TemplateBinding Foreground}">
+                                    <TextBlock.RenderTransform>
+                                        <RotateTransform x:Name="ChevronSpin" Angle="0"/>
+                                    </TextBlock.RenderTransform>
+                                </TextBlock>
+                                <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ChevronSpin"
+                                                         Storyboard.TargetProperty="Angle" To="90"
+                                                         Duration="{StaticResource MotionQuick}"
+                                                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="ChevronSpin"
+                                                         Storyboard.TargetProperty="Angle" To="0"
+                                                         Duration="{StaticResource MotionQuick}"
+                                                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ColorSwatch" TargetType="RadioButton">
         <Setter Property="Width" Value="24"/>
         <Setter Property="Height" Value="24"/>

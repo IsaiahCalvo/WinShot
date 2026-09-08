@@ -81,4 +81,22 @@ public class UpdateServiceTests
     [InlineData("abc123")]                            // too short
     public void ParseSha256_RejectsMalformed(string body) =>
         Assert.Null(UpdateService.ParseSha256(body));
+
+    /// <summary>
+    /// The release body is what the About pane's "What's new" renders. It used to be
+    /// fetched and dropped, which is why the update flow could only ever say a number.
+    /// </summary>
+    [Fact]
+    public void CheckResultCarriesReleaseNotes()
+    {
+        var available = new UpdateCheckResult(
+            UpdateState.UpdateAvailable, "1.4.0", "https://github.com/x/y-Setup.exe",
+            "WinShot 1.4.0 is available.", "- Faster scrolling capture");
+        Assert.Contains("scrolling", available.ReleaseNotes);
+
+        // Populated on the up-to-date path too: About shows notes for the build you are on.
+        var current = new UpdateCheckResult(UpdateState.UpToDate, "1.4.0", ReleaseNotes: "- Nothing new");
+        Assert.Equal("- Nothing new", current.ReleaseNotes);
+        Assert.Null(current.DownloadUrl);
+    }
 }

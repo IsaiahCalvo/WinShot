@@ -1,4 +1,5 @@
-﻿using SD = System.Drawing;
+﻿using System.Runtime.InteropServices;
+using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
 namespace WinShot.Core;
@@ -10,6 +11,43 @@ public enum ToastSeverity
     Info,
     Success,
     Error,
+}
+
+/// <summary>
+/// The extra affordances a toast can carry under its body, for the results that are a
+/// decision rather than a confirmation. All optional; a plain confirmation passes none.
+/// </summary>
+public sealed class ToastExtras
+{
+    /// <summary>A button that does something and leaves the toast up, relabelling itself
+    /// with whatever the action returns -- "Cut breaks" becoming "Add breaks".</summary>
+    public string? ToggleText { get; init; }
+
+    /// <summary>Runs the toggle and returns the button's new label. Async because the work
+    /// behind it is a clipboard write, and a discarded Task faults where nobody is looking --
+    /// the button relabelled itself and announced a re-copy that never happened.</summary>
+    public Func<Task<string>>? Toggle { get; init; }
+
+    /// <summary>A secondary button that declines and closes -- the explicit "no" that makes
+    /// the primary button a choice instead of the only thing on offer.</summary>
+    public string? SecondaryText { get; init; }
+
+    public Action? Secondary { get; init; }
+
+    /// <summary>A checkbox under the buttons: the user's standing answer to whatever the
+    /// toast keeps offering. Ticking it is the way to stop being asked.</summary>
+    public string? CheckboxText { get; init; }
+
+    public Action<bool>? CheckboxChanged { get; init; }
+
+    /// <summary>Never self-dismiss. For a toast the user has to answer: a 4.5 s window is
+    /// not an offer, it is a reflex test.</summary>
+    public bool Sticky { get; init; }
+
+    public bool HasAny =>
+        (ToggleText is not null && Toggle is not null) ||
+        SecondaryText is not null ||
+        CheckboxText is not null;
 }
 
 /// <summary>
@@ -27,10 +65,24 @@ public sealed class ToastWindow : WF.Form
     /// on top of the first, exactly, whether they share the corner or an anchor rect. The
     /// rule lives here rather than in the caller because there is more than one caller: the
     /// quick-actions card raises its own share failures, and routing them past App's field
-    /// put two cards on the same spot. Disposed, not closed: skipping the outgoing exit fade
-    /// is deliberate, so two different messages never cross-dissolve into each other.
+    /// put two cards on the same spot. Closed, not disposed: Dispose() never raises
+    /// OnFormClosing, which is where the exit tween lives, so the outgoing toast vanished at
+    /// full opacity and left the corner empty for the 280 ms the replacement spent rising.
+    /// That is the whole "Reading text" -> result handoff, and a designed sequence must not
+    /// blink; the outgoing card sinks and fades under the arriving one instead.
     /// </summary>
     private static ToastWindow? _live;
+
+    /// <summary>
+    /// The window handle of the toast currently on screen, or zero. A full-screen overlay
+    /// that re-raises itself over anything covering it (see
+    /// <c>SelectorForeground.KeepOnTop</c>) has to know its own confirmations are not
+    /// intruders — the toast is TopMost and hit-testable, so the pointer resting on it reads
+    /// as "something covered the overlay" and the overlay buries the message it just raised.
+    /// </summary>
+    internal static IntPtr LiveHandle =>
+        _live is { IsDisposed: false } toast && toast.IsHandleCreated ? toast.Handle : IntPtr.Zero;
+
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 
@@ -52,6 +104,12 @@ public sealed class ToastWindow : WF.Form
     /// the screen as long as an action toast does instead of the 1.7 s a confirmation gets.</summary>
     private const int DwellMs = 1700;
     private const int LongDwellMs = 4500;
+
+    /// <summary>A sticky toast waits for an answer rather than counting one down -- but it is
+    /// a TopMost window over everything the user owns, so "waits" must not mean "forever".
+    /// This is a backstop, not a dwell: long enough that nobody reads it as a countdown,
+    /// short enough that a toast nobody answers cannot become permanent screen furniture.</summary>
+    private const int StickyBackstopMs = 30_000;
 
     /// <summary>One 13-DIP row of body text, and the most rows the toast will grow to.
     /// Trim measures against these rather than guessing a character count.</summary>
@@ -81,6 +139,15 @@ public sealed class ToastWindow : WF.Form
     private readonly WF.Label _glyphLabel;
     private readonly WF.Label _previewLabel;
     private readonly DarkButton? _openButton;
+    private readonly DarkButton? _secondaryButton;
+    private readonly DarkButton? _toggleButton;
+    private readonly DarkCheckBox? _suppressCheck;
+    private readonly bool _sticky;
+    /// <summary>The dwell a non-sticky toast counts down. Held so the sticky backstop can be
+    /// substituted in one place instead of at every Start() site.</summary>
+    private int _dwellMs;
+    private IntPtr _keyHook;
+    private HookProc? _keyHookProc;
 
     /// <summary>
     /// The body label's real width in device pixels. Row counting has to measure against
@@ -91,6 +158,11 @@ public sealed class ToastWindow : WF.Form
     /// <summary>The column the toast measures against — what tests must pass to
     /// <see cref="LinesNeeded"/> and <see cref="Trim"/> to ask about this toast's box.</summary>
     internal int BodyColumnPx => _bodyColumnPx;
+
+    /// <summary>How long this toast will dwell before dismissing itself, in ms. Exposed so a
+    /// test can prove that a toast carrying a control gets the long window rather than the
+    /// 1.7 s a plain confirmation gets.</summary>
+    internal int DismissIntervalMs => _dismiss.Interval;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
     // the anchor monitor or labels truncate on 125%/150% displays.
@@ -107,9 +179,11 @@ public sealed class ToastWindow : WF.Form
         SD.Point? anchorScreen,
         Action? onOpen,
         ToastSeverity severity = ToastSeverity.Info,
-        bool holdLong = false)
+        bool holdLong = false,
+        ToastExtras? extras = null)
     {
         _anchor = anchorScreen;
+        _sticky = extras?.Sticky == true;
 
         // One screen read for the life of the toast. With no anchor the fallback is the
         // pointer's monitor, and the pointer can cross to a different-DPI display between
@@ -171,7 +245,8 @@ public sealed class ToastWindow : WF.Form
             {
                 Scale = _scale,
                 BackColor = Back,
-                FillColor = ThemePalette.Accent,
+                // AccentDeep carries the white label at 4.6:1; the raw accent is 3.65:1.
+                FillColor = ThemePalette.AccentDeep,
                 Size = new SD.Size(S(96), S(26)),
                 Text = "Open link",
             };
@@ -194,6 +269,61 @@ public sealed class ToastWindow : WF.Form
             Controls.Add(_openButton);
         }
 
+        if (extras?.SecondaryText is string secondaryText)
+        {
+            _secondaryButton = ActionButton(secondaryText, ThemePalette.SurfaceAlt);
+            _secondaryButton.Click += (_, _) =>
+            {
+                try { extras.Secondary?.Invoke(); }
+                catch (Exception ex) { Log.Error("Toast secondary action failed", ex); }
+                Close();
+            };
+            Controls.Add(_secondaryButton);
+        }
+
+        if (extras?.ToggleText is string toggleText && extras.Toggle is Func<Task<string>> toggle)
+        {
+            _toggleButton = ActionButton(toggleText, ThemePalette.SurfaceAlt);
+            _toggleButton.Click += async (_, _) =>
+            {
+                // Stays open on purpose: the point of the toggle is to look at the result
+                // and change your mind again. Awaited, not discarded: the label must not
+                // claim a re-copy that a busy clipboard refused.
+                string label;
+                try { label = await toggle(); }
+                catch (Exception ex)
+                {
+                    Log.Error("Toast toggle failed", ex);
+                    ShowActionFailure(FriendlyError.For(ex));
+                    return;
+                }
+                if (IsDisposed) return;
+                _toggleButton.Text = label;
+                HoldOpen();
+                Announce();
+            };
+            Controls.Add(_toggleButton);
+        }
+
+        if (extras?.CheckboxText is string checkboxText)
+        {
+            _suppressCheck = new DarkCheckBox
+            {
+                Scale = _scale,
+                BackColor = Back,
+                Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
+                ForeColor = ThemePalette.TextSecondary,
+                Text = checkboxText,
+                AccessibleName = checkboxText,
+            };
+            _suppressCheck.CheckedChanged += (_, _) =>
+            {
+                try { extras.CheckboxChanged?.Invoke(_suppressCheck.Checked); }
+                catch (Exception ex) { Log.Error("Toast preference change failed", ex); }
+            };
+            Controls.Add(_suppressCheck);
+        }
+
         // FormBorderStyle.None with no Text leaves an unnamed window: Narrator announced the
         // tray balloon this replaced, so the toast has to name itself the same way.
         AccessibleRole = WF.AccessibleRole.Alert;
@@ -203,10 +333,15 @@ public sealed class ToastWindow : WF.Form
 
         // holdLong is for a working state ("Checking for updates…") whose work outlives the
         // confirmation dwell: it must not self-dismiss before its own result arrives.
-        _dismiss.Interval = _openButton is not null || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        // Any toast carrying a control is long-dwell by construction: 1.7 s to read a
+        // preview, decide, and hit a button is not an offer. This used to name _openButton
+        // alone, because it was the only action a toast could carry when it was written.
+        bool hasAction = _openButton is not null || _toggleButton is not null || _secondaryButton is not null;
+        _dwellMs = hasAction || holdLong || severity == ToastSeverity.Error ? LongDwellMs : DwellMs;
+        _dismiss.Interval = _sticky ? StickyBackstopMs : _dwellMs;
         _dismiss.Tick += (_, _) => Close();
         MouseEnter += (_, _) => HoldOpen();
-        MouseLeave += (_, _) => _dismiss.Start();
+        MouseLeave += (_, _) => RestartDismiss();
 
         // The toast is ShowWithoutActivation and never takes focus, so the Escape key never
         // reaches it. A click on the card is the only dismissal a user can actually perform,
@@ -215,7 +350,7 @@ public sealed class ToastWindow : WF.Form
         foreach (WF.Control c in Controls)
         {
             c.MouseEnter += (_, _) => HoldOpen();
-            c.MouseLeave += (_, _) => _dismiss.Start();
+            c.MouseLeave += (_, _) => RestartDismiss();
             if (c is WF.Label) c.Click += (_, _) => Close();
         }
     }
@@ -238,12 +373,31 @@ public sealed class ToastWindow : WF.Form
         AccessibleDescription = _body;
 
         int bodyBottom = BodyTopDip + (BodyLineH * lines);
-        if (_openButton is not null)
-            _openButton.Location = new SD.Point(S(CardWidthDip - 14 - 96), S(bodyBottom + 8));
 
-        ClientSize = new SD.Size(
-            S(CardWidthDip),
-            S(_openButton is not null ? bodyBottom + 8 + 26 + 10 : bodyBottom + 10));
+        // The button row fills from the right: primary last, then whatever declines or
+        // toggles beside it, so the affirmative action is always in the same place.
+        int rowRight = CardWidthDip - 14;
+        bool hasRow = false;
+        foreach (DarkButton? button in new[] { _openButton, _secondaryButton, _toggleButton })
+        {
+            if (button is null) continue;
+            hasRow = true;
+            rowRight -= 96;
+            // ponytail: two buttons is the whole vocabulary (primary + one of decline/toggle),
+            // and two fit exactly. Clamped rather than wrapped so a third would overlap on the
+            // card instead of being painted off its left edge where nothing can reach it.
+            button.Location = new SD.Point(S(Math.Max(TextXDip, rowRight)), S(bodyBottom + 8));
+            rowRight -= 8;
+        }
+
+        int contentBottom = hasRow ? bodyBottom + 8 + 26 : bodyBottom;
+        if (_suppressCheck is not null)
+        {
+            _suppressCheck.Location = new SD.Point(S(TextXDip), S(contentBottom + 10));
+            contentBottom += 10 + 20;
+        }
+
+        ClientSize = new SD.Size(S(CardWidthDip), S(contentBottom + 10));
     }
 
     /// <summary>
@@ -322,13 +476,24 @@ public sealed class ToastWindow : WF.Form
         base.OnShown(e);
         ToastWindow? previous = _live;
         _live = this;
-        if (!ReferenceEquals(previous, this)) previous?.Dispose();
+        if (!ReferenceEquals(previous, this) && previous is { IsDisposed: false })
+        {
+            // Close, so the outgoing toast runs its exit tween. Its Dispose only clears _live
+            // when it still owns it, so the field this OnShown just claimed is safe.
+            try { previous.Close(); }
+            catch (Exception ex) { Log.Error("Could not close the outgoing toast (non-fatal)", ex); }
+        }
         UpdateRegion();
         Position();
         _restLocation = Location;
         _motion?.Dispose();
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, ApplyEntrance);
-        _dismiss.Start();
+        // A sticky toast runs the backstop rather than the dwell; RestartDismiss picks.
+        RestartDismiss();
+        // Not gated on _sticky: the line-break toggle rides an ordinary 4.5 s toast, and a
+        // control the pointer is the only way to reach is not a control everyone can use.
+        if (AsksSomething)
+            InstallKeyHook();
         Announce();
     }
 
@@ -352,6 +517,33 @@ public sealed class ToastWindow : WF.Form
     }
 
     /// <summary>
+    /// Rewrites the live toast's body when it is still saying the same thing, and returns
+    /// false when there is nothing on screen to rewrite so the caller can show a fresh one.
+    /// This is the contract a progress readout needs: <see cref="OnShown"/> disposes the
+    /// outgoing toast outright — deliberately, so two different messages never cross-dissolve
+    /// — which turns "50 %" arriving after "45 %" into a strobe rather than a count.
+    /// Deliberately does NOT <see cref="Announce"/>: re-announcing every step is the same
+    /// strobe in audio, and the title a screen reader already heard has not changed.
+    /// </summary>
+    public static bool TryUpdateBody(string title, string body)
+    {
+        ToastWindow? live = _live;
+        if (live is null || live.IsDisposed || live._exiting || !live.IsHandleCreated)
+            return false;
+        if (!string.Equals(live.AccessibleName, title, StringComparison.Ordinal))
+            return false;
+
+        live.SetBody(body);
+        // The card may have changed height and a corner toast is bottom-anchored.
+        live.Position();
+        live._restLocation = live.Location;
+        // Each step is fresh evidence the download is alive, so the dwell restarts with it.
+        live._dismiss.Stop();
+        live._dismiss.Start();
+        return true;
+    }
+
+    /// <summary>
     /// The action failed. The toast becomes its own error report: the glyph and the body say
     /// so in place, rather than the card disappearing with nothing to show for the click.
     /// </summary>
@@ -371,8 +563,8 @@ public sealed class ToastWindow : WF.Form
             Position();
             _restLocation = Location;
         }
-        _dismiss.Interval = LongDwellMs;
-        _dismiss.Start();
+        _dwellMs = LongDwellMs;
+        RestartDismiss();
         Announce();
     }
 
@@ -393,6 +585,15 @@ public sealed class ToastWindow : WF.Form
         // which flashed on exactly the gesture this method exists to serve.
         double from = _entranceAmount;
         _motion = Motion.Run(RiseMs, Motion.EaseOutCubic, p => ApplyEntrance(from + ((1d - from) * p)));
+    }
+
+    /// <summary>Resumes the countdown after a hover. A sticky toast resumes its backstop
+    /// instead of the dwell: moving the pointer away is not an answer, but it must still not
+    /// leave an unanswerable window on screen for the rest of the session.</summary>
+    private void RestartDismiss()
+    {
+        _dismiss.Interval = _sticky ? StickyBackstopMs : _dwellMs;
+        _dismiss.Start();
     }
 
     /// <summary>0 = fully out (transparent, dropped by the rise distance), 1 = at rest.</summary>
@@ -454,6 +655,7 @@ public sealed class ToastWindow : WF.Form
         if (disposing)
         {
             if (ReferenceEquals(_live, this)) _live = null;
+            RemoveKeyHook();
             _dismiss.Stop();
             _dismiss.Dispose();
             _motion?.Dispose();
@@ -461,6 +663,170 @@ public sealed class ToastWindow : WF.Form
         }
         base.Dispose(disposing);
     }
+
+    // ---------------------------------------------------------------- keyboard
+    // A sticky toast presents a decision, and this window is ShowWithoutActivation: it never
+    // takes focus, so Tab, Enter and Escape all go to whatever the user was already in. That
+    // left a TopMost decision card with no keyboard path to either answer. The fix is the
+    // pattern FastKeystrokeOverlayWindow already uses -- a WH_KEYBOARD_LL hook, armed only
+    // while a sticky toast that actually asks something is on screen -- rather than stealing
+    // focus from the user's work.
+
+    /// <summary>
+    /// Whether this toast is putting a question to the user. Only one that is gets the hook:
+    /// a sticky toast can also be a working state ("Reading text") that carries no buttons
+    /// and asks nothing, and arming a machine-wide keyboard hook on its behalf takes keys
+    /// away from whatever the user is actually typing in for the length of a job they did
+    /// not ask to be interrupted by.
+    ///
+    /// Every control counts, not just the two buttons: the line-break toggle and the
+    /// "Don't detect links" checkbox are both things the user has to answer, and naming only
+    /// the buttons left them mouse-only on a window that never takes focus.
+    /// </summary>
+    private bool AsksSomething =>
+        _openButton is not null || _secondaryButton is not null ||
+        _toggleButton is not null || _suppressCheck is not null;
+
+    /// <summary>Enter takes the affirmative: the primary where there is one, and otherwise
+    /// the toggle, which on a toggle-only toast is the only thing there is to take.</summary>
+    private DarkButton? EnterTarget => _openButton ?? _toggleButton;
+
+    /// <summary>Space ticks the checkbox — what Space does to a checkbox everywhere else —
+    /// and falls back to the toggle so a toggle-only toast answers to either key.</summary>
+    private WF.Control? SpaceTarget => (WF.Control?)_suppressCheck ?? _toggleButton;
+
+    private const int WhKeyboardLl = 13;
+    private const int WmKeyDown = 0x0100;
+    private const int WmKeyUp = 0x0101;
+    private const int WmSysKeyDown = 0x0104;
+    private const int WmSysKeyUp = 0x0105;
+    private static readonly IntPtr Swallow = new(1);
+
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    private void InstallKeyHook()
+    {
+        if (_keyHook != IntPtr.Zero) return;
+        _keyHookProc = KeyboardHookCallback; // held: a collected delegate takes the hook down
+        _keyHook = SetWindowsHookExW(WhKeyboardLl, _keyHookProc, GetModuleHandleW(null), 0);
+        if (_keyHook == IntPtr.Zero)
+            Log.Error($"Toast could not install its keyboard hook (error {Marshal.GetLastWin32Error()})");
+    }
+
+    private void RemoveKeyHook()
+    {
+        if (_keyHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_keyHook);
+        _keyHook = IntPtr.Zero;
+        _keyHookProc = null;
+    }
+
+    /// <summary>
+    /// Escape declines, from anywhere: it is the one key that can never do something the user
+    /// did not ask for, and without it a sticky toast has no keyboard exit at all. It is only
+    /// *consumed* while the pointer is over the card, though. This window never has focus, so
+    /// swallowing Escape everywhere ate the Escape the user aimed at their own app -- the
+    /// dropdown they meant to close stayed open and they had to press it twice. Declining a
+    /// passive card in passing is safe; taking the key is not.
+    ///
+    /// Enter takes the primary, but only while the pointer is over the card -- hover is what
+    /// says the toast is what the user is looking at, and an unconditional Enter would open a
+    /// link out from under someone who had gone back to typing somewhere else. It is not
+    /// swallowed when there is no primary to take, which was a key eaten for nothing.
+    ///
+    /// Space, on the same hover gate, is the other two controls' key: the checkbox where
+    /// there is one, the toggle button otherwise. Without it "Cut breaks" and "Don't detect
+    /// links" were reachable by pointer only.
+    /// </summary>
+    private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && !IsDisposed && !_exiting)
+        {
+            long msg = wParam.ToInt64();
+            bool down = msg is WmKeyDown or WmSysKeyDown;
+            if (down || msg is WmKeyUp or WmSysKeyUp)
+            {
+                var key = (WF.Keys)Marshal.PtrToStructure<KbdllHookStruct>(lParam).vkCode;
+                if (key == WF.Keys.Escape)
+                {
+                    if (down) BeginInvoke(new Action(DeclineFromKeyboard));
+                }
+                else if (key is WF.Keys.Enter or WF.Keys.Return && down
+                    && EnterTarget is DarkButton enter && PointerIsOver())
+                {
+                    BeginInvoke(new Action(() => enter.PerformClick()));
+                }
+                else if (key == WF.Keys.Space && down
+                    && SpaceTarget is WF.Control space && PointerIsOver())
+                {
+                    BeginInvoke(new Action(() => PressWithSpace(space)));
+                }
+
+                if (ConsumesKey(key))
+                    return Swallow;
+            }
+        }
+        return CallNextHookEx(_keyHook, nCode, wParam, lParam);
+    }
+
+    /// <summary>Which keys this toast takes off the machine. Only what the pointer says the
+    /// user is looking at: the hook sees every process's keystrokes, and this window has no
+    /// focus to justify taking any of them.</summary>
+    internal bool ConsumesKey(WF.Keys key) => key switch
+    {
+        WF.Keys.Escape => PointerIsOver(),
+        WF.Keys.Enter or WF.Keys.Return => EnterTarget is not null && PointerIsOver(),
+        WF.Keys.Space => SpaceTarget is not null && PointerIsOver(),
+        _ => false,
+    };
+
+    /// <summary>Space on a checkbox ticks it; on the toggle button it presses it. Both hold
+    /// the card open the way a click on either does, so answering with the keyboard does not
+    /// leave the dwell running out under the answer.</summary>
+    private void PressWithSpace(WF.Control target)
+    {
+        if (IsDisposed) return;
+        HoldOpen();
+        if (target is DarkCheckBox check) check.Checked = !check.Checked;
+        else if (target is DarkButton button) button.PerformClick();
+    }
+
+    private bool PointerIsOver()
+    {
+        try { return IsHandleCreated && Bounds.Contains(WF.Cursor.Position); }
+        catch { return false; }
+    }
+
+    /// <summary>Escape is the secondary answer where there is one ("Don't open"), and a plain
+    /// dismissal where there is not.</summary>
+    private void DeclineFromKeyboard()
+    {
+        if (IsDisposed) return;
+        if (_secondaryButton is not null) _secondaryButton.PerformClick();
+        else Close();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KbdllHookStruct
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(string? lpModuleName);
 
     protected override WF.CreateParams CreateParams
     {
@@ -558,6 +924,15 @@ public sealed class ToastWindow : WF.Form
     }
 
     private void UpdateRegion() => PopupChrome.ApplyRegion(this, S(14));
+
+    private DarkButton ActionButton(string text, SD.Color fill) => new()
+    {
+        Scale = _scale,
+        BackColor = Back,
+        FillColor = fill,
+        Size = new SD.Size(S(96), S(26)),
+        Text = text,
+    };
 
     private WF.Label Label(string text, int x, int y, int width, float size, SD.Color color, bool bold = false, int height = 22) =>
         new()

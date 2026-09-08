@@ -22,7 +22,10 @@ public sealed record UpdateCheckResult(
     UpdateState State,
     string? LatestVersion = null,
     string? DownloadUrl = null,
-    string? Message = null);
+    string? Message = null,
+    /// <summary>The release body, verbatim, for the About pane's "What's new".
+    /// Populated whenever GitHub answered, not only when an update is available.</summary>
+    string? ReleaseNotes = null);
 
 /// <summary>
 /// Anonymous GitHub-Releases poller for IsaiahCalvo/WinShot, modelled on Clip's updater:
@@ -63,15 +66,16 @@ public static class UpdateService
                 return new UpdateCheckResult(UpdateState.Error, Message: "Release has no tag.");
 
             string latest = CleanVersion(tag);
+            string? notes = GetString(root, "body");
             if (!IsNewerVersion(CurrentVersion, latest))
-                return new UpdateCheckResult(UpdateState.UpToDate, latest);
+                return new UpdateCheckResult(UpdateState.UpToDate, latest, ReleaseNotes: notes);
 
             string? downloadUrl = FindSetupAssetUrl(root);
             if (downloadUrl is null)
                 return new UpdateCheckResult(UpdateState.Error, Message: "No Setup.exe asset on the latest release.");
 
             return new UpdateCheckResult(UpdateState.UpdateAvailable, latest, downloadUrl,
-                $"WinShot {latest} is available.");
+                $"WinShot {latest} is available.", notes);
         }
         catch (Exception ex)
         {
@@ -112,7 +116,13 @@ public static class UpdateService
     /// </summary>
     /// <exception cref="InvalidOperationException">Non-GitHub URL.</exception>
     /// <exception cref="UpdateVerificationException">The downloaded file's hash did not match the sidecar.</exception>
-    public static async Task DownloadAndLaunchAsync(string downloadUrl, string version, CancellationToken ct = default)
+    /// <param name="onProgress">Fraction downloaded, 0..1, or null when the server sent no
+    /// Content-Length. Called on the download thread; the caller marshals.</param>
+    public static async Task DownloadAndLaunchAsync(
+        string downloadUrl,
+        string version,
+        CancellationToken ct = default,
+        Action<double?>? onProgress = null)
     {
         if (!downloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || !IsGitHubHost(downloadUrl))
             throw new InvalidOperationException("Refusing to download from a non-GitHub URL.");
@@ -126,9 +136,10 @@ public static class UpdateService
             request.Headers.UserAgent.ParseAdd("WinShotUpdateChecker/1.0");
             using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
+            long? total = response.Content.Headers.ContentLength;
             await using var src = await response.Content.ReadAsStreamAsync(ct);
             await using var dst = File.Create(path);
-            await src.CopyToAsync(dst, ct);
+            await CopyWithProgressAsync(src, dst, total, onProgress, ct);
         }
 
         // Defense-in-depth + corruption check: the release publishes "<setupname>.sha256" next to
@@ -159,6 +170,23 @@ public static class UpdateService
             Arguments = "/SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /SUPPRESSMSGBOXES /NORESTART",
             UseShellExecute = true,
         });
+    }
+
+    /// <summary>An installer is ~40 MB over whatever connection the user has: copying it with
+    /// no progress is the "app silently vanishes and reappears" complaint from the audit.</summary>
+    private static async Task CopyWithProgressAsync(
+        Stream source, Stream destination, long? total, Action<double?>? onProgress, CancellationToken ct)
+    {
+        byte[] buffer = new byte[81920];
+        long written = 0;
+        int read;
+        onProgress?.Invoke(total is > 0 ? 0 : null);
+        while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        {
+            await destination.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+            written += read;
+            onProgress?.Invoke(total is > 0 ? Math.Clamp(written / (double)total.Value, 0, 1) : null);
+        }
     }
 
     /// <summary>

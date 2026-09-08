@@ -29,18 +29,62 @@ public static class ThemedMessageDialog
     /// Shows a confirm/cancel prompt. Returns true when the user confirms.
     /// Destructive confirms render the confirm button with the red fill.
     /// </summary>
-    public static bool Confirm(Window? owner, string title, string message, string confirmLabel, bool destructive = false)
+    /// <param name="cancelLabel">The way out. Name the outcome where "Cancel" would be vague —
+    /// "Keep both" says what happens, which is what makes the safe choice the obvious one.</param>
+    public static bool Confirm(
+        Window? owner,
+        string title,
+        string message,
+        string confirmLabel,
+        bool destructive = false,
+        string cancelLabel = "Cancel")
     {
         var (dialog, _, footer) = Build(owner, title, message);
 
-        AddButton(footer, "Cancel", primary: false, () => { }).IsCancel = true;
+        Button cancel = AddButton(footer, cancelLabel, primary: false, () => { });
+        cancel.IsCancel = true;
 
         Button confirm = AddButton(
             footer, confirmLabel, primary: true, () => dialog.DialogResult = true,
             styleKey: destructive ? "PillButtonDestructive" : "PillButtonPrimary");
-        confirm.IsDefault = true;
+        // Enter never commits something that cannot be undone: on a destructive confirm the
+        // safe button is the default and the red one has to be aimed at.
+        if (destructive)
+            cancel.IsDefault = true;
+        else
+            confirm.IsDefault = true;
 
         return dialog.ShowDialog() == true;
+    }
+
+    /// <summary>
+    /// Asks for one line of text. Returns null when the user cancels, so an empty answer and
+    /// a cancelled prompt stay distinguishable. Same card and footer as the other two, so a
+    /// rename prompt does not have to be a second dialog style.
+    /// </summary>
+    public static string? Prompt(
+        Window? owner, string title, string message, string initialValue, string confirmLabel)
+    {
+        var (dialog, body, footer) = Build(owner, title, message);
+
+        var input = new TextBox { Text = initialValue, Margin = new Thickness(0, 0, 0, 18) };
+        input.SetResourceReference(FrameworkElement.StyleProperty, "DarkTextBox");
+        // The sentence above the field is the only label it has; without this a screen reader
+        // announces an unnamed edit box.
+        System.Windows.Automation.AutomationProperties.SetName(input, message);
+        // Build hands back the whole card, footer included, so the field goes in above it.
+        body.Children.Insert(body.Children.IndexOf(footer), input);
+        dialog.Loaded += (_, _) =>
+        {
+            input.Focus();
+            input.SelectAll();
+        };
+
+        AddButton(footer, "Cancel", primary: false, () => { }).IsCancel = true;
+        Button confirm = AddButton(footer, confirmLabel, primary: true, () => dialog.DialogResult = true);
+        confirm.IsDefault = true;
+
+        return dialog.ShowDialog() == true ? input.Text : null;
     }
 
     /// <summary>

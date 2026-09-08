@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
 using WinShot.Core;
@@ -18,7 +18,14 @@ public sealed class GifRecorder
     private readonly SD.Rectangle _screenRect;
     private readonly int _fps;
     private readonly string _outputPath;
-    private readonly bool _captureCursor;
+    private volatile bool _captureCursor;
+
+    /// <summary>Live: "hide the cursor while typing" flips this between frames.</summary>
+    public bool CaptureCursor
+    {
+        get => _captureCursor;
+        set => _captureCursor = value;
+    }
     private readonly SD.Size _outputSize;
     private readonly int _paletteColors;
     private readonly BlockingCollection<SD.Bitmap> _frames = new(boundedCapacity: 8);

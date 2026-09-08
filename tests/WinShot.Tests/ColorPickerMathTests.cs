@@ -2,6 +2,7 @@
 using System.Windows.Media;
 using WinShot.Editor;
 using Xunit;
+using SD = System.Drawing;
 
 namespace WinShot.Tests;
 
@@ -100,32 +101,24 @@ public class ColorPickerMathTests
 
     /// <summary>
     /// "My colours" is most-recent-first, capped, and re-saving a colour it already holds
-    /// moves it to the front rather than filling the row with duplicates.
+    /// moves it to the front rather than filling the row with duplicates. One store, shared
+    /// with the capture-side picker — the editor kept its own in-memory list until this one
+    /// existed, and two lists could only ever have disagreed.
     /// </summary>
     [Fact]
     public void SavedColoursAreMostRecentFirstDeduplicatedAndCapped()
     {
-        SavedColors.ClearForTest();
-        try
-        {
-            for (int i = 0; i < SavedColors.Capacity + 3; i++)
-                SavedColors.Add(Color.FromRgb((byte)i, 0, 0));
+        List<string> list = new();
+        for (int i = 0; i < WinShot.Core.SavedColors.MaxCount + 3; i++)
+            list = WinShot.Core.SavedColors.With(list, SD.Color.FromArgb(255, i, 0, 0));
 
-            Assert.Equal(SavedColors.Capacity, SavedColors.All.Count);
-            Assert.Equal(Color.FromRgb((byte)(SavedColors.Capacity + 2), 0, 0), SavedColors.All[0]);
+        Assert.Equal(WinShot.Core.SavedColors.MaxCount, list.Count);
+        Assert.Equal("#0C0000", list[0]);
 
-            Color oldest = SavedColors.All[^1];
-            SavedColors.Add(oldest);
-            Assert.Equal(oldest, SavedColors.All[0]);
-            Assert.Equal(SavedColors.Capacity, SavedColors.All.Count);
-            Assert.Single(SavedColors.All, c => c == oldest);
-
-            SavedColors.Remove(oldest);
-            Assert.DoesNotContain(oldest, SavedColors.All);
-        }
-        finally
-        {
-            SavedColors.ClearForTest();
-        }
+        string oldest = list[^1];
+        list = WinShot.Core.SavedColors.With(list, SD.Color.FromArgb(255, 3, 0, 0));
+        Assert.Equal(oldest, list[0]);
+        Assert.Equal(WinShot.Core.SavedColors.MaxCount, list.Count);
+        Assert.Single(list, e => e == oldest);
     }
 }

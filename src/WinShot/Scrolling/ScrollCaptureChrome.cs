@@ -57,6 +57,54 @@ internal static class CaptureExclusion
 }
 
 /// <summary>
+/// The scrolling chrome's show/hide ramp. All three surfaces are layered windows, so their
+/// alpha is set directly rather than through Form.Opacity -- which recreates the handle, and
+/// on a full-monitor TopMost surface costs more than the ramp is worth. The exit runs the
+/// mirror ease so leaving reads as arriving played backwards.
+/// </summary>
+internal static class ScrollChromeFade
+{
+    /// <summary>From the vocabulary: the dim, the controls bar and the preview panel are
+    /// three windows arriving on screen, which is what <see cref="Motion.EnterDurationMs"/>
+    /// names -- QuickMs is for hover fills and other same-place tint changes.</summary>
+    public const int DurationMs = Motion.EnterDurationMs;
+
+    public static IDisposable In(Action<byte> apply)
+    {
+        apply(0);
+        return Motion.Run(DurationMs, Motion.EaseOutCubic, p => apply(Alpha(p)));
+    }
+
+    /// <summary>
+    /// Fades out and completes when it is gone. The cancel handle comes back too: the caller
+    /// closes its form on a timeout race, and a discarded handle left an uncancellable tween
+    /// holding Motion.Acquire() with its form already destroyed.
+    ///
+    /// The task completes only when the fade RUNS OUT. Disposing the handle cancels the tween,
+    /// which by Motion's contract skips the completion -- so the task never completes, and the
+    /// deliberate behaviour a test in BreakerProbes pins ("a cancelled tween must not report
+    /// that it finished"). Never simply await this: race it against a timeout the way
+    /// ScrollingStatusWindow does, or the cancel path waits for the rest of the session.
+    ///
+    /// <paramref name="from"/> is the alpha the surface is actually at, and has no default on
+    /// purpose: every exit here can start inside the entrance (Escape during the 280 ms ramp),
+    /// and a fade that assumed 255 wrote full opacity on its first frame -- the whole-monitor
+    /// dim brightened to solid before it left. Every other ramp on these surfaces reads its
+    /// live value; this one has to be told.
+    /// </summary>
+    public static Task Out(Action<byte> apply, byte from, out IDisposable handle)
+    {
+        double start = from / 255d;
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handle = Motion.Run(DurationMs, Motion.EaseInCubic, p => apply(Alpha(start * (1d - p))),
+            () => done.TrySetResult());
+        return done.Task;
+    }
+
+    private static byte Alpha(double amount) => (byte)Math.Clamp(Math.Round(amount * 255d), 0d, 255d);
+}
+
+/// <summary>
 /// Full-monitor dim with the capture region punched out as a bright, accent-framed hole,
 /// so during a scrolling capture the user sees exactly what's being captured while still
 /// scrolling the live content underneath. Click-through (WS_EX_TRANSPARENT) so all input
@@ -74,6 +122,9 @@ public sealed class ScrollDimOverlay : WF.Form
 
     private readonly SD.Rectangle _monitor;
     private readonly SD.Rectangle _holeLocal;
+    private SD.Bitmap? _surface;
+    private IDisposable? _fade;
+    private byte _alpha;
 
     public ScrollDimOverlay(SD.Rectangle regionScreen)
     {
@@ -109,14 +160,57 @@ public sealed class ScrollDimOverlay : WF.Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        try { RenderLayered(); }
+        try
+        {
+            RenderLayered();
+            _fade = ScrollChromeFade.In(SetAlpha);
+        }
         catch (Exception ex) { Log.Error("Scroll dim overlay render failed (non-fatal)", ex); }
+    }
+
+    /// <summary>Fades the dim out and completes once it is gone; the caller then closes.</summary>
+    public Task FadeOutAsync()
+    {
+        if (IsDisposed || _surface is null) return Task.CompletedTask;
+        _fade?.Dispose();
+        return ScrollChromeFade.Out(SetAlpha, _alpha, out _fade);
+    }
+
+    private void SetAlpha(byte alpha)
+    {
+        _alpha = alpha; // what the exit fades down from when it starts inside the entrance
+        if (IsDisposed || _surface is null || !IsHandleCreated) return;
+        PushLayered(_surface, alpha);
+    }
+
+    protected override void OnFormClosed(WF.FormClosedEventArgs e)
+    {
+        _fade?.Dispose();
+        _fade = null;
+        _surface?.Dispose();
+        _surface = null;
+        base.OnFormClosed(e);
+    }
+
+    /// <summary>
+    /// A form disposed without being closed never raises FormClosed, and an in-flight fade
+    /// holds Motion's process-wide high-resolution clock for the rest of the process. Both
+    /// teardown paths have to release it.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _fade?.Dispose();
+            _fade = null;
+        }
+        base.Dispose(disposing);
     }
 
     private void RenderLayered()
     {
         int w = Math.Max(1, _monitor.Width), h = Math.Max(1, _monitor.Height);
-        using var bmp = new SD.Bitmap(w, h, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var bmp = new SD.Bitmap(w, h, SD.Imaging.PixelFormat.Format32bppPArgb);
         using (var g = SD.Graphics.FromImage(bmp))
         {
             g.SmoothingMode = SmoothingMode.None;
@@ -134,10 +228,12 @@ public sealed class ScrollDimOverlay : WF.Form
                 g.DrawRectangle(pen, _holeLocal.X - 2, _holeLocal.Y - 2, _holeLocal.Width + 3, _holeLocal.Height + 3);
             }
         }
-        PushLayered(bmp);
+        _surface?.Dispose();
+        _surface = bmp;
+        PushLayered(bmp, 0);
     }
 
-    private void PushLayered(SD.Bitmap bmp)
+    private void PushLayered(SD.Bitmap bmp, byte constantAlpha)
     {
         IntPtr screenDc = GetDC(IntPtr.Zero);
         IntPtr memDc = CreateCompatibleDC(screenDc);
@@ -152,7 +248,7 @@ public sealed class ScrollDimOverlay : WF.Form
             {
                 BlendOp = AC_SRC_OVER,
                 BlendFlags = 0,
-                SourceConstantAlpha = 255,
+                SourceConstantAlpha = constantAlpha,
                 AlphaFormat = AC_SRC_ALPHA,
             };
             UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, ULW_ALPHA);
@@ -194,7 +290,9 @@ public sealed class ScrollControlsBar : WF.Form
     public event Action? CancelRequested;
     public event Action? DoneRequested;
     public event Action? StartRequested;
-    /// <summary>Fires with the new autopilot state; clicking Auto-Scroll before Start also starts.</summary>
+    /// <summary>Fires with the new autopilot state. The toggle is hidden until Start(), so the
+    /// only way to turn autopilot on first is Alt+A -- which starts the capture too, and the
+    /// reveal that comes with Start puts the toggle on screen already reading "Pause Auto".</summary>
     public event Action<bool>? AutoScrollToggled;
 
     private readonly WF.Label _status;
@@ -204,6 +302,10 @@ public sealed class ScrollControlsBar : WF.Form
     private readonly SD.Rectangle _region;
     private bool _started;
     private bool _autoOn;
+    private readonly WinShot.Capture.RectangleTween _reveal = new();
+    private IDisposable? _revealTween;
+    private IDisposable? _fade;
+    private byte _alpha;
     private ScrollHint _hint = ScrollHint.None; // a persistent hint overrides live status text
 
     // Point-based fonts render at the monitor's DPI, so the fixed-pixel layout has to be
@@ -214,9 +316,6 @@ public sealed class ScrollControlsBar : WF.Form
     private readonly double _scale;
 
     private int S(int logical) => WinShot.Recording.RecordingMonitorDpi.Px(logical, _scale);
-
-    // Amber warning — the palette only has red (error); these are nudges, not errors.
-    private static readonly SD.Color WarnColor = ThemePalette.Warn;
 
     public ScrollControlsBar(SD.Rectangle regionScreen)
     {
@@ -245,6 +344,10 @@ public sealed class ScrollControlsBar : WF.Form
             ForeColor = ThemePalette.TextSecondary,
             Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
             Text = "Scroll capture ready",
+            // Before capture the bar is a single Start Capture capsule: a status line
+            // reading "ready" and a toggle for a run that hasn't begun are both answers to
+            // questions nobody has asked yet. Start() reveals them.
+            Visible = false,
             TextAlign = SD.ContentAlignment.MiddleLeft,
             Anchor = WF.AnchorStyles.None,
             AccessibleName = "Scrolling capture status",
@@ -258,11 +361,12 @@ public sealed class ScrollControlsBar : WF.Form
         cancel.Click += (_, _) => PerformAction(ScrollChromeAction.Cancel);
 
         _auto = MakeButton("Auto-Scroll", "ScrollCaptureAuto", "Toggle automatic scrolling",
-            "Start or pause automatic scrolling. Keyboard shortcut: Alt+A.",
+            "Start or pause automatic scrolling. Auto-scroll runs only while the pointer is over the region. Keyboard shortcut: Alt+A.",
             ThemePalette.SurfaceAlt, ThemePalette.TextPrimary);
+        _auto.Visible = false; // revealed with the status line when capture starts
         _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
 
-        _start = MakeButton("Start Capture", "ScrollCaptureStart", "Start scrolling capture",
+        _start = MakeButton("Start capture", "ScrollCaptureStart", "Start scrolling capture",
             "Begin capturing without moving focus from the captured app. Keyboard shortcut: Alt+S.",
             ThemePalette.Accent, SD.Color.White);
         _start.Click += (_, _) => PerformAction(ScrollChromeAction.Start);
@@ -300,7 +404,11 @@ public sealed class ScrollControlsBar : WF.Form
         };
         // Re-round AND re-center when the bar resizes (Start swaps to Done), so it never
         // clips the content or drifts off-center.
-        SizeChanged += (_, _) => { ApplyRoundedRegion(Width, Height, S(12)); PositionNear(_region); };
+        SizeChanged += (_, _) =>
+        {
+            ApplyRoundedRegion(Width, Height, S(12));
+            if (!_reveal.IsActive) PositionNear(_region); // the glide owns the position while it runs
+        };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -319,6 +427,28 @@ public sealed class ScrollControlsBar : WF.Form
     {
         base.OnHandleCreated(e);
         CaptureExclusion.ApplyLayeredOpaque(Handle);
+        CaptureExclusion.SetLayeredAlpha(Handle, 0); // the fade in OnShown brings it up
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _fade = ScrollChromeFade.In(SetChromeAlpha);
+    }
+
+    /// <summary>Fades the bar out and completes once it is gone; the caller then closes.</summary>
+    public Task FadeOutAsync()
+    {
+        if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
+        _fade?.Dispose();
+        return ScrollChromeFade.Out(SetChromeAlpha, _alpha, out _fade);
+    }
+
+    private void SetChromeAlpha(byte alpha)
+    {
+        _alpha = alpha; // what the exit fades down from when it starts inside the entrance
+        if (IsDisposed || !IsHandleCreated) return;
+        CaptureExclusion.SetLayeredAlpha(Handle, alpha);
     }
 
     private void Start()
@@ -327,7 +457,49 @@ public sealed class ScrollControlsBar : WF.Form
         _started = true;
         _start.Visible = false;
         _done.Visible = true;
+        RevealCaptureControls();
         StartRequested?.Invoke();
+    }
+
+    /// <summary>
+    /// Grows the capsule into the full capture bar. The controls appear at their final size
+    /// and the window glides from the capsule's rect to the bar's, re-centred on the region,
+    /// so the bar reads as expanding rather than being replaced.
+    /// </summary>
+    private void RevealCaptureControls()
+    {
+        if (IsDisposed) return;
+        if (!IsHandleCreated)
+        {
+            _status.Visible = true;
+            _auto.Visible = true;
+            return;
+        }
+
+        SD.Rectangle from = Bounds;
+        AutoSize = false; // the glide sets Size itself; AutoSize would snap it back
+        _status.Visible = true;
+        _auto.Visible = true;
+        PerformLayout();
+        SD.Size grown = PreferredSize;
+        SD.Rectangle to = new(from.X + ((from.Width - grown.Width) / 2), from.Y, grown.Width, grown.Height);
+
+        _revealTween?.Dispose();
+        _reveal.Retarget(from, to);
+        _revealTween = Motion.Run(Motion.SwapMs, Motion.EaseOutCubic,
+            p =>
+            {
+                if (IsDisposed) return;
+                _reveal.Update((float)p);
+                Bounds = _reveal.Current;
+            },
+            () =>
+            {
+                _reveal.Stop();
+                if (IsDisposed) return;
+                AutoSize = true;
+                PositionNear(_region);
+            });
     }
 
     private void ToggleAuto()
@@ -374,14 +546,15 @@ public sealed class ScrollControlsBar : WF.Form
         Announce(text);
     }
 
-    /// <summary>Shows a persistent amber hint that overrides the live status text until the
-    /// service clears it (the next <see cref="SetStatus"/> repaints normal text once cleared).</summary>
+    /// <summary>Shows a persistent hint that overrides the live status text until the service
+    /// clears it (the next <see cref="SetStatus"/> repaints normal text once cleared). Amber
+    /// for the nudges, body text for the pointer gate -- see ScrollHintText.ColorFor.</summary>
     public void SetHint(ScrollHint hint)
     {
         if (IsDisposed) return;
         _hint = hint;
         if (hint == ScrollHint.None) return;
-        _status.ForeColor = WarnColor;
+        _status.ForeColor = ScrollHintText.ColorFor(hint);
         _status.Text = ScrollHintText.For(hint) ?? _status.Text;
         Announce(_status.Text);
     }
@@ -434,6 +607,34 @@ public sealed class ScrollControlsBar : WF.Form
         {
             // UI Automation is optional; visible status remains the fallback.
         }
+    }
+
+    protected override void OnFormClosed(WF.FormClosedEventArgs e)
+    {
+        _revealTween?.Dispose();
+        _revealTween = null;
+        _fade?.Dispose();
+        _fade = null;
+        _reveal.Stop();
+        base.OnFormClosed(e);
+    }
+
+    /// <summary>
+    /// A form disposed without being closed never raises FormClosed, and an in-flight fade
+    /// holds Motion's process-wide high-resolution clock for the rest of the process. Both
+    /// teardown paths have to release it.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _revealTween?.Dispose();
+            _revealTween = null;
+            _fade?.Dispose();
+            _fade = null;
+            _reveal.Stop();
+        }
+        base.Dispose(disposing);
     }
 
     private void PositionNear(SD.Rectangle region)
@@ -490,8 +691,18 @@ internal static class ScrollHintText
     {
         ScrollHint.SlowDown => "⚠ Please slow down — scroll back up a little",
         ScrollHint.AlreadyCaptured => "Already captured — scroll down to continue",
+        ScrollHint.MoveCursorHere => "Move the pointer over the region to keep scrolling",
         _ => null,
     };
+
+    /// <summary>
+    /// Amber is for the two nudges that mean something went wrong. MoveCursorHere is
+    /// Auto-Scroll's ordinary paused state -- and the state the user is in the instant they
+    /// press the button, since the controls bar sits outside the region -- so a warning
+    /// colour there fires during normal use and stops meaning "warning".
+    /// </summary>
+    public static SD.Color ColorFor(ScrollHint hint) =>
+        hint == ScrollHint.MoveCursorHere ? ThemePalette.TextSecondary : ThemePalette.Warn;
 }
 
 /// <summary>
@@ -504,9 +715,8 @@ public sealed class ScrollPreviewPanel : WF.Form
     private readonly WF.PictureBox _pic;
     private readonly WF.Label _caption;
     private bool _hintShowing;
-
-    // Amber warning — matches the controls bar's nudge color.
-    private static readonly SD.Color WarnColor = ThemePalette.Warn;
+    private IDisposable? _fade;
+    private byte _alpha;
 
     // Same reason as ScrollControlsBar: AutoScaleMode.Dpi never fires on the monitor a
     // window is born on, so the panel laid out at 96-dpi metrics while its point-sized
@@ -574,6 +784,28 @@ public sealed class ScrollPreviewPanel : WF.Form
     {
         base.OnHandleCreated(e);
         CaptureExclusion.ApplyLayeredOpaque(Handle);
+        CaptureExclusion.SetLayeredAlpha(Handle, 0); // the fade in OnShown brings it up
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _fade = ScrollChromeFade.In(SetChromeAlpha);
+    }
+
+    /// <summary>Fades the preview out and completes once it is gone; the caller then closes.</summary>
+    public Task FadeOutAsync()
+    {
+        if (IsDisposed || !IsHandleCreated) return Task.CompletedTask;
+        _fade?.Dispose();
+        return ScrollChromeFade.Out(SetChromeAlpha, _alpha, out _fade);
+    }
+
+    private void SetChromeAlpha(byte alpha)
+    {
+        _alpha = alpha; // what the exit fades down from when it starts inside the entrance
+        if (IsDisposed || !IsHandleCreated) return;
+        CaptureExclusion.SetLayeredAlpha(Handle, alpha);
     }
 
     /// <summary>Takes ownership of <paramref name="image"/> (disposes the previous one).</summary>
@@ -595,8 +827,8 @@ public sealed class ScrollPreviewPanel : WF.Form
         _caption.Text = text;
     }
 
-    /// <summary>Amber warning shown under the preview, mirroring the controls bar — the
-    /// user is usually watching this panel while scrolling.</summary>
+    /// <summary>The hint shown under the preview, mirroring the controls bar — the user is
+    /// usually watching this panel while scrolling.</summary>
     public void SetHint(ScrollHint hint)
     {
         if (IsDisposed) return;
@@ -606,15 +838,32 @@ public sealed class ScrollPreviewPanel : WF.Form
             _caption.ForeColor = ThemePalette.TextSecondary;
             return;
         }
-        _caption.ForeColor = WarnColor;
+        _caption.ForeColor = ScrollHintText.ColorFor(hint);
         _caption.Text = ScrollHintText.For(hint) ?? _caption.Text;
     }
 
     protected override void OnFormClosed(WF.FormClosedEventArgs e)
     {
+        _fade?.Dispose();
+        _fade = null;
         _pic.Image?.Dispose();
         _pic.Image = null;
         base.OnFormClosed(e);
+    }
+
+    /// <summary>
+    /// A form disposed without being closed never raises FormClosed, and an in-flight fade
+    /// holds Motion's process-wide high-resolution clock for the rest of the process. Both
+    /// teardown paths have to release it.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _fade?.Dispose();
+            _fade = null;
+        }
+        base.Dispose(disposing);
     }
 
     private void PositionBottomRight(SD.Rectangle region)

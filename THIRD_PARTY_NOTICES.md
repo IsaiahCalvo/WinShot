@@ -90,15 +90,45 @@ Survey is Isaiah's own repository — the same author as WinShot — so the port
 carry no third-party obligation. Listed here because "ported from" in a shipping
 source header should never be a dead end for whoever audits this next.
 
-### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT — **PENDING, not yet used**
+### Microsoft PowerToys — https://github.com/microsoft/PowerToys — MIT
 
-`docs/research/2026-09-02-cleanshot-video-sweep.md` plans a port of PowerToys'
-`MeasureToolCore` edge detection into a future `src/WinShot/Capture/EdgeSnap.cs`.
-Nothing is ported yet. **When that port lands**, MIT requires the copyright notice
-and the full permission notice to travel with all copies: the verbatim MIT licence
-text plus "Copyright (c) Microsoft Corporation" must be added to this file, must
-ship with the binary, and an attribution header must sit in `EdgeSnap.cs` itself.
-Until then this entry is a reminder, not a notice.
+`src/WinShot/Capture/EdgeSnap.cs` **is** a port: the four-ray edge walk from
+`src/modules/MeasureTool/MeasureToolCore/EdgeDetection.cpp` (`FindEdge`,
+`DetectEdgesInternal`) and the two pixel-distance metrics from
+`MeasureToolCore/BGRATextureView.h` (`PixelsClose`), rewritten in C# without the
+SSE2/NEON intrinsics — four bytes at a time, where the memory access dominates
+anyway. The structure, the clamp to `[1, dim-2]`, the compare-against-the-start-pixel
+rule, the last-similar return value and the byte-masked summed-L1 score are all
+theirs. One line deviates on purpose and says so in place: PowerToys masks the
+summed distance to a byte, so a distance past 255 wraps and two very different
+colours read as identical; `EdgeSnap` clamps instead. Below 256 the two are
+identical, so the tuned default of 30 is unaffected.
+
+`EdgeSnap.cs` carries the attribution header MIT requires in the source file
+itself; the permission notice it points at is this one:
+
+> Copyright (c) Microsoft Corporation.
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of
+> this software and associated documentation files (the "Software"), to deal in
+> the Software without restriction, including without limitation the rights to
+> use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+> the Software, and to permit persons to whom the Software is furnished to do so,
+> subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+> FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+> COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+> IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+> CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Nothing else in WinShot comes from PowerToys. The px-to-dip conversion the
+measurement pill shows is `px * 96 / dpi`, which is the Windows definition of a
+device-independent pixel, not a borrowed expression.
 
 ## Shipped packages
 
@@ -168,22 +198,19 @@ should be reproduced verbatim with the distribution.
 ## Icon assets
 
 Sixteen files sit under `src/WinShot/Assets/` and all sixteen ship inside the binary:
-fifteen SVGs as `EmbeddedResource`, plus `winshot.ico` as the `ApplicationIcon`.
+fifteen SVGs as `EmbeddedResource`, plus `winshot.ico` — which is both the
+`ApplicationIcon` and an `EmbeddedResource`, because the tray icon and the About pane
+load the same file rather than drawing a second mark.
 
-Fifteen of them — `winshot.ico` and the fourteen `quick-access-*.svg` — are WinShot's
-own, drawn for this app and carrying no upstream marker. The fourteen SVGs share a
-viewBox of `0 0 24 24` and paint with `currentColor`. Their stroke weights do not yet
-agree: six are 1.85, seven are 2, and `quick-access-pin.svg` is a solid filled path
-with no stroke at all. Normalising them to 1.85 belongs to T7, which also replaces the
-pin glyph.
+All sixteen are WinShot's own, drawn for this app and carrying no upstream marker.
+`winshot.ico` is generated from `tools\make-icon.ps1`. The fifteen SVGs share a
+viewBox of `0 0 24 24` and paint with `currentColor`; fourteen are stroked at 1.85,
+and `quick-access-pin-filled.svg` is a solid path with no stroke — deliberately, as
+the filled half of the pin's outline/filled pair.
 
-One is not. `download-window-svgrepo-com.svg` came from **SVG Repo**
-(https://www.svgrepo.com) — its own header comment says so, and unlike the others it
-is 800×800 with a hard-coded `#000000` fill. SVG Repo licences per icon, anywhere
-from CC0 to CC-BY with attribution required, so this file's terms are **unverified**.
-Nothing in the code references it; only `WinShot.csproj` still embeds it. T7 deletes
-it, which resolves this entry — if it is ever kept instead, its individual SVG Repo
-licence has to be looked up and recorded here.
+`download-window-svgrepo-com.svg`, which came from **SVG Repo**
+(https://www.svgrepo.com) under unverified per-icon terms and had no consumers in the
+code, has been deleted. No third-party icon art ships with WinShot.
 
 ## Fonts
 
@@ -202,11 +229,10 @@ The browser extension has its own notices, covering different code:
   reserved" — nobody may copy, modify or redistribute it. That is a legitimate
   choice for a personal, closed app, but right now it is an accident rather than a
   decision. Isaiah's call.
-- **These notices must ship, not just live here.** MIT and Apache-2.0 obligations
-  attach to the distributed binary, so this file (plus the Apache-2.0 text and
-  Skia's `THIRD-PARTY-NOTICES.txt`) needs to be carried by the installer and
-  reachable from the About pane. Not wired yet. Tracked in the master plan under
-  T7's About-pane row so it does not go with this branch.
+- ~~**These notices must ship, not just live here.**~~ Done: this file, the
+  Apache-2.0 text and Skia's `THIRD-PARTY-NOTICES.txt` are copied into the build
+  output (see `WinShot.csproj`), so the installer carries them, and the About pane
+  links to them.
 - **This file is written for whoever maintains WinShot, not for its users.** It
   names a first name, internal track IDs, and unfinished work. Whoever wires the
   About pane should render the user-facing part — "Studied, not copied", "Shipped

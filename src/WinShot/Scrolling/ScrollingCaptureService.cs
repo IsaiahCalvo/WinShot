@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 
@@ -14,6 +14,24 @@ public enum ScrollHint
     /// <summary>The live frame sits entirely over already-captured content (user scrolled
     /// back up). Nothing is appended until they scroll past the capture's end again.</summary>
     AlreadyCaptured,
+
+    /// <summary>Auto-Scroll is on but the pointer has left the region, so nothing is being
+    /// injected. Moving the pointer back over the region resumes immediately.</summary>
+    MoveCursorHere,
+}
+
+/// <summary>Whether Auto-Scroll may inject a wheel step right now. Auto-Scroll drives the
+/// page under the pointer, so it only runs while the pointer is over the captured region:
+/// parking the pointer elsewhere is how the user pauses, and it is what makes the wheel
+/// reach the right window without the loop moving anyone's cursor.</summary>
+internal static class ScrollAutoScrollGate
+{
+    /// <param name="cursorRouted">Whether the input method in use routes by pointer position.
+    /// Only the injected wheel does; a wheel message and a page key are posted to a window
+    /// handle and work with the pointer anywhere, so gating those would stall a run -- and
+    /// tell the user to move a pointer that has nothing to do with it -- for no reason.</param>
+    public static bool MayInject(bool cursorRouted, SD.Rectangle region, SD.Point cursor) =>
+        !cursorRouted || region.Contains(cursor);
 }
 
 /// <summary>Hard limits that keep an in-memory scroll capture within a predictable budget.</summary>
@@ -84,7 +102,9 @@ public static class ScrollingCaptureService
     public static async Task<SD.Bitmap?> RunAsync(SD.Rectangle screenRegion,
         ScrollDirection? presetDirection, Func<bool> autoScroll, Action<string> status,
         Action<ScrollHint> hint, CancellationToken ct, Action<SD.Bitmap>? preview = null,
-        Func<SD.Rectangle, SD.Bitmap>? frameSource = null, bool paneScoped = false)
+        Func<SD.Rectangle, SD.Bitmap>? frameSource = null, bool paneScoped = false,
+        Func<SD.Point>? cursorSource = null, Action<int, bool>? scrollInput = null,
+        bool reverse = false)
     {
         if (screenRegion.Width < 1 || screenRegion.Height < 1)
             return null;
@@ -98,7 +118,7 @@ public static class ScrollingCaptureService
         {
             try
             {
-                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped);
+                var loop = new Loop(screenRegion, presetDirection, autoScroll, status, hint, preview, ct, frameSource, paneScoped, cursorSource, scrollInput, reverse);
                 return loop.Run();
             }
             catch (Exception ex)
@@ -209,13 +229,37 @@ public static class ScrollingCaptureService
         private int _noEffectStreak;
         private int _healSteps;       // auto-recovery scrolls while Lost/Reviewing
         private int _lastSentNotches; // notches of the most recent injected step (dead-reckoning)
+        /// <summary>Auto-Scroll axis discovery. There is one Auto-Scroll button, so when no
+        /// axis was preset the loop has to find one: it drives the vertical axis first and,
+        /// if the whole input ladder moves nothing, flips to horizontal and runs the ladder
+        /// again before declaring the end. Once a frame actually matches, _direction locks
+        /// and neither field is consulted again.</summary>
+        private bool _autoAxisHorizontal;
+        private bool _autoAxisFlipped;
         private ulong _lastProbe;     // sparse hash of the last manual-mode frame (pause fast path)
 
         private readonly Func<SD.Rectangle, SD.Bitmap> _grab;
+        private readonly Func<SD.Point> _cursor;
+        /// <summary>Test seam: receives (delta, horizontal) instead of real wheel input.</summary>
+        private readonly Action<int, bool>? _scrollInput;
+        /// <summary>
+        /// Upward capture: the user scrolls up from where they are and the newest content
+        /// arrives above what is already captured. Rather than teaching the stitch buffer,
+        /// the canvas profile, the dead reckoning, the retract and the sticky-band re-attach
+        /// to run backwards, every frame is flipped on the way in and the finished canvas is
+        /// flipped once on the way out. In flipped space an upward scroll IS a downward one,
+        /// so the whole engine -- matcher, seam healer, footer detector -- runs unmodified
+        /// and stays covered by the suites that already exist. A sticky header lands at the
+        /// bottom of a flipped frame, gets excluded from every seam as a "footer", and the
+        /// final flip puts it back at the top where it belongs.
+        /// </summary>
+        private readonly bool _reverse;
 
         public Loop(SD.Rectangle region, ScrollDirection? presetDirection, Func<bool> autoScroll,
             Action<string> status, Action<ScrollHint> hint, Action<SD.Bitmap>? preview,
-            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource, bool paneScoped = false)
+            CancellationToken ct, Func<SD.Rectangle, SD.Bitmap>? frameSource, bool paneScoped = false,
+            Func<SD.Point>? cursorSource = null, Action<int, bool>? scrollInput = null,
+            bool reverse = false)
         {
             _region = region;
             _paneScoped = paneScoped;
@@ -226,6 +270,9 @@ public static class ScrollingCaptureService
             _preview = preview;
             _ct = ct;
             _grab = frameSource ?? CaptureService.CaptureScreenRegionWithoutLayeredWindows;
+            _cursor = cursorSource ?? CursorPoint;
+            _scrollInput = scrollInput;
+            _reverse = reverse;
             _verticalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Width);
             _horizontalLimit = ScrollingCaptureLimits.MaxLengthForCrossAxis(region.Height);
             _stitch = new StitchBuffer(region.Width, _verticalLimit);
@@ -315,7 +362,7 @@ public static class ScrollingCaptureService
                 _lastFrame?.Dispose();
                 _firstFrameKeep?.Dispose();
                 _stitch.Dispose();
-                return _horizontal.Take();
+                return Unflip(_horizontal.Take());
             }
             _horizontal.Dispose();
             var vertical = _stitch.Take();
@@ -323,12 +370,28 @@ public static class ScrollingCaptureService
                 vertical = DeduplicateStaticRails(vertical);
             _lastFrame?.Dispose();
             _firstFrameKeep?.Dispose();
-            return vertical;
+            return Unflip(vertical);
+        }
+
+        /// <summary>Puts a reverse capture back the right way up, once, at the end.</summary>
+        private SD.Bitmap? Unflip(SD.Bitmap? image)
+        {
+            if (_reverse)
+                image?.RotateFlip(SD.RotateFlipType.RotateNoneFlipY);
+            return image;
         }
 
         // ------------------------------------------------------------ frames
 
         private SD.Bitmap CaptureFrame()
+        {
+            SD.Bitmap frame = GrabSettledFrame();
+            if (_reverse)
+                frame.RotateFlip(SD.RotateFlipType.RotateNoneFlipY);
+            return frame;
+        }
+
+        private SD.Bitmap GrabSettledFrame()
         {
             if (!_scrolledBeforeFrame)
                 return _grab(_region);
@@ -526,6 +589,15 @@ public static class ScrollingCaptureService
             // that won't align vertically but aligns horizontally locks horizontal mode.
             if (_direction is null && _stitchedFrames <= 1 && _lastFrame is not null)
             {
+                // The axis we just injected on gets first refusal. Once the ladder has
+                // flipped to the horizontal axis, the frame coming back moved sideways —
+                // but on repetitive content its rows can still score a spurious vertical
+                // offset, and locking Vertical there strands the whole run: the axis
+                // reverts to the one nothing responds to, HorizontalAxis goes false again,
+                // and the auto-heal budget is spent injecting notches the page ignores.
+                if (_autoAxisHorizontal && LockHorizontalIfMatched(frame, out bool locked))
+                    return locked;
+
                 int dv = matchedOffset;
                 if (dv > 0)
                 {
@@ -537,16 +609,8 @@ public static class ScrollingCaptureService
                     FinishVerticalFrame(frame, sig, matchSig);
                     return _stitch.Height < _verticalLimit || EndAtCap();
                 }
-                FixedBands horizontalBands = FixedRegionDetector.DetectHorizontal(_lastFrame, frame);
-                int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame, frame,
-                    horizontalBands.Leading, horizontalBands.Trailing);
-                if (dh > 0)
-                {
-                    _direction = ScrollDirection.Horizontal;
-                    AdoptFirstHorizontalFrame(_lastFrame);
-                    _stitch.Dispose();
-                    return ProcessHorizontal(frame);
-                }
+                if (LockHorizontalIfMatched(frame, out bool horizontal))
+                    return horizontal;
                 FinishVerticalFrame(frame, sig, matchSig);
                 return true; // keep watching; direction still unknown
             }
@@ -597,6 +661,26 @@ public static class ScrollingCaptureService
             FinishVerticalFrame(frame, sig, matchSig);
             if (_stitch.Height >= _verticalLimit)
                 return EndAtCap();
+            return true;
+        }
+
+        /// <summary>
+        /// Does this frame align horizontally against the previous one? If it does, the run
+        /// commits to <see cref="ScrollDirection.Horizontal"/> and <paramref name="keepGoing"/>
+        /// carries the horizontal path's own answer. Callers must own <c>_lastFrame</c>.
+        /// </summary>
+        private bool LockHorizontalIfMatched(SD.Bitmap frame, out bool keepGoing)
+        {
+            keepGoing = true;
+            FixedBands bands = FixedRegionDetector.DetectHorizontal(_lastFrame!, frame);
+            int dh = ImageStitcher.FindScrollOffsetHorizontal(_lastFrame!, frame,
+                bands.Leading, bands.Trailing);
+            if (dh <= 0)
+                return false;
+            _direction = ScrollDirection.Horizontal;
+            AdoptFirstHorizontalFrame(_lastFrame!);
+            _stitch.Dispose();
+            keepGoing = ProcessHorizontal(frame);
             return true;
         }
 
@@ -971,11 +1055,30 @@ public static class ScrollingCaptureService
             ScrollMethod? next = _method switch
             {
                 ScrollMethod.WheelInput => ScrollMethod.WheelMessage,
-                ScrollMethod.WheelMessage when _direction != ScrollDirection.Horizontal => ScrollMethod.PageKey,
+                ScrollMethod.WheelMessage when !HorizontalAxis => ScrollMethod.PageKey,
                 _ => null,
             };
             if (next is null)
+            {
+                // Every input method moved nothing and no axis was ever locked, so the
+                // region may simply scroll the other way. Auto-Scroll is one button, so
+                // discovering that is the loop's job: flip the axis and run the ladder
+                // again. A locked direction never gets here.
+                if (_direction is null && !_autoAxisFlipped)
+                {
+                    _autoAxisFlipped = true;
+                    _autoAxisHorizontal = !_autoAxisHorizontal;
+                    Log.Info($"Scroll: no vertical movement — probing the {(_autoAxisHorizontal ? "horizontal" : "vertical")} axis");
+                    _method = ScrollMethod.WheelInput;
+                    _methodProducedMovement = false;
+                    _noEffectStreak = 0;
+                    _identicalStreak = 0;
+                    _pxPerNotch = 0;
+                    _notches = 1;
+                    return true;
+                }
                 return false;
+            }
             Log.Info($"Scroll: input method {_method} had no effect — switching to {next}");
             _method = next.Value;
             _methodProducedMovement = false;
@@ -1358,9 +1461,21 @@ public static class ScrollingCaptureService
             bool hasFrame = _direction == ScrollDirection.Horizontal
                 ? _horizontal.Width > 0
                 : _prevSig is not null;
+
             bool wantAuto = _autoScroll() && hasFrame;
-            if (wantAuto && _direction != ScrollDirection.Horizontal)
-                _direction ??= ScrollDirection.Vertical; // Auto-Scroll defaults to vertical
+
+            if (wantAuto && !ScrollAutoScrollGate.MayInject(
+                    _method == ScrollMethod.WheelInput, _region, _cursor()))
+            {
+                // Pointer parked outside the region: hold the wheel and say so. Auto-Scroll
+                // is not cancelled — moving back over the region resumes on the next tick.
+                SetHint(ScrollHint.MoveCursorHere);
+                _scrolledBeforeFrame = false;
+                return Sleep(ManualPollMs);
+            }
+
+            if (_lastHint == ScrollHint.MoveCursorHere)
+                SetHint(ScrollHint.None);
 
             if (wantAuto)
             {
@@ -1401,27 +1516,28 @@ public static class ScrollingCaptureService
         /// <paramref name="singleNotch"/> forces the gentlest step.</summary>
         private void SendScrollStep(bool up, bool singleNotch = false)
         {
-            bool horizontal = _direction == ScrollDirection.Horizontal;
+            bool horizontal = HorizontalAxis;
             int notches = singleNotch ? 1 : _notches;
             _lastSentNotches = up ? 0 : notches; // dead-reckoning only advances downward
             int sign = horizontal ? 1 : -1;
             if (up) sign = -sign;
+            if (_reverse) sign = -sign; // the page has to move the other way to reveal more
             int delta = WheelDelta * notches * sign;
+            if (_scrollInput is not null)
+            {
+                _scrollInput(delta, horizontal);
+                return;
+            }
             int centerX = _region.X + _region.Width / 2, centerY = _region.Y + _region.Height / 2;
             switch (_method)
             {
                 case ScrollMethod.WheelInput:
-                    // Cursor DIP: wheel routing follows the cursor, but a cursor parked in the
-                    // region triggers hover effects that end up in the capture. So teleport to
-                    // the region center just for the wheel tick and return immediately — the
-                    // page gets a mouseleave, hover styles clear, and the frame is only grabbed
-                    // after the ~350ms settle. If the user moved the mouse in the same instant,
-                    // leave their cursor alone rather than fight them.
-                    GetCursorPos(out var orig);
-                    SetCursorPos(centerX, centerY);
+                    // Wheel routing follows the cursor, and Pace() only gets here while the
+                    // cursor is already inside the region — so the tick lands on the right
+                    // window without moving anyone's pointer. (This used to teleport the
+                    // cursor to the region centre and back for every step, which made the
+                    // pointer twitch for the whole run and left no way to pause.)
                     SendWheelInput(delta, horizontal);
-                    if (GetCursorPos(out var now) && now.X == centerX && now.Y == centerY)
-                        SetCursorPos(orig.X, orig.Y);
                     break;
 
                 case ScrollMethod.WheelMessage:
@@ -1461,6 +1577,14 @@ public static class ScrollingCaptureService
             }
         }
 
+        /// <summary>The axis input is being sent along right now: the locked direction, or
+        /// the axis auto-discovery is currently probing while direction is still unknown.</summary>
+        private bool HorizontalAxis => _direction == ScrollDirection.Horizontal
+            || (_direction is null && _autoAxisHorizontal);
+
+        private static SD.Point CursorPoint()
+            => GetCursorPos(out var p) ? new SD.Point(p.X, p.Y) : SD.Point.Empty;
+
         private bool Sleep(int ms)
         {
             try
@@ -1494,6 +1618,7 @@ public static class ScrollingCaptureService
                 SD.Bitmap? snap = _direction == ScrollDirection.Horizontal
                     ? _horizontalStrip?.SnapshotWhole()
                     : _strip?.SnapshotWhole();
+                snap = Unflip(snap); // the strip is stitched in flipped space on a reverse run
                 if (snap is not null)
                     _preview(snap); // callback takes ownership
             }
@@ -1989,9 +2114,6 @@ public static class ScrollingCaptureService
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr hWnd, uint msg, nuint wParam, nint lParam);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
 
     private const uint GA_ROOT = 2;
 

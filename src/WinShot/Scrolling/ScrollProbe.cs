@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -96,8 +96,14 @@ public static class ScrollProbe
         }
     }
 
-    /// <summary>Mirrors the capture loop's wheel routing: teleport the cursor to the region
-    /// center for the tick (wheel follows the cursor), then put it back.</summary>
+    /// <summary>
+    /// Puts the cursor over the region for the single probe notch and then back. The capture
+    /// loop no longer does this -- it waits for the pointer instead -- but the probe runs
+    /// before there is any chrome to say so, twice, and reverses its own notch, so asking the
+    /// user to park the pointer for a measurement they were never told about would be worse
+    /// than borrowing it for one tick. The restore is skipped if anything else moved the
+    /// cursor in the meantime.
+    /// </summary>
     private static Action<int> WheelAtRegionCenter(SD.Rectangle region) => delta =>
     {
         int cx = region.X + region.Width / 2, cy = region.Y + region.Height / 2;

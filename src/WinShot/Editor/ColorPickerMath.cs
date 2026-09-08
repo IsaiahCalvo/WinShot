@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace WinShot.Editor;
@@ -75,37 +75,4 @@ internal static class ColorPickerMath
     public static string ToHex(Color c) => c.A == 255
         ? $"#{c.R:X2}{c.G:X2}{c.B:X2}"
         : $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
-}
-
-/// <summary>
-/// The picker's "My Colors" row. Session-wide and shared by every editor window, capped so
-/// the row stays one line.
-///
-/// ponytail: in memory for now. Persisting it belongs with the other saved-colour storage
-/// (the capture-side picker keeps its own), and putting a second store here first would
-/// guarantee the two disagree.
-/// </summary>
-internal static class SavedColors
-{
-    public const int Capacity = 8;
-
-    private static readonly List<Color> Colors = new();
-
-    public static IReadOnlyList<Color> All => Colors;
-
-    /// <summary>
-    /// Adds a colour, most recent first. Re-saving one that is already there moves it to
-    /// the front rather than duplicating it.
-    /// </summary>
-    public static void Add(Color color)
-    {
-        Colors.RemoveAll(c => c == color);
-        Colors.Insert(0, color);
-        while (Colors.Count > Capacity)
-            Colors.RemoveAt(Colors.Count - 1);
-    }
-
-    public static void Remove(Color color) => Colors.RemoveAll(c => c == color);
-
-    internal static void ClearForTest() => Colors.Clear();
 }

@@ -40,6 +40,24 @@ public static class ThemePalette
     public static readonly SD.Color AccentPressed = SD.Color.FromArgb(0x00, 0x60, 0xDF);
 
     /// <summary>
+    /// The accent as a fill that carries WHITE TEXT — Theme.xaml's AccentDeepColor, which is
+    /// why it exists there. White on <see cref="Accent"/> is 3.65:1, under the 4.5:1 text
+    /// floor; on this it is 4.6:1. Same hue, so it still reads as the one accent — use
+    /// <see cref="Accent"/> everywhere the accent is a graphic rather than a text ground.
+    /// </summary>
+    public static readonly SD.Color AccentDeep = SD.Color.FromArgb(0x0A, 0x73, 0xE0);
+
+    /// <summary>The destructive red as a fill that carries white text; Theme.xaml's
+    /// RedDeepColor. White on <see cref="Red"/> is 3.4:1, on this 5.0:1.</summary>
+    public static readonly SD.Color RedDeep = SD.Color.FromArgb(0xD4, 0x2B, 0x21);
+
+    /// <summary>The accent's gradient partner: the second stop of the editor's "Azure"
+    /// background preset. Named here because the headless capture-path backdrop needs the
+    /// same colour and cannot reach a WPF Brush for it — two hex literals for one colour
+    /// is how a palette drifts.</summary>
+    public static readonly SD.Color AccentGradientEnd = SD.Color.FromArgb(0x6D, 0xD5, 0xED);
+
+    /// <summary>
     /// The keyboard focus RING on a dark field. Never a fill: nothing white may sit on top
     /// of it — use <see cref="AccentHovered"/> for a hovered accent surface. This is
     /// Theme.xaml's InfoColor, which is what the WPF half already strokes its focus rings
@@ -53,6 +71,15 @@ public static class ThemePalette
     // Red doubles as the recording dot and destructive actions; Warn as paused/warning.
     public static readonly SD.Color Red = SD.Color.FromArgb(0xFF, 0x45, 0x3A);
     public static readonly SD.Color Warn = SD.Color.FromArgb(0xFF, 0x9F, 0x0A);
+
+    /// <summary>
+    /// Measurement crimson. Colour is the grammar of the measure overlay and it must not
+    /// blur: crimson is a distance the app computed, Accent blue is a guide the user placed.
+    /// Red is the recording dot and destructive actions, and is orange-leaning besides, so
+    /// measurement gets its own value rather than borrowing one. WinForms-only, and so the
+    /// one colour here with no Theme.xaml twin: no WPF surface shows a measurement.
+    /// </summary>
+    public static readonly SD.Color Measure = SD.Color.FromArgb(0xE0, 0x24, 0x4A);
 
     // Text.
     public static readonly SD.Color TextPrimary = SD.Color.FromArgb(0xF2, 0xF2, 0xF4);
@@ -97,6 +124,13 @@ public static class ThemePalette
     public const float GlyphTextPt = 13f;       // 17.3 DIP
 
     /// <summary>
+    /// A glyph inside a pill or a badge — Theme.xaml's GlyphBadge step. The selector's size
+    /// pill cross-fades to a camera at this size; sized off <see cref="TextBodyPt"/> instead,
+    /// the camera read as a text character rather than as the button the pill has become.
+    /// </summary>
+    public const float GlyphBadgePt = 10.5f;    // 14 DIP
+
+    /// <summary>
     /// Off the scale deliberately: the quick-actions card is pinned, and its menu
     /// was measured to 202x357 by hand at this size. TextCaptionPt reflows it.
     /// </summary>
@@ -108,6 +142,16 @@ public static class ThemePalette
     /// QuickAccessOverlayInteractionTests pins it.
     /// </summary>
     public const float PinnedCardLabelPt = 7f;
+
+    /// <summary>
+    /// Off the scale deliberately: the recording card's duration and size sit in a 17 px
+    /// strip inside the pinned card, and anything larger crowds the two ends together on
+    /// the smallest card size — the same face the quick-access tooltip needs, so it IS that
+    /// token rather than a second constant holding the same number. Two copies of 6.5 is
+    /// exactly the drift one type scale exists to prevent: move one and the strip and the
+    /// tooltip stop matching with nothing failing.
+    /// </summary>
+    public const float MediaStripLabelPt = PinnedTooltipPt;
 
     /// <summary>
     /// Off the scale deliberately: the quick-access tooltip is a 2 mm-tall chip whose
@@ -127,6 +171,38 @@ public static class ThemePalette
 
     public static SD.Font UiFont(float sizePt, SD.FontStyle style = SD.FontStyle.Regular)
         => new("Segoe UI", sizePt, style, SD.GraphicsUnit.Point);
+
+    /// <summary>
+    /// The same two fonts in PIXELS, for owner-drawn surfaces that measure with
+    /// <c>TextRenderer</c> (GDI) and draw with <c>Graphics.DrawString</c> (GDI+). A
+    /// GraphicsUnit.Point font resolves its size against the screen DC captured when the
+    /// Font was constructed on the GDI side, and against the target Graphics' own DpiY on
+    /// the GDI+ side; under PerMonitorV2 those are two different monitors, so the pill is
+    /// measured at one display's text size and painted at another's. Pixels are unambiguous
+    /// — the caller multiplies by its own monitor's scale.
+    /// </summary>
+    public static SD.Font UiFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new("Segoe UI", Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
+    /// <inheritdoc cref="UiFontPx"/>
+    public static SD.Font IconFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new(HasFluentIcons ? "Segoe Fluent Icons" : "Segoe MDL2 Assets",
+            Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
+
+    /// <summary>A point-unit type token as physical pixels on a monitor at
+    /// <paramref name="scale"/> (72 pt to the inch, 96 px to the inch at 100%).</summary>
+    public static int PxForPt(float sizePt, double scale) =>
+        Math.Max(1, (int)Math.Round(sizePt * (96f / 72f) * (scale <= 0 ? 1d : scale)));
+
+    /// <summary>
+    /// The app's one monospaced face, for numeric readouts that must not jitter as their
+    /// digits change — the recording timer, the editors' time and frame counts. Named here
+    /// rather than typed out per surface so the choice is one decision.
+    /// </summary>
+    public const string MonoFamily = "Consolas";
+
+    public static SD.Font MonoFontPx(int sizePx, SD.FontStyle style = SD.FontStyle.Regular)
+        => new(MonoFamily, Math.Max(1, sizePx), style, SD.GraphicsUnit.Pixel);
 
     /// <summary>
     /// Composites a straight-alpha colour over an opaque one, the way GDI+ paints it.

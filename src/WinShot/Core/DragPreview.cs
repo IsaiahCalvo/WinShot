@@ -68,8 +68,7 @@ internal sealed class DragPreview : IDisposable
     /// </summary>
     public static BitmapSource CreateThumbnail(SD.Bitmap image, double dpiScale)
     {
-        double dpi = dpiScale > 0 ? dpiScale : 1.0;
-        int max = Math.Max(1, (int)Math.Round(MaxEdge * dpi));
+        int max = MaxEdgePixels(dpiScale);
         double scale = Math.Min(1.0, (double)max / Math.Max(image.Width, image.Height));
         int w = Math.Max(1, (int)Math.Round(image.Width * scale));
         int h = Math.Max(1, (int)Math.Round(image.Height * scale));
@@ -86,6 +85,37 @@ internal sealed class DragPreview : IDisposable
         var source = CaptureService.ToBitmapSource(thumb);
         source.Freeze();
         return source;
+    }
+
+    /// <summary>
+    /// The ghost's longest edge in REAL pixels for a monitor at <paramref name="dpiScale"/>.
+    /// <see cref="Show"/> divides the bitmap's pixel size by the scale to get its logical size,
+    /// so a cap in logical units alone would shrink the ghost as the scale rose. Public because
+    /// History decodes straight from disk and needs the same number to decode against.
+    /// </summary>
+    public static int MaxEdgePixels(double dpiScale) =>
+        Math.Max(1, (int)Math.Round(MaxEdge * (dpiScale > 0 ? dpiScale : 1.0)));
+
+    /// <summary>
+    /// The already-decoded twin of <see cref="CreateThumbnail"/>, for a caller that has a
+    /// <see cref="BitmapSource"/> rather than a GDI+ bitmap. It caps the LONGEST edge, not the
+    /// width: <see cref="Show"/> sizes a <c>SizeToContent</c> window from the aspect ratio, so a
+    /// width-only cap let a scrolling capture (1200x9000) drag as a 180x1350 strip down the
+    /// whole screen. Returns null for anything that is not a usable bitmap.
+    /// </summary>
+    public static BitmapSource? Fit(ImageSource? source, double dpiScale)
+    {
+        if (source is not BitmapSource bitmap || bitmap.PixelWidth <= 0 || bitmap.PixelHeight <= 0)
+            return null;
+
+        int max = MaxEdgePixels(dpiScale);
+        double scale = (double)max / Math.Max(bitmap.PixelWidth, bitmap.PixelHeight);
+        if (scale >= 1d)
+            return bitmap;
+
+        var scaled = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
+        scaled.Freeze();
+        return scaled;
     }
 
     /// <summary>Shows the preview at the cursor. <paramref name="dpiScale"/> keeps it crisp on HiDPI.</summary>

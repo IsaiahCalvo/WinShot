@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -911,6 +911,7 @@ public partial class EditorWindow : Window
         }
         SyncColorPickerInputs(CurrentTargetColor());
         RebuildSavedColorsRow();
+        BuildColorCopyMenu();
         OpenPopover(ColorPickerPopup, ColorPickerGrid);
     }
 
@@ -966,9 +967,13 @@ public partial class EditorWindow : Window
         btn.Click += OnColorPickerGridPick;
         if (saved)
         {
+            // Picking a saved colour is a vote for it: SavedColors.With moves it back to the
+            // head. The built-in palette deliberately does not vote — those sixteen cannot be
+            // lost, and running them through a ten-slot list would evict the ones that can.
+            btn.Click += (_, _) => RememberColor(c);
             btn.MouseRightButtonUp += (_, _) =>
             {
-                SavedColors.Remove(c);
+                ForgetColor(c);
                 RebuildSavedColorsRow();
             };
         }
@@ -979,23 +984,43 @@ public partial class EditorWindow : Window
     /// The "My colours" row. Empty until something is saved, so it never shows a gap — and
     /// the first save eases the section in on the sub-row recipe instead of inserting it in
     /// one frame under the pointer. Save itself is docked right, so it never moves.
+    ///
+    /// The list is <see cref="WinShot.Core.SavedColors"/> over <c>Settings.SavedColors</c> —
+    /// the same store the capture-side picker writes — so a colour saved here survives the
+    /// window that saved it. A second in-editor list lived here until that store existed and
+    /// would only ever have disagreed with it.
     /// </summary>
     private void RebuildSavedColorsRow()
     {
         SavedColorsGrid.Children.Clear();
-        foreach (Color c in SavedColors.All)
-            SavedColorsGrid.Children.Add(BuildSwatchButton(c, ColorPickerMath.ToHex(c), saved: true));
+        foreach (string hex in WinShot.Core.SavedColors.Sanitize(_settings.Current.SavedColors))
+        {
+            if (TryParseColor(hex, out Color c))
+                SavedColorsGrid.Children.Add(BuildSwatchButton(c, hex, saved: true));
+        }
 
-        Visibility show = SavedColors.All.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        Visibility show = SavedColorsGrid.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         bool appearing = show == Visibility.Visible && SavedColorsSection.Visibility != Visibility.Visible;
         SavedColorsSection.Visibility = show;
         if (appearing)
             SavedColorsSection.BeginStoryboard((Storyboard)FindResource("SubRowIn"));
     }
 
+    /// <summary>Drops one colour from the user's palette. The inverse of RememberColor, and
+    /// the only way out of the row — which is why the swatch's tooltip says so out loud.</summary>
+    private void ForgetColor(Color c)
+    {
+        string hex = WinShot.Core.ColorFormatter.Format(
+            System.Drawing.Color.FromArgb(c.R, c.G, c.B), WinShot.Core.ColorFormat.Hex);
+        List<string> next = WinShot.Core.SavedColors.Sanitize(_settings.Current.SavedColors);
+        if (next.RemoveAll(e => string.Equals(e, hex, StringComparison.OrdinalIgnoreCase)) == 0) return;
+        _settings.Current.SavedColors = next;
+        _savedColorsDirty = true;
+    }
+
     private void OnSaveColor(object sender, RoutedEventArgs e)
     {
-        SavedColors.Add(PickerColor());
+        RememberColor(PickerColor());
         RebuildSavedColorsRow();
     }
 
@@ -1168,6 +1193,86 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
+    /// The formats a colour can be copied in, and their menu labels. Bare hex and OKLCH are
+    /// here because the two places a colour ends up are a CSS file and a chat message, and
+    /// neither wants the app's own #RRGGBB every time.
+    /// </summary>
+    private static readonly (string Label, WinShot.Core.ColorFormat Format)[] CopyFormats =
+    {
+        ("HEX", WinShot.Core.ColorFormat.Hex),
+        ("HEX without #", WinShot.Core.ColorFormat.HexBare),
+        ("HEX with alpha", WinShot.Core.ColorFormat.HexArgb),
+        ("rgb()", WinShot.Core.ColorFormat.Rgb),
+        ("hsl()", WinShot.Core.ColorFormat.Hsl),
+        ("OKLCH", WinShot.Core.ColorFormat.Oklch),
+    };
+
+    /// <summary>Builds the preview swatch's "Copy as" menu once.</summary>
+    private void BuildColorCopyMenu()
+    {
+        if (ColorPickerPreviewButton.ContextMenu is not null) return;
+
+        // Placed against the swatch, not the mouse: ContextMenu defaults to MousePoint, so
+        // Enter or Space on the focused swatch dropped the format list wherever the pointer
+        // happened to be sitting -- possibly off the popup entirely.
+        // Both styles applied by hand: DarkContextMenu and DarkMenuItem are keyed, not
+        // implicit, so a menu built in code and left unstyled falls back to Aero2 -- a white
+        // popup with black text hanging off a swatch inside the dark picker.
+        var menu = new ContextMenu
+        {
+            Style = (Style)FindResource("DarkContextMenu"),
+            PlacementTarget = ColorPickerPreviewButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+        };
+        var itemStyle = (Style)FindResource("DarkMenuItem");
+        foreach ((string label, WinShot.Core.ColorFormat format) in CopyFormats)
+        {
+            var item = new MenuItem { Header = $"Copy as {label}", Tag = format, Style = itemStyle };
+            // The automation name is the visible label, so voice control can say it.
+            AutomationProperties.SetName(item, $"Copy as {label}");
+            item.Click += OnCopyColorAs;
+            menu.Items.Add(item);
+        }
+        ColorPickerPreviewButton.ContextMenu = menu;
+    }
+
+    /// <summary>Opens the format list from the swatch. It is a Button, so Tab reaches it and
+    /// Enter, Space, Shift+F10 and the Apps key all land here or on its context menu.</summary>
+    private void OnColorPickerPreviewClick(object sender, RoutedEventArgs e)
+    {
+        BuildColorCopyMenu();
+        if (ColorPickerPreviewButton.ContextMenu is ContextMenu menu)
+            menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Copies the picked colour in one notation. Awaited and confirmed: the clipboard write
+    /// retries a busy clipboard and then faults, and discarding that Task made "Copy as
+    /// OKLCH" a menu row that said nothing whether it worked or not.
+    /// </summary>
+    private async void OnCopyColorAs(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item || item.Tag is not WinShot.Core.ColorFormat format)
+            return;
+
+        Color c = _customColor;
+        string text = WinShot.Core.ColorFormatter.Format(
+            System.Drawing.Color.FromArgb(c.A, c.R, c.G, c.B), format);
+        try
+        {
+            await CaptureService.SetTextToClipboardAsync(text);
+            // Success, so the checkmark glyph -- the info glyph is what "Save failed" and
+            // "Copied" looking identical was about.
+            App.Toast("Copied", text, severity: WinShot.Core.ToastSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            WinShot.Core.Log.Error("Could not copy the color", ex);
+            App.Toast("Copy failed", WinShot.Core.FriendlyError.For(ex), severity: WinShot.Core.ToastSeverity.Error);
+        }
+    }
+
+    /// <summary>
     /// The eyedropper inside the picker: arms the sampling tool, closes the popup, and
     /// reopens it on the sampled colour — so picking a colour off the image is part of
     /// choosing one rather than a detour that loses the picker.
@@ -1208,6 +1313,33 @@ public partial class EditorWindow : Window
         _fillColor = c;
         _toolPrefs.Update(_tool, s => s.WithFillColor(c));
         if (IsLoaded) RestyleSelectedFillColor(c);
+    }
+
+    /// <summary>
+    /// Records a picked colour in the user's palette. Held in memory and written once when the
+    /// editor closes: SettingsService.Save writes the file and raises Changed (which
+    /// re-registers every global hotkey), and the eyedropper calls this on every sample.
+    /// </summary>
+    private void RememberColor(Color c)
+    {
+        var picked = System.Drawing.Color.FromArgb(c.R, c.G, c.B);
+        List<string> next = WinShot.Core.SavedColors.With(_settings.Current.SavedColors, picked);
+        if (next.SequenceEqual(WinShot.Core.SavedColors.Sanitize(_settings.Current.SavedColors), StringComparer.OrdinalIgnoreCase))
+            return;
+
+        _settings.Current.SavedColors = next;
+        _savedColorsDirty = true;
+    }
+
+    /// <summary>Writes the palette out, once, when the editor is done with it.</summary>
+    private void PersistSavedColors()
+    {
+        if (!_savedColorsDirty) return;
+        _savedColorsDirty = false;
+        // Quietly: the palette is runtime state nothing subscribes to, and a plain Save()
+        // raises Changed, which unregisters and re-registers every global hotkey.
+        try { _settings.SaveQuietly(); }
+        catch (Exception ex) { WinShot.Core.Log.Error("Could not save the color palette (non-fatal)", ex); }
     }
 
     /// <summary>Parses "#RGB", "#RRGGBB", "#AARRGGBB" or bare hex; tolerates a missing leading '#'.</summary>

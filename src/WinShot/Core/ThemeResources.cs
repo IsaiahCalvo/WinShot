@@ -59,6 +59,9 @@ public static class ThemeResources
         return null;
     }
 
+    /// <summary>Theme.xaml's loop-period key, which the zeroing pass below leaves alone.</summary>
+    internal const string ShimmerDurationKey = "MotionShimmer";
+
     /// <summary>
     /// Honours Settings &gt; Accessibility &gt; Visual effects &gt; Animation effects on the
     /// WPF side. Core/Motion.cs already jumps straight to the end state when the user has
@@ -117,7 +120,13 @@ public static class ThemeResources
                 // not dictionary keys, so nothing above walks them, and they kept animating
                 // with the setting off. A window is parsed long after OnStartup runs this, so
                 // its {StaticResource MotionQuick} picks up the zeroed value.
-                case Duration:
+                // ...except the shimmer loop period. Its surfaces gate themselves on
+                // Motion.AnimationsEnabled, read live rather than once at startup, so turning
+                // animation back on mid-session starts a RepeatBehavior="Forever" storyboard —
+                // and a zeroed Duration on a Forever storyboard is a spinning clock, not a
+                // still gradient. The two halves have to agree about when the preference is
+                // read; this is the half that can afford to leave the value alone.
+                case Duration when !ShimmerDurationKey.Equals(key):
                     theme[key] = new Duration(TimeSpan.Zero);
                     break;
             }

@@ -1,0 +1,693 @@
+﻿using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using WinShot.Core;
+using WinShot.Recording;
+using Xunit;
+using SD = System.Drawing;
+using WF = System.Windows.Forms;
+
+namespace WinShot.Tests;
+
+/// <summary>
+/// The recording control pill: cell geometry at every DPI Isaiah runs, the anchor under the
+/// recorded rectangle (including the two fallbacks), and the entrance tween's holder discipline.
+/// </summary>
+public class RecordingControlBarTests
+{
+    private sealed class Anim : IDisposable
+    {
+        private readonly Func<bool> _prev;
+        public Anim(bool on) { _prev = Motion.AnimationsEnabled; Motion.AnimationsEnabled = () => on; }
+        public void Dispose() => Motion.AnimationsEnabled = _prev;
+    }
+
+    private static void PumpUntil(Func<bool> done, int ms = 6000)
+    {
+        var clock = Stopwatch.StartNew();
+        while (!done() && clock.ElapsedMilliseconds < ms)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
+    // ---- layout ------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void Cells_ButtAgainstEachOtherAndFillTheBar(double scale)
+    {
+        var cells = RecordingControlBarLayout.Build(showTimer: true, scale);
+        SD.Size size = RecordingControlBarLayout.Size(showTimer: true, scale);
+
+        Assert.Equal(5, cells.Count);
+        int pad = RecordingMonitorDpi.Px(RecordingControlBarLayout.SidePadDip, scale);
+        Assert.Equal(pad, cells[0].Bounds.Left);
+        Assert.Equal(size.Width - pad, cells[^1].Bounds.Right);
+        for (int i = 1; i < cells.Count; i++)
+            Assert.Equal(cells[i - 1].Bounds.Right, cells[i].Bounds.Left);
+        Assert.All(cells, c => Assert.Equal(size.Height, c.Bounds.Height));
+    }
+
+    [Fact]
+    public void Cells_DropTheTimerWhenTheTimerIsOff()
+    {
+        var cells = RecordingControlBarLayout.Build(showTimer: false, scale: 1.0);
+
+        Assert.DoesNotContain(cells, c => c.Cell == RecordingControlBarCell.Timer);
+        Assert.Equal(
+            new[]
+            {
+                RecordingControlBarCell.PauseResume,
+                RecordingControlBarCell.Restart,
+                RecordingControlBarCell.Stop,
+                RecordingControlBarCell.Discard,
+            },
+            cells.Select(c => c.Cell));
+        Assert.True(
+            RecordingControlBarLayout.Size(showTimer: false, 1.0).Width <
+            RecordingControlBarLayout.Size(showTimer: true, 1.0).Width);
+    }
+
+    // ---- placement ---------------------------------------------------------------
+
+    [Fact]
+    public void Placement_CentresJustBelowTheRegion()
+    {
+        var region = new SD.Rectangle(400, 200, 600, 300);
+        var work = new SD.Rectangle(0, 0, 1920, 1080);
+        var size = new SD.Size(240, 40);
+
+        SD.Point at = RecordingControlBarPlacement.UnderRegion(region, work, size, margin: 12);
+
+        Assert.Equal(400 + ((600 - 240) / 2), at.X);
+        Assert.Equal(500 + 12, at.Y);
+    }
+
+    [Fact]
+    public void Placement_FlipsAboveTheRegionWhenThereIsNoRoomBelow()
+    {
+        var region = new SD.Rectangle(0, 300, 1920, 760);
+        var work = new SD.Rectangle(0, 0, 1920, 1080);
+        var size = new SD.Size(240, 40);
+
+        SD.Point at = RecordingControlBarPlacement.UnderRegion(region, work, size, margin: 12);
+
+        Assert.Equal(300 - 12 - 40, at.Y);
+    }
+
+    [Fact]
+    public void Placement_StaysOnScreenForAFullHeightRegionOnANegativeYMonitor()
+    {
+        // Isaiah's second monitor sits above the laptop, so its Y coordinates are negative.
+        var work = new SD.Rectangle(-1920, -1080, 1920, 1080);
+        var region = work;
+        var size = new SD.Size(240, 40);
+
+        SD.Point at = RecordingControlBarPlacement.UnderRegion(region, work, size, margin: 12);
+
+        Assert.InRange(at.X, work.Left, work.Right - size.Width);
+        Assert.InRange(at.Y, work.Top, work.Bottom - size.Height);
+    }
+
+    [Fact]
+    public void Placement_ClampsAWiderBarIntoTheWorkingArea()
+    {
+        var region = new SD.Rectangle(1800, 100, 100, 100);
+        var work = new SD.Rectangle(0, 0, 1920, 1080);
+        var size = new SD.Size(400, 40);
+
+        SD.Point at = RecordingControlBarPlacement.UnderRegion(region, work, size, margin: 12);
+
+        Assert.Equal(1920 - 400, at.X);
+    }
+
+    // ---- the window itself -------------------------------------------------------
+
+    [Fact]
+    public void Bar_EntranceFinishesAndReleasesTheMotionClock()
+    {
+        using var animation = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        PumpUntil(() => bar.Opacity > 0.9);
+        Assert.True(bar.Opacity > 0.9);
+        bar.Close();
+        bar.Dispose();
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    [Fact]
+    public void Bar_ClosingMidEntranceLeavesNoClockHolder()
+    {
+        using var animation = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        for (int i = 0; i < 6; i++)
+        {
+            var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false);
+            bar.Show();
+            WF.Application.DoEvents();
+            bar.Close();
+            bar.Dispose();
+        }
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    // ---- stop: saving state, then a fade -----------------------------------------
+
+    [Fact]
+    public void Bar_SavingStateSurvivesUntilTheFadeAndReleasesTheClock()
+    {
+        using var animation = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: false);
+        bar.Show();
+        PumpUntil(() => bar.Opacity > 0.9);
+
+        bar.BeginSaving();
+        Assert.True(bar.IsSaving);
+        // Still on screen: the whole point is that nothing tears down before the card lands.
+        WF.Application.DoEvents();
+        Assert.False(bar.IsDisposed);
+
+        bar.FadeOutAndClose();
+        PumpUntil(() => bar.IsDisposed);
+        Assert.True(bar.IsDisposed);
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+        bar.Dispose();
+    }
+
+    [Fact]
+    public void Bar_FadeOutIsIdempotentAndSafeBeforeItIsEverShown()
+    {
+        using var animation = new Anim(true);
+        Assert.Equal(0, Motion.Holders);
+
+        // Never shown: there is no handle and no tween to run, so this must simply not throw.
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.FadeOutAndClose();
+        bar.FadeOutAndClose();
+        bar.Dispose();
+
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>With animation off system-wide the exit must still end with the window gone,
+    /// not left on screen waiting for a tween that never runs.</summary>
+    [Fact]
+    public void Bar_FadeOutStillClosesWithAnimationOff()
+    {
+        using var animation = new Anim(false);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+        bar.BeginSaving();
+        bar.FadeOutAndClose();
+        WF.Application.DoEvents();
+
+        Assert.True(bar.IsDisposed);
+        Assert.Equal(0, Motion.Holders);
+        bar.Dispose();
+    }
+
+    // ---- what it actually paints ---------------------------------------------------
+
+    private static SD.Bitmap Render(FastRecordingControlBar bar) => bar.RenderToBitmap();
+
+    /// <summary>
+    /// Counts genuinely red pixels. The green and blue channels have to be BOTH low and close
+    /// to each other, because ClearType renders white text with orange sub-pixel fringes that a
+    /// naive "red is high" test happily counts as red.
+    /// </summary>
+    private static int CountRed(SD.Bitmap image)
+    {
+        int red = 0;
+        for (int y = 0; y < image.Height; y++)
+        {
+            for (int x = 0; x < image.Width; x++)
+            {
+                SD.Color pixel = image.GetPixel(x, y);
+                if (pixel.R > 150 &&
+                    pixel.R - pixel.G > 90 &&
+                    pixel.R - pixel.B > 90 &&
+                    Math.Abs(pixel.G - pixel.B) < 40)
+                {
+                    red++;
+                }
+            }
+        }
+        return red;
+    }
+
+    /// <summary>
+    /// Pixel-scanned rather than eyeballed: the recording dot and the stop glyph are the only
+    /// red on the pill, and the saving row has neither — if the saving state ever failed to
+    /// replace the cells it would show a live-looking stop button over a finished recording.
+    /// </summary>
+    [Fact]
+    public void Bar_PaintsRedForRecordingAndDropsItWhileSaving()
+    {
+        using var animation = new Anim(false); // no entrance: DrawToBitmap wants the rest state
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        using (SD.Bitmap recording = Render(bar))
+        {
+            Assert.True(CountRed(recording) > 20, "the recording pill painted no red at all");
+        }
+
+        bar.BeginSaving();
+        WF.Application.DoEvents();
+        using (SD.Bitmap saving = Render(bar))
+        {
+            Assert.True(CountRed(saving) < 5, $"the saving row is still painting {CountRed(saving)} red pixels");
+        }
+
+        bar.Close();
+        bar.Dispose();
+    }
+
+    [Fact]
+    public void Bar_PaintsSomethingInEveryCell()
+    {
+        using var animation = new Anim(false);
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        using SD.Bitmap image = Render(bar);
+        // The bar's own cells, not a fresh layout at 100%: on a scaled display those disagree
+        // and the scan lands in the gaps between cells.
+        foreach ((RecordingControlBarCell cell, SD.Rectangle bounds) in bar.Cells)
+        {
+            SD.Rectangle box = SD.Rectangle.Intersect(bounds, new SD.Rectangle(0, 0, image.Width, image.Height));
+            if (box.Width < 8 || box.Height < 8)
+                continue;
+
+            bool inked = false;
+            for (int y = box.Top + 4; y < box.Bottom - 4 && !inked; y++)
+            {
+                for (int x = box.Left + 2; x < box.Right - 2; x++)
+                {
+                    SD.Color pixel = image.GetPixel(x, y);
+                    if (pixel.R > 120 || pixel.G > 120 || pixel.B > 120)
+                    {
+                        inked = true;
+                        break;
+                    }
+                }
+            }
+            Assert.True(inked, $"{cell} rendered as an empty cell");
+        }
+
+        bar.Close();
+        bar.Dispose();
+    }
+
+    [Fact]
+    public void Bar_TipsNameTheActionAndItsKey()
+    {
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200),
+            showTimer: true,
+            stopHotkey: "Ctrl+Shift+3");
+
+        Assert.Equal("Stop and save (Esc or Ctrl+Shift+3)", bar.TipFor(RecordingControlBarCell.Stop));
+        Assert.Equal("Discard the take (Shift+Esc)", bar.TipFor(RecordingControlBarCell.Discard));
+        Assert.Equal("Pause recording", bar.TipFor(RecordingControlBarCell.PauseResume));
+        bar.SyncPaused(true);
+        Assert.Equal("Resume recording", bar.TipFor(RecordingControlBarCell.PauseResume));
+    }
+
+    /// <summary>
+    /// The pill is the one surface the user touches during a take, and the rewrite from four
+    /// DarkButtons to owner-drawn cells dropped the eased hover they had. A snap would be at 1
+    /// the instant the hover is set; an ease has to travel there, and the cell being left has
+    /// to fall from wherever it had reached.
+    /// </summary>
+    [Fact]
+    public void Bar_HoverAndPressEaseInsteadOfSnapping()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false, stopHotkey: null);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        SetHover(bar, 0);
+        Assert.True(Wash(bar, "_hover", 0) < 0.99, "hover arrived at full strength in one frame");
+        // Wait for the tween to LAND, not merely to get close: Motion.Run applies exactly
+        // 1.0 on its final frame, and 0.999 let the pump exit a frame early on a slow run.
+        PumpUntil(() => Wash(bar, "_hover", 0) >= 1d);
+        Assert.Equal(1d, Wash(bar, "_hover", 0), 3);
+
+        SetHover(bar, -1);
+        Assert.True(Wash(bar, "_hover", 0) > 0.01, "the cell being left vanished in one frame");
+        PumpUntil(() => Wash(bar, "_hover", 0) <= 0.001);
+
+        bar.Close();
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static void SetHover(FastRecordingControlBar bar, int index) =>
+        typeof(FastRecordingControlBar)
+            .GetMethod("SetHover", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(bar, [index]);
+
+    private static double Wash(FastRecordingControlBar bar, string field, int index)
+    {
+        var wash = (HoverWash<int>)typeof(FastRecordingControlBar)
+            .GetField(field, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(bar)!;
+        return wash[index];
+    }
+
+    [Fact]
+    public void Bar_TipFallsBackToEscapeWhenNoHotkeyIsBound()
+    {
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200),
+            showTimer: false,
+            stopHotkey: "   ");
+
+        Assert.Equal("Stop and save (Esc)", bar.TipFor(RecordingControlBarCell.Stop));
+    }
+
+    // ---- DPI: the tooltip box -----------------------------------------------------
+
+    /// <summary>
+    /// Every coordinate on the pill is multiplied by the monitor scale, and the tip's font is
+    /// too — but its padding was a raw 12x8, so the hint read cramped against the box edge at
+    /// exactly the 150% Isaiah runs. The padding has to grow with the face.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    public void TipBox_PadsProportionallyToItsOwnFace(double scale)
+    {
+        const string Tip = "Stop and save (Esc)";
+        SD.Size box = OnBarAtScale(scale, bar => bar.TipBoxSize(Tip));
+        SD.Size text = OnBarAtScale(scale, bar => MeasureTip(bar, Tip));
+
+        Assert.Equal(RecordingMonitorDpi.Px(12, scale), box.Width - text.Width);
+        Assert.Equal(RecordingMonitorDpi.Px(8, scale), box.Height - text.Height);
+    }
+
+    private static SD.Size MeasureTip(FastRecordingControlBar bar, string text)
+    {
+        var font = (SD.Font)typeof(FastRecordingControlBar)
+            .GetField("_tipFont", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(bar)!;
+        return WF.TextRenderer.MeasureText(text, font);
+    }
+
+    /// <summary>Builds a bar for a pinned scale — no 150% monitor required, and the seam is
+    /// always put back.</summary>
+    private static T OnBarAtScale<T>(double scale, Func<FastRecordingControlBar, T> read)
+    {
+        RecordingMonitorDpi.ScaleSource = _ => scale;
+        try
+        {
+            using var bar = new FastRecordingControlBar(
+                new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+            return read(bar);
+        }
+        finally { RecordingMonitorDpi.ScaleSource = null; }
+    }
+
+    // ---- accessibility ------------------------------------------------------------
+
+    /// <summary>
+    /// The pill is one owner-drawn window with no child controls, and its WinForms ToolTip is
+    /// not a UIA name — so without renaming the window per cell a screen reader announced one
+    /// unnamed graphic for the whole running take.
+    /// </summary>
+    [Fact]
+    public void Bar_NamesItselfAfterTheHoveredCell()
+    {
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+
+        Assert.Equal("Recording controls", bar.AccessibleName);
+        Assert.Equal(WF.AccessibleRole.ToolBar, bar.AccessibleRole);
+
+        var cells = bar.Cells;
+        SetHover(bar, IndexOf(cells, RecordingControlBarCell.PauseResume));
+        Assert.Equal("Pause recording", bar.AccessibleName);
+
+        SetHover(bar, IndexOf(cells, RecordingControlBarCell.Timer)); // read-only, not a control
+        Assert.Equal("Recording controls", bar.AccessibleName);
+
+        SetHover(bar, IndexOf(cells, RecordingControlBarCell.Discard));
+        Assert.Equal("Discard the take (Shift+Esc)", bar.AccessibleName);
+
+        SetHover(bar, -1);
+        Assert.Equal("Recording controls", bar.AccessibleName);
+    }
+
+    /// <summary>
+    /// Pause and Restart have no bound key at all — Escape reaches Stop and Shift+Escape
+    /// Discard, and that was every keyboard route the bar had. Tab walks the cells so the
+    /// other two can be worked without the mouse.
+    /// </summary>
+    [Fact]
+    public void Bar_TabWalksTheCellsAndSpaceWorksTheFocusedOne()
+    {
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+        var cells = bar.Cells;
+
+        Assert.Equal(-1, bar.FocusIndex);
+
+        // Forward from nothing lands on the first cell that is actually a control: the timer
+        // is a read-only readout and must be skipped in both directions.
+        bar.MoveFocusForTest(1);
+        Assert.Equal(RecordingControlBarCell.PauseResume, cells[bar.FocusIndex].Cell);
+        bar.MoveFocusForTest(1);
+        Assert.Equal(RecordingControlBarCell.Restart, cells[bar.FocusIndex].Cell);
+        Assert.Equal("Restart the take", bar.AccessibleName);
+
+        bar.MoveFocusForTest(-1);
+        Assert.Equal(RecordingControlBarCell.PauseResume, cells[bar.FocusIndex].Cell);
+
+        // Wraps backwards past the timer to the last control rather than stalling on it.
+        bar.MoveFocusForTest(-1);
+        Assert.Equal(RecordingControlBarCell.Discard, cells[bar.FocusIndex].Cell);
+
+        bool restarted = false;
+        bar.RestartRequested += () => restarted = true;
+        bar.MoveFocusForTest(1); // wraps forward onto PauseResume
+        bar.MoveFocusForTest(1); // Restart
+        bar.ActivateFocusedForTest();
+        Assert.True(restarted, "Space on the focused Restart cell did nothing");
+    }
+
+    /// <summary>Once the take is stopping the cells stop being controls, so the ring and the
+    /// name go with them.</summary>
+    [Fact]
+    public void Bar_DropsFocusAndItsNameOnceTheTakeIsSaving()
+    {
+        using var animation = new Anim(false);
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true, stopHotkey: null);
+
+        bar.MoveFocusForTest(1);
+        Assert.True(bar.FocusIndex >= 0);
+
+        bar.BeginSaving();
+        Assert.Equal(-1, bar.FocusIndex);
+        Assert.Equal("Saving the recording", bar.AccessibleName);
+
+        bar.MoveFocusForTest(1); // nothing is actionable any more
+        Assert.Equal(-1, bar.FocusIndex);
+    }
+
+    // ---- press: the wash has to come back down ------------------------------------
+
+    /// <summary>
+    /// The bar armed the press wash on mouse-down and had nowhere to release it: Pause and
+    /// Resume take no terminal action, and HoverWash.To early-returns on an unchanged target,
+    /// so a clicked Pause cell rendered pressed for the rest of the take — including while
+    /// the pointer sat over Restart.
+    /// </summary>
+    [Fact]
+    public void Bar_PressWashReleasesOnMouseUp()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        int pause = IndexOf(bar.Cells, RecordingControlBarCell.PauseResume);
+        SetHover(bar, pause);
+        Press(bar, "OnBarMouseDown", Centre(bar.Cells[pause].Bounds));
+        PumpUntil(() => bar.PressAmount(pause) >= 1d);
+        Assert.Equal(1d, bar.PressAmount(pause), 3);
+
+        Press(bar, "OnBarMouseUp", Centre(bar.Cells[pause].Bounds));
+        PumpUntil(() => bar.PressAmount(pause) <= 0.001);
+        Assert.True(bar.PressAmount(pause) <= 0.001, "the press wash never came back down");
+
+        bar.Close();
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>A press dragged off its own cell releases too, the way the HUD's does.</summary>
+    [Fact]
+    public void Bar_PressWashReleasesWhenThePointerLeavesTheCell()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 400, 200), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        int pause = IndexOf(bar.Cells, RecordingControlBarCell.PauseResume);
+        int restart = IndexOf(bar.Cells, RecordingControlBarCell.Restart);
+        SetHover(bar, pause);
+        Press(bar, "OnBarMouseDown", Centre(bar.Cells[pause].Bounds));
+        PumpUntil(() => bar.PressAmount(pause) >= 1d);
+
+        SetHover(bar, restart);
+        PumpUntil(() => bar.PressAmount(pause) <= 0.001);
+        Assert.True(bar.PressAmount(pause) <= 0.001, "Pause stayed pressed under a pointer on Restart");
+        Assert.Equal(0d, bar.PressAmount(restart), 3);
+
+        bar.Close();
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    // ---- stop: the controls cross-fade into the saving row -------------------------
+
+    /// <summary>
+    /// Recording -> Saving was the one state change on this flow with no transition: a bare
+    /// bool branch in OnPaint swapped five cells for a spinner in a single frame, between an
+    /// entrance and an exit that both ease. It now runs on Motion.SwapMs, the token for one
+    /// pane replacing another in the same slot.
+    /// </summary>
+    [Fact]
+    public void Bar_SavingCrossFadesRatherThanSwappingInOneFrame()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 600, 300), showTimer: true);
+        bar.Show();
+        PumpUntil(() => bar.Opacity > 0.9);
+
+        bar.BeginSaving();
+        // Nothing has moved yet: the tween's first frame comes from the pump, so a swap would
+        // already be showing the spinner alone here.
+        Assert.Equal(0d, bar.SavingAmount, 3);
+        Assert.True(bar.IsSaving);
+        using (SD.Bitmap midway = bar.RenderToBitmap())
+            Assert.True(midway.Width > 0); // paints both branches without throwing
+
+        PumpUntil(() => bar.SavingAmount >= 1d);
+        Assert.Equal(1d, bar.SavingAmount, 3);
+
+        bar.FadeOutAndClose();
+        PumpUntil(() => bar.IsDisposed);
+        bar.Dispose();
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    /// <summary>With animation off system-wide the swap is immediate, as every other tween is.</summary>
+    [Fact]
+    public void Bar_SavingSwapIsImmediateWithAnimationOff()
+    {
+        using var animation = new Anim(false);
+
+        using var bar = new FastRecordingControlBar(
+            new SD.Rectangle(-6000, -6000, 600, 300), showTimer: false);
+        bar.Show();
+        WF.Application.DoEvents();
+        bar.BeginSaving();
+
+        Assert.Equal(1d, bar.SavingAmount, 3);
+        Assert.Equal(0, Motion.Holders);
+        bar.Close();
+        bar.Dispose();
+    }
+
+    /// <summary>
+    /// A bar disposed without being closed used to keep its 50 ms timer ticking against a dead
+    /// form and leak three GDI fonts plus the ToolTip, because the teardown lived only in
+    /// OnClosed and Form.Dispose() does not raise Closed.
+    /// </summary>
+    [Fact]
+    public void Bar_DisposedWithoutClosingStillTearsItsTimerAndFontsDown()
+    {
+        using var animation = new Anim(true);
+        PumpUntil(() => Motion.Holders == 0);
+
+        var bar = new FastRecordingControlBar(new SD.Rectangle(-6000, -6000, 400, 200), showTimer: true);
+        bar.Show();
+        WF.Application.DoEvents();
+
+        var timer = (WF.Timer)typeof(FastRecordingControlBar)
+            .GetField("_timer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(bar)!;
+        Assert.True(timer.Enabled);
+
+        bar.Dispose(); // no Close()
+
+        Assert.False(timer.Enabled);
+        PumpUntil(() => Motion.Holders == 0);
+        Assert.Equal(0, Motion.Holders);
+    }
+
+    private static SD.Point Centre(SD.Rectangle r) =>
+        new(r.Left + (r.Width / 2), r.Top + (r.Height / 2));
+
+    private static void Press(FastRecordingControlBar bar, string handler, SD.Point at) =>
+        typeof(FastRecordingControlBar)
+            .GetMethod(handler, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(bar, [null, new WF.MouseEventArgs(WF.MouseButtons.Left, 1, at.X, at.Y, 0)]);
+
+    private static int IndexOf(
+        IReadOnlyList<(RecordingControlBarCell Cell, SD.Rectangle Bounds)> cells,
+        RecordingControlBarCell cell)
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            if (cells[i].Cell == cell)
+                return i;
+        }
+        return -1;
+    }
+}

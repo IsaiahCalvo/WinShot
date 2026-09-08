@@ -1,4 +1,4 @@
-using WinShot.Capture;
+﻿using WinShot.Capture;
 using Xunit;
 using SD = System.Drawing;
 
@@ -74,5 +74,32 @@ public class FastSelectorLoupeLayoutTests
             zoom: 8);
 
         Assert.False(layout.IsVisible);
+    }
+
+    [Fact]
+    public void Calculate_ReadsOutTheSelectionSizeWhileDragging()
+    {
+        var layout = FastSelectorLoupeLayout.Calculate(
+            clientSize: new SD.Size(800, 600),
+            virtualScreen: new SD.Rectangle(0, 0, 800, 600),
+            cursorClient: new SD.Point(100, 100),
+            cursorScreen: new SD.Point(100, 100),
+            loupeSize: 120,
+            zoom: 8,
+            dragSize: new SD.Size(150, 122));
+
+        // Geometry is untouched — only the sentence changes, so the loupe does not jump
+        // the moment a drag starts.
+        Assert.Equal(new SD.Rectangle(124, 152, 120, 120), layout.Bounds);
+        Assert.Equal("150 × 122", layout.Coordinates);
+    }
+
+    [Theory]
+    [InlineData(0, 0, "1072, 341")]
+    [InlineData(150, 122, "150 × 122")]
+    [InlineData(0, 40, "0 × 40")]
+    public void Readout_SwapsPositionForSizeOnceTheDragHasExtent(int width, int height, string expected)
+    {
+        Assert.Equal(expected, SelectorReadout.Text(new SD.Point(1072, 341), new SD.Size(width, height)));
     }
 }

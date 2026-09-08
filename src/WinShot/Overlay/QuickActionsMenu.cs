@@ -37,6 +37,9 @@ internal static class QuickActionsMenu
     internal const string ShareGroup = "share";
     internal const string ShareBlip = "share-blip";
     internal const string ShareWindows = "share-windows";
+    internal const string SaveAll = "save-all";
+    internal const string CloseAll = "close-all";
+    internal const string TemporarilyHide = "hide";
     internal const string Close = "close";
 
     /// <summary>A menu row. <paramref name="Children"/> makes it a submenu instead of an action.</summary>
@@ -88,6 +91,12 @@ internal static class QuickActionsMenu
         rows.AddRange(ShareRows(canShare, canBlip));
 
         rows.Add(new Row(Separator, Separator));
+        // One block with Close: these are all "get this out of the way", strongest first.
+        // Only Save all earns an ellipsis — it asks for a folder. Close all acts immediately
+        // (and says how many it closed), so promising more input would be a lie.
+        rows.Add(new Row(SaveAll, "Save all…"));
+        rows.Add(new Row(CloseAll, "Close all"));
+        rows.Add(new Row(TemporarilyHide, "Temporarily hide"));
         rows.Add(new Row(Close, "Close", "Ctrl+W"));
         return rows;
     }
@@ -245,6 +254,53 @@ internal static class QuickActionsMenu
             return;
         }
         document.Print();
+    }
+
+    /// <summary>
+    /// The rows that only make sense with more than one card on screen. They are built into
+    /// every menu and hidden when the stack is a single card, rather than rebuilt on every
+    /// capture: the menu is warmed while the card is idle so the right-click is instant, and
+    /// its row width is measured once over every row it holds.
+    /// </summary>
+    internal static bool NeedsAStack(string id) => id is SaveAll or CloseAll;
+
+    /// <summary>
+    /// Whether the hover-gated keyboard hook swallows <paramref name="keyData"/> system-wide.
+    /// Deliberately separate from the handler: the hook has to decide inside its callback,
+    /// but must not run the action there — opening the context menu from a hook spins a
+    /// modal message loop inside it.
+    ///
+    /// Hover is not focus: the card is never activated, so every key the hook eats belongs
+    /// to whatever the user is actually typing in. That rules out the bare letters (a parked
+    /// card would swallow every c/s/e/p/o/b, Escape and Tab out of the document underneath),
+    /// and it also rules out <b>Ctrl+S and Ctrl+W</b>, which the hook used to claim:
+    ///
+    /// hovering a card is not a decision, and there is no honest signal that separates
+    /// "reaching for the card" from "the pointer happens to be in the corner". Getting that
+    /// wrong on Ctrl+S saves the screenshot, says "Saved &lt;name&gt;.png", and leaves the
+    /// document the user meant to save still dirty with nothing on screen admitting it;
+    /// Ctrl+W closes the card instead of the browser tab. Ctrl+C and Ctrl+E misfire
+    /// visibly and cost nothing that cannot be redone, so those two stay.
+    ///
+    /// Every chord the card advertises — Ctrl+S and Ctrl+W included — still works through
+    /// the card's real KeyDown, once it genuinely has keyboard focus. So do the bare-letter,
+    /// Tab, Enter and Space cases.
+    ///
+    /// <paramref name="canEdit"/> is false on a recording with no video editor behind it:
+    /// that card offers no Edit button and no "Edit video" row, so the hook must not eat
+    /// Ctrl+E on its behalf either.
+    /// </summary>
+    internal static bool ClaimsKey(WF.Keys keyData, bool canEdit)
+    {
+        WF.Keys key = keyData & WF.Keys.KeyCode;
+        WF.Keys modifiers = keyData & WF.Keys.Modifiers;
+
+        // Ctrl alone. Alt+anything belongs to the window underneath, and Shift disqualifies
+        // the letters too: Ctrl+Shift+C is somebody else's Inspect.
+        if (modifiers != WF.Keys.Control)
+            return false;
+
+        return key == WF.Keys.C || (key == WF.Keys.E && canEdit);
     }
 
     internal static bool FileReady(string? path) => path is not null && File.Exists(path);

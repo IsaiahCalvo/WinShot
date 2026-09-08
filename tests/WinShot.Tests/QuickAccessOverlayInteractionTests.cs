@@ -1,10 +1,14 @@
+﻿using System.Globalization;
 using System.Reflection;
 using System.IO;
+using System.Xml.Linq;
 using WinShot.Core;
 using WinShot.Overlay;
 using Xunit;
 using SD = System.Drawing;
+using W = System.Windows;
 using WF = System.Windows.Forms;
+using WM = System.Windows.Media;
 
 namespace WinShot.Tests;
 
@@ -27,9 +31,24 @@ public class QuickAccessOverlayInteractionTests
             Assert.Equal(
                 new[] { "Pin", "Close", "Annotate", "Save", "Copy" },
                 Enumerable.Range(0, 5).Select(i => overlay.AccessibilityObject.GetChild(i)!.Name).ToArray());
-            Assert.Equal("Close (Ctrl+W)", overlay.AccessibilityObject.GetChild(1)!.Help);
+            // A tooltip names a chord only where hovering can actually press it: the hook
+            // claims Ctrl+E and Ctrl+C on hover and deliberately lets Ctrl+W and Ctrl+S
+            // through to the app underneath, so advertising those two on a hover-only
+            // surface promised a keystroke that closed the user's browser tab instead.
+            Assert.Equal("Close", overlay.AccessibilityObject.GetChild(1)!.Help);
             Assert.Equal("Open Annotate tool (Ctrl+E)", overlay.AccessibilityObject.GetChild(2)!.Help);
-            Assert.Equal("Save (Ctrl+S)", overlay.AccessibilityObject.GetChild(3)!.Help);
+            Assert.Equal("Save", overlay.AccessibilityObject.GetChild(3)!.Help);
+            foreach (string help in Enumerable.Range(0, 5)
+                         .Select(i => overlay.AccessibilityObject.GetChild(i)!.Help ?? string.Empty))
+            {
+                int at = help.IndexOf("(Ctrl+", StringComparison.Ordinal);
+                if (at < 0)
+                    continue;
+                var chord = WF.Keys.Control | Enum.Parse<WF.Keys>(help.Substring(at + 6, 1));
+                Assert.True(
+                    QuickActionsMenu.ClaimsKey(chord, canEdit: true),
+                    $"the tooltip \"{help}\" advertises a chord the hover hook does not claim");
+            }
 
             InvokeKey(overlay, WF.Keys.Control | WF.Keys.E);
             Assert.True(annotate);
@@ -102,7 +121,7 @@ public class QuickAccessOverlayInteractionTests
 
         var method = typeof(FastQuickActionsWindow)
             .GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!;
-        using var preview = (SD.Bitmap)method.Invoke(null, new object[] { source, 192, 120 })!;
+        using var preview = (SD.Bitmap)method.Invoke(null, new object[] { source, 192, 120, false })!;
 
         SD.Color left = preview.GetPixel(4, preview.Height / 2);
         SD.Color center = preview.GetPixel(preview.Width / 2, preview.Height / 2);
@@ -187,10 +206,13 @@ public class QuickAccessOverlayInteractionTests
             Assert.Contains("Print…", labels);
             Assert.Contains("Open with…", labels);
             Assert.Contains("Move to Recycle Bin", labels);
-            // Cloud upload, Quick Look and Temporarily Hide are the CleanShot rows we skipped.
+            Assert.Contains("Save all…", labels);
+            Assert.Contains("Close all", labels);
+            Assert.Contains("Temporarily hide", labels);
+            // Cloud upload and Quick Look are the CleanShot rows we skipped — Quick Look
+            // because Pin already is one.
             Assert.DoesNotContain(labels, l => l.Contains("Cloud", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(labels, l => l.Contains("Quick Look", StringComparison.OrdinalIgnoreCase));
-            Assert.DoesNotContain(labels, l => l.Contains("Temporarily", StringComparison.OrdinalIgnoreCase));
         });
     }
 
@@ -428,7 +450,7 @@ public class QuickAccessOverlayInteractionTests
             Assert.Null(card.ToastAnchor());
 
             var method = typeof(FastQuickActionsWindow)
-                .GetMethod("ShowShareToast", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                .GetMethod("ShowCardToast", BindingFlags.Instance | BindingFlags.NonPublic)!;
             method.Invoke(card, new object[] { "Share failed", "The drive is full.", ToastSeverity.Error });
         });
     }
@@ -462,7 +484,7 @@ public class QuickAccessOverlayInteractionTests
                 // Directory.CreateDirectory throws before the first await, so the catch has
                 // already run by the time the call returns.
                 type.GetMethod("SaveCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-                    .Invoke(overlay, new object[] { false, true });
+                    .Invoke(overlay, new object?[] { false, true, null, true });
 
                 Assert.Equal(FriendlyError.For(new IOException()), message.GetValue(overlay));
                 Assert.True((bool)isFailure.GetValue(overlay)!, "a failure flash must not resume the auto-close timer");
@@ -587,6 +609,61 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    /// <summary>
+    /// The recording strip's camcorder is the smallest glyph on the card, so it is the one
+    /// that shows a mismatched stroke weight first. <see cref="SvgIcons"/> fits the whole
+    /// viewBox into the square render box, so a viewBox with empty margin renders the
+    /// artwork small and its 1.85 stroke light: on the stock 24x24 box the camcorder
+    /// occupied 14 of 24 rows, so it drew at 0.58x and its stroke landed at 0.69 device px
+    /// beside 1.08 px everywhere else on the same card.
+    ///
+    /// Measured off the asset rather than off a render: RenderTargetBitmap draws nothing on
+    /// a bare test thread (no dispatcher, so no media context) — every glyph comes back
+    /// blank there, which would make a pixel scan assert something that is true of the test
+    /// host and not of the app.
+    /// </summary>
+    [Fact]
+    public void TheRecordingGlyphsViewBoxIsCroppedToWhatItActuallyDraws()
+    {
+        using Stream stream = typeof(FastQuickActionsWindow).Assembly
+            .GetManifestResourceStream("WinShot.Assets.quick-access-camcorder.svg")
+            ?? throw new Xunit.Sdk.XunitException("the camcorder asset is not embedded");
+        XElement root = XDocument.Load(stream).Root!;
+
+        string[] box = root.Attribute("viewBox")!.Value.Split(' ');
+        var viewBox = new W.Rect(
+            double.Parse(box[0], CultureInfo.InvariantCulture),
+            double.Parse(box[1], CultureInfo.InvariantCulture),
+            double.Parse(box[2], CultureInfo.InvariantCulture),
+            double.Parse(box[3], CultureInfo.InvariantCulture));
+
+        // Half the stroke sits outside the path, so the ink is wider than the geometry.
+        double half = double.Parse(root.Attribute("stroke-width")!.Value, CultureInfo.InvariantCulture) / 2d;
+        W.Rect ink = W.Rect.Empty;
+        foreach (XElement element in root.Descendants())
+        {
+            WM.Geometry? geometry = element.Name.LocalName switch
+            {
+                "path" => WM.Geometry.Parse(element.Attribute("d")!.Value),
+                "rect" => new WM.RectangleGeometry(new W.Rect(
+                    double.Parse(element.Attribute("x")!.Value, CultureInfo.InvariantCulture),
+                    double.Parse(element.Attribute("y")!.Value, CultureInfo.InvariantCulture),
+                    double.Parse(element.Attribute("width")!.Value, CultureInfo.InvariantCulture),
+                    double.Parse(element.Attribute("height")!.Value, CultureInfo.InvariantCulture))),
+                _ => null,
+            };
+            if (geometry is null)
+                continue;
+            W.Rect bounds = geometry.Bounds;
+            bounds.Inflate(half, half);
+            ink.Union(bounds);
+        }
+
+        Assert.True(viewBox.Contains(ink), $"the viewBox {viewBox} clips the ink {ink}");
+        Assert.True(ink.Width / viewBox.Width > 0.95, $"the viewBox is {viewBox.Width} wide for {ink.Width} of ink");
+        Assert.True(ink.Height / viewBox.Height > 0.95, $"the viewBox is {viewBox.Height} tall for {ink.Height} of ink");
+    }
+
     private static string? InvokeIconFor(string id) =>
         (string?)typeof(FastQuickActionsWindow).Assembly
             .GetType("WinShot.Overlay.QuickActionsMenu")!
@@ -685,7 +762,7 @@ public class QuickAccessOverlayInteractionTests
                 using var overlay = new FastQuickActionsWindow(bitmap, settings);
                 var method = typeof(FastQuickActionsWindow).GetMethod("SaveCoreAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-                var task = (Task)method.Invoke(overlay, new object[] { false, false })!;
+                var task = (Task)method.Invoke(overlay, new object?[] { false, false, null, true })!;
                 var deadline = DateTime.UtcNow.AddSeconds(5);
                 while (!task.IsCompleted && DateTime.UtcNow < deadline)
                 {
@@ -703,8 +780,953 @@ public class QuickAccessOverlayInteractionTests
         }
     }
 
+    [Fact]
+    public void ABatchSaveSaysHowManyLandedAndNamesTheFolder()
+    {
+        string folder = Path.Combine("C:", "Users", "someone", "Captures");
+
+        (string title, string body) = FastQuickActionsWindow.BatchSaveConfirmation(4, 0, folder);
+        Assert.Equal("Saved 4 captures", title);
+        // A sentence, like every other toast body the card raises — not a bare folder name.
+        Assert.Equal("All of them are in Captures.", body);
+
+        (string one, string oneBody) = FastQuickActionsWindow.BatchSaveConfirmation(1, 0, folder);
+        Assert.Equal("Saved 1 capture", one);
+        Assert.Equal("It is in Captures.", oneBody);
+    }
+
+    [Fact]
+    public void ABatchSaveThatPartlyFailedNeverReportsPlainSuccess()
+    {
+        string folder = Path.Combine("C:", "Users", "someone", "Captures");
+
+        // The whole reason the batch counts instead of toasting per card: five per-card
+        // toasts replaced each other and a failure was invisible behind the last one.
+        (string partial, string partialBody) = FastQuickActionsWindow.BatchSaveConfirmation(3, 2, folder);
+        Assert.Equal("Saved 3 of 5 captures", partial);
+        Assert.Contains("2 could not be written", partialBody);
+
+        (string none, string noneBody) = FastQuickActionsWindow.BatchSaveConfirmation(0, 2, folder);
+        Assert.Equal("Nothing was saved", none);
+        Assert.Contains("Captures", noneBody);
+    }
+
+    [Fact]
+    public void TheCardHasItsThumbnailBeforeItIsEverShown()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using (var pen = new SD.Pen(SD.Color.Orange, 40))
+            using (var g = SD.Graphics.FromImage(bitmap))
+            {
+                g.Clear(SD.Color.MidnightBlue);
+                g.DrawLine(pen, 0, 0, 1200, 760);
+            }
+
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var preview = (SD.Bitmap?)typeof(FastQuickActionsWindow)
+                .GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay);
+
+            // Not merely present: the real capture's pixels, at the thumbnail's own size.
+            Assert.NotNull(preview);
+            Assert.Equal(overlay.ClientSize, preview!.Size);
+            Assert.NotEqual(SD.Color.Empty.ToArgb(), preview.GetPixel(preview.Width / 2, preview.Height / 2).ToArgb());
+        });
+    }
+
+    [Fact]
+    public void TheCardSlidesInFromOffScreenAndLandsExactlyOnItsSlot()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            // Pin the monitor: "move to the active screen" reads the live cursor, which on a
+            // multi-monitor machine can answer differently between two placements and make
+            // the settled slot itself move.
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+
+            overlay.Show();
+            // The move happens before the first paint, so by the time Show returns the card
+            // is already off its slot rather than sitting on it.
+            SD.Point duringEntrance = overlay.Location;
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            SD.Point settled = overlay.Location;
+
+            Assert.NotEqual(settled, duringEntrance);
+            Assert.Equal(settled.X, duringEntrance.X);
+            Assert.True(duringEntrance.Y > settled.Y, "a bottom-anchored card comes up from below its slot");
+            Assert.True(
+                settled.Y + overlay.Height <= WF.Screen.FromRectangle(overlay.Bounds).WorkingArea.Bottom,
+                "the card settles fully inside the working area");
+            Assert.Equal(0, Motion.Holders);
+            overlay.Hide();
+        });
+    }
+
+    [Fact]
+    public void ClosingMidEntranceReleasesTheHighResolutionClock()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            overlay.Show();
+            overlay.Dispose();
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    [Fact]
+    public void HoverChromeCrossFadesRatherThanSnappingOn()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = CreateBusyCapture();
+            var settings = new SettingsService();
+            using var overlay = FastQuickActionsWindow.CreateForTheme(bitmap, settings, QuickAccessOverlayTheme.Dark);
+            overlay.CreateControl();
+            InstallPreviews(overlay, bitmap);
+
+            double idle = MeanLuminance(RenderCard(overlay));
+            SetHoverAmount(overlay, 1d);
+            double full = MeanLuminance(RenderCard(overlay));
+            SetHoverAmount(overlay, 0.5d);
+            double half = MeanLuminance(RenderCard(overlay));
+
+            // Not eyeballed: the mid-fade frame has to actually sit between the two ends.
+            Assert.NotEqual(idle, full, 3);
+            double low = Math.Min(idle, full);
+            double high = Math.Max(idle, full);
+            Assert.InRange(half, low + 0.01, high - 0.01);
+        });
+    }
+
+    [Fact]
+    public void AHiddenCardJumpsStraightToTheHoverEndStateAndLeaksNoClock()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var amount = typeof(FastQuickActionsWindow)
+                .GetField("_hoverAmount", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            Invoke(overlay, "SetHovering", true);
+            Assert.Equal(1d, (double)amount.GetValue(overlay)!, 6);
+            Invoke(overlay, "SetHovering", false);
+            Assert.Equal(0d, (double)amount.GetValue(overlay)!, 6);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    [Fact]
+    public void AShownCardRampsItsHoverAndReleasesTheClockWhenItLands()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            overlay.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            var amount = typeof(FastQuickActionsWindow)
+                .GetField("_hoverAmount", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Invoke(overlay, "SetHovering", true);
+
+            // Still on its way, not already there — that is what makes it a cross-fade.
+            Assert.True((double)amount.GetValue(overlay)! < 1d);
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            Assert.Equal(1d, (double)amount.GetValue(overlay)!, 6);
+            Assert.Equal(0, Motion.Holders);
+            overlay.Hide();
+        });
+    }
+
+    private static void SetHoverAmount(FastQuickActionsWindow overlay, double amount)
+        => typeof(FastQuickActionsWindow)
+            .GetField("_hoverAmount", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(overlay, amount);
+
+    private static void InstallPreviews(FastQuickActionsWindow overlay, SD.Bitmap source)
+    {
+        var type = typeof(FastQuickActionsWindow);
+        var thumb = (SD.Rectangle)type.GetField("_thumbRect", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+        var preview = (SD.Bitmap)type.GetMethod("CreatePreviewBitmap", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { source, thumb.Width, thumb.Height, false })!;
+        var blurred = (SD.Bitmap)type.GetMethod("CreateBlurred", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { preview })!;
+        type.GetField("_preview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, preview);
+        type.GetField("_blurredPreview", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(overlay, blurred);
+    }
+
+    private static SD.Bitmap RenderCard(FastQuickActionsWindow overlay)
+    {
+        var bitmap = new SD.Bitmap(overlay.ClientSize.Width, overlay.ClientSize.Height);
+        using var graphics = SD.Graphics.FromImage(bitmap);
+        using var args = new WF.PaintEventArgs(graphics, new SD.Rectangle(SD.Point.Empty, bitmap.Size));
+        typeof(FastQuickActionsWindow)
+            .GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(overlay, new object[] { args });
+        return bitmap;
+    }
+
+    private static double MeanLuminance(SD.Bitmap bitmap)
+    {
+        using (bitmap)
+        {
+            double total = 0;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    SD.Color pixel = bitmap.GetPixel(x, y);
+                    total += (0.2126 * pixel.R + 0.7152 * pixel.G + 0.0722 * pixel.B) / 255d;
+                }
+            }
+            return total / (bitmap.Width * bitmap.Height);
+        }
+    }
+
+    private static SD.Bitmap CreateBusyCapture()
+    {
+        var bitmap = new SD.Bitmap(1200, 760);
+        using var g = SD.Graphics.FromImage(bitmap);
+        g.Clear(SD.Color.FromArgb(22, 41, 72));
+        using var pen = new SD.Pen(SD.Color.FromArgb(240, 244, 250), 24);
+        for (int x = -800; x < 1200; x += 90)
+            g.DrawLine(pen, x, 0, x + 800, 760);
+        return bitmap;
+    }
+
+    [Fact]
+    public void TheEditorRoundTripKeepsTheCardAndUpdatesItInPlace()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            settings.Current.OverlayAutoClose = true;
+            settings.Current.OverlayAutoCloseSeconds = 20;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            overlay.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            var timer = (WF.Timer)typeof(FastQuickActionsWindow)
+                .GetField("_autoCloseTimer", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            var versionField = typeof(FastQuickActionsWindow)
+                .GetField("_imageVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            overlay.StepAside();
+            // The card dims out over QuickMs rather than cutting, so wait the fade out.
+            PumpUntil(() => !overlay.Visible, 3000);
+
+            // Out of the way, not gone — and it must not auto-close under the editor.
+            Assert.False(overlay.Visible);
+            Assert.False(overlay.IsDisposed);
+            Assert.False(timer.Enabled);
+
+            overlay.ReplaceImageFromEditor(new SD.Bitmap(640, 400));
+            PumpUntilRenderIdle(overlay);
+            overlay.ComeBack();
+
+            using var annotated = overlay.CloneImage();
+            Assert.Equal(new SD.Size(640, 400), annotated.Size);
+            Assert.Equal(1, (int)versionField.GetValue(overlay)!);
+            Assert.True(overlay.Visible);
+            Assert.True(timer.Enabled);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(0, Motion.Holders);
+            overlay.Hide();
+        });
+    }
+
+    /// <summary>
+    /// The annotate round-trip when the editor closes inside the 140 ms step-aside fade —
+    /// Escape buffered while it initialises, or an editor that dismisses itself. ComeBack
+    /// used to see a card that was still Visible, treat it as "nothing to do" and return
+    /// before clearing _offScreen or cancelling the fade; the fade then hid the card and
+    /// nothing revived it, because only _temporarilyHidden cards are revived by the next
+    /// capture. The capture vanished from the corner for the life of the process.
+    /// </summary>
+    [Fact]
+    public void AnEditorThatClosesInsideTheStepAsideFadeStillGivesTheCardBack()
+    {
+        RunSta(() =>
+        {
+            Func<bool> previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => true;
+            var made = new List<FastQuickActionsWindow>();
+            try
+            {
+                var settings = new SettingsService();
+                settings.Current.OverlayMoveToActiveScreen = false;
+                var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                made.Add(card);
+                card.Show();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+
+                card.StepAside();            // App.AnnotateFromOverlay
+                WF.Application.DoEvents();   // one frame of the fade
+                card.ComeBack();             // the editor's Closed handler
+                PumpUntil(() => Motion.Holders == 0, 4000);
+
+                Assert.True(card.Visible, "the annotated card never came back");
+                Assert.Equal(1d, card.Opacity, 2);
+
+                // And it is back in the stack, so the next capture stacks above it rather
+                // than landing on top of it.
+                var next = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+                made.Add(next);
+                next.Show();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+                Assert.NotEqual(card.Bounds, next.Bounds);
+            }
+            finally
+            {
+                Motion.AnimationsEnabled = previous;
+                foreach (FastQuickActionsWindow card in made)
+                    card.Dispose();
+                WF.Application.DoEvents();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Hover alone must not outrank the window the user is typing in. The corner is a normal
+    /// place to park a pointer and the card does not auto-close by default, so a hovered card
+    /// used to eat chords out of a document for as long as it sat there. ClaimsKey drops the
+    /// two whose misfires cannot be seen or undone; this narrows what is left of the arming.
+    /// </summary>
+    [Fact]
+    public void AParkedPointerStopsTheCardTakingKeysOffTheForegroundApp()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            overlay.Show();
+
+            // Never hovered: nothing to claim.
+            Assert.False((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            // The pointer arrives — the card may claim its four chords.
+            Invoke(overlay, "SetHovering", true);
+            Assert.True((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            // Left sitting there, it goes back to being just a pointer.
+            SetPrivate(overlay, "_shortcutArmedAt", Environment.TickCount64 - 10_000);
+            Assert.False((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            // And focus moving while the pointer stays put — the Alt+Tab-then-Ctrl+S case —
+            // disarms it whatever the clock says.
+            Invoke(overlay, "ArmShortcuts");
+            Assert.True((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+            SetPrivate(overlay, "_shortcutForeground", new IntPtr(0x1234));
+            Assert.False((bool)InvokeWithResult(overlay, "ShortcutsAreArmed")!);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+        });
+    }
+
+    [Fact]
+    public void TheShortcutHookLivesExactlyAsLongAsTheHover()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            var hook = typeof(FastQuickActionsWindow)
+                .GetField("_keyHook", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            // Off-screen the card must never take a keystroke off the app underneath.
+            Invoke(overlay, "SetHovering", true);
+            Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            overlay.Show();
+            Invoke(overlay, "SetHovering", true);
+            Assert.NotEqual(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            Invoke(overlay, "SetHovering", false);
+            Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            Invoke(overlay, "SetHovering", true);
+            overlay.StepAside();
+            Assert.Equal(IntPtr.Zero, (IntPtr)hook.GetValue(overlay)!);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+        });
+    }
+
+    [Fact]
+    public void ABurstOfCapturesDismissesTheOldestCardsInsteadOfPilingUp()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var cards = new List<FastQuickActionsWindow>();
+            try
+            {
+                for (int i = 0; i < 9; i++)
+                {
+                    using var bitmap = new SD.Bitmap(1200, 760);
+                    var card = new FastQuickActionsWindow(bitmap, settings);
+                    cards.Add(card);
+                    card.Show();
+                }
+
+                int capacity = QuickAccessOverlayLayout.StackCapacity(
+                    WF.Screen.PrimaryScreen!.WorkingArea,
+                    cards[^1].Size,
+                    settings.Current.OverlayPosition,
+                    cards[^1].DeviceDpi);
+                int living = cards.Count(c => !c.IsDisposed && !IsLeaving(c));
+
+                Assert.InRange(capacity, 1, 5);
+                Assert.Equal(capacity, living);
+                // Oldest first: the survivors are the tail of the burst.
+                Assert.All(cards.TakeLast(capacity), c => Assert.False(IsLeaving(c)));
+                Assert.All(cards.Take(cards.Count - capacity), c => Assert.True(IsLeaving(c)));
+            }
+            finally
+            {
+                foreach (var card in cards)
+                {
+                    AllowImmediateClose(card);
+                    card.Dispose();
+                }
+                PumpUntil(() => Motion.Holders == 0, 4000);
+            }
+        });
+    }
+
+    private static bool IsLeaving(FastQuickActionsWindow card)
+        => (bool)typeof(FastQuickActionsWindow)
+            .GetField("_exitMotionStarted", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(card)!;
+
+    private static void AllowImmediateClose(FastQuickActionsWindow card)
+        => typeof(FastQuickActionsWindow)
+            .GetField("_allowImmediateClose", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(card, true);
+
+    [Fact]
+    public void TemporarilyHideDiscardsNothingAndTheNextCaptureBringsTheStackBack()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"winshot-qao-hide-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string capture = Path.Combine(directory, "capture.png");
+        using (var written = new SD.Bitmap(16, 16))
+            written.Save(capture, SD.Imaging.ImageFormat.Png);
+
+        RunSta(() =>
+        {
+            // Drain anything an earlier test left on the recently-closed stack.
+            while (FastQuickActionsWindow.PopRecentlyClosed() is not null) { }
+
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            settings.Current.OverlayAutoClose = true;
+            settings.Current.OverlayAutoCloseSeconds = 20;
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var first = new FastQuickActionsWindow(bitmap, settings, capture);
+            using var second = new FastQuickActionsWindow(bitmap, settings);
+            first.Show();
+            second.Show();
+
+            Invoke(second, "RunMenuAction", QuickActionsMenu.TemporarilyHide, "Temporarily hide");
+            PumpUntil(() => !first.Visible && !second.Visible, 3000);
+
+            Assert.False(first.Visible);
+            Assert.False(second.Visible);
+            Assert.False(first.IsDisposed);
+            Assert.False(second.IsDisposed);
+            // Non-destructive: nothing auto-closed, nothing went to recently-closed.
+            Assert.Null(FastQuickActionsWindow.PopRecentlyClosed());
+
+            using var third = new FastQuickActionsWindow(bitmap, settings);
+            Assert.True(first.Visible);
+            Assert.True(second.Visible);
+
+            third.Dispose();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+        });
+
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public void DraggingOutOffersTheFileAndTheBitmap()
+    {
+        RunSta(() =>
+        {
+            var bitmap = new SD.Bitmap(64, 40);
+            WF.DataObject data = FastQuickActionsWindow.CreateDragData(@"C:\captures\shot.png", bitmap);
+
+            // The file is what mail clients attach; the bitmap is what canvas and chat
+            // apps take, and without it they refused the drop outright.
+            Assert.True(data.GetDataPresent(WF.DataFormats.FileDrop));
+            Assert.True(data.GetDataPresent(WF.DataFormats.Bitmap));
+            Assert.Equal(new[] { @"C:\captures\shot.png" }, (string[])data.GetData(WF.DataFormats.FileDrop)!);
+
+            // The payload has to outlive the card. OLE fetches CF_BITMAP at the drop, and
+            // the auto-close timer and the stack cap both close cards on a WF.Timer that
+            // keeps ticking inside DoDragDrop's modal pump — so the card's _image can be
+            // disposed mid-drag, and handing OLE the live bitmap made every later fetch
+            // throw and the drop deliver nothing.
+            bitmap.Dispose();
+            var payload = Assert.IsAssignableFrom<SD.Image>(data.GetData(WF.DataFormats.Bitmap));
+            Assert.Equal(64, payload.Width);
+            payload.Dispose();
+        });
+    }
+
+    [Fact]
+    public void SavingSaysWhichFileItWroteAndWhereItWent()
+    {
+        (string title, string body) = FastQuickActionsWindow.SaveConfirmation(
+            Path.Combine("C:", "Users", "someone", "Pictures", "WinShot 2026-09-04 at 11.02.14.png"));
+
+        // Sentence case, the file rather than the whole path, and the folder it landed in —
+        // the card closes on save, so this line is the only thing that says where the
+        // capture went. A bare filename read as a fragment beside the batch confirmation's
+        // "All of them are in Pictures."
+        Assert.Equal("Saved", title);
+        Assert.Equal("WinShot 2026-09-04 at 11.02.14.png is in Pictures.", body);
+    }
+
+    [Fact]
+    public void DoubleClickingTheThumbnailOpensTheEditorAndASingleClickDoesNot()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            int edits = 0;
+            overlay.EditRequested += _ => edits++;
+            var body = new SD.Point(overlay.ClientSize.Width / 2, overlay.ClientSize.Height / 4);
+
+            Click(overlay, body, clicks: 1);
+            Assert.Equal(0, edits);
+
+            Click(overlay, body, clicks: 2);
+            Assert.Equal(1, edits);
+        });
+    }
+
+    [Fact]
+    public void ADoubleClickThatStartedAsADragDoesNotOpenTheEditor()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            int edits = 0;
+            overlay.EditRequested += _ => edits++;
+            var body = new SD.Point(overlay.ClientSize.Width / 2, overlay.ClientSize.Height / 4);
+
+            // A release with nothing armed is what a finished drag looks like.
+            Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(body, clicks: 2));
+
+            Assert.Equal(0, edits);
+        });
+    }
+
+    private static void Click(FastQuickActionsWindow overlay, SD.Point at, int clicks)
+    {
+        Invoke(overlay, "OnOverlayMouseDown", overlay, MouseArgs(at, 1));
+        Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(at, clicks));
+    }
+
+    private static WF.MouseEventArgs MouseArgs(SD.Point at, int clicks)
+        => new(WF.MouseButtons.Left, clicks, at.X, at.Y, 0);
+
+    [Fact]
+    public void ARecordingCardDiffersFromAScreenshotCardOnlyInsideItsStrip()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"winshot-qao-strip-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string media = Path.Combine(directory, "recording.mp4");
+        File.WriteAllBytes(media, new byte[86016]);
+
+        try
+        {
+            RunSta(() =>
+            {
+                // Each card takes ownership of the bitmap it is handed, so the two get
+                // their own copy of the same pixels.
+                var settings = new SettingsService();
+                using var shot = FastQuickActionsWindow.CreateForTheme(
+                    CreateBusyCapture(), settings, QuickAccessOverlayTheme.Dark);
+                shot.CreateControl();
+                using (var source = CreateBusyCapture())
+                    InstallPreviews(shot, source);
+                using SD.Bitmap plain = RenderCard(shot);
+
+                using var recording = FastQuickActionsWindow.CreateForMediaFile(
+                    media, CreateBusyCapture(), settings, canEdit: true, duration: TimeSpan.FromSeconds(53));
+                recording.CreateControl();
+                using (var source = CreateBusyCapture())
+                    InstallPreviews(recording, source);
+                using SD.Bitmap withStrip = RenderCard(recording);
+
+                Assert.Equal(plain.Size, withStrip.Size);
+                var card = (SD.Rectangle)typeof(FastQuickActionsWindow)
+                    .GetField("_cardRect", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(recording)!;
+                SD.Rectangle band = MediaCardStrip.GradientBounds(card, recording.DeviceDpi);
+
+                // The card is pinned: everything above the strip has to be the same bytes.
+                for (int y = 0; y < band.Top; y++)
+                {
+                    for (int x = 0; x < plain.Width; x++)
+                        Assert.Equal(plain.GetPixel(x, y).ToArgb(), withStrip.GetPixel(x, y).ToArgb());
+                }
+
+                // And the strip has to actually be there — scanned, not eyeballed.
+                int changed = 0;
+                for (int y = band.Top; y < band.Bottom; y++)
+                {
+                    for (int x = 0; x < plain.Width; x++)
+                    {
+                        if (plain.GetPixel(x, y).ToArgb() != withStrip.GetPixel(x, y).ToArgb())
+                            changed++;
+                    }
+                }
+                Assert.True(changed > band.Width, $"the recording strip barely drew anything ({changed} pixels)");
+            });
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void APinGrowsOutOfTheCardItCameFrom()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var card = new FastQuickActionsWindow(bitmap, settings);
+            card.CreateControl();
+            SD.Rectangle origin = card.CardScreenBounds;
+
+            using var pin = new WinShot.Pin.FastPinWindow(card.CloneImage(), settings);
+            pin.CreateControl();
+            SD.Rectangle settled = pin.Bounds;
+            pin.GrowFrom(origin);
+
+            pin.Show();
+            Assert.Equal(origin, pin.Bounds);
+
+            PumpUntil(() => Motion.Holders == 0 && pin.Bounds == settled, 4000);
+
+            Assert.Equal(settled, pin.Bounds);
+            Assert.Equal(0, Motion.Holders);
+            pin.Hide();
+        });
+    }
+
+    [Fact]
+    public void ClosingTheCardForAPinSkipsTheExitFlight()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var card = new FastQuickActionsWindow(bitmap, settings);
+            card.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            card.CloseWithoutMotion();
+
+            // Two copies of the same capture, one growing and one flying off, reads as a
+            // duplicate rather than as one object moving.
+            Assert.False(IsLeaving(card));
+            Assert.True(card.IsDisposed);
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    /// <summary>
+    /// The re-aim in PositionFromSettings has to fire while an entrance is in flight and
+    /// never after one has landed. It reads a flag rather than the Motion handle because
+    /// with animation turned off Motion.Run applies the end state and calls onDone INLINE,
+    /// before the caller ever gets a handle to assign — so the handle field is non-null for
+    /// a tween that already finished, and a handle-based guard replayed the whole entrance
+    /// on every later reposition: the card thrown off screen and snapped back, on a machine
+    /// whose owner asked for no animation at all.
+    /// </summary>
+    [Fact]
+    public void ARepositionReAimsAnEntranceInFlightButNeverReplaysOneThatLanded()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            // Pin the monitor: "move to the active screen" reads the live cursor, so a second
+            // placement could otherwise choose a different slot for reasons of its own.
+            settings.Current.OverlayMoveToActiveScreen = false;
+
+            using (new AnimationSetting(false))
+            {
+                using var landed = new FastQuickActionsWindow(bitmap, settings);
+                landed.Show();
+
+                // The trap itself, asserted: the tween is over, and its handle is not null.
+                Assert.NotNull(EnterMotion(landed));
+                Assert.False(EnterMotionRunning(landed));
+
+                SD.Rectangle area = WF.Screen.FromRectangle(landed.Bounds).WorkingArea;
+                var moves = new List<SD.Rectangle>();
+                void Track(object? sender, EventArgs e) => moves.Add(landed.Bounds);
+                landed.LocationChanged += Track;
+                Invoke(landed, "PositionFromSettings");
+                landed.LocationChanged -= Track;
+
+                // The settled location alone proves nothing — a replay ends where it began.
+                // Watch the way through: the entrance starts from outside the anchored edge,
+                // so a replayed one is the only thing that puts the card off the working area.
+                // (Not an equality against one slot: OpenWindows is static and another test
+                // class's card landing mid-run legitimately restacks this one.)
+                Assert.All(moves, bounds => Assert.True(
+                    area.Contains(bounds),
+                    $"a landed card must not leave the working area on a reposition, but went to {bounds}"));
+            }
+
+            using (new AnimationSetting(true))
+            {
+                using var flying = new FastQuickActionsWindow(bitmap, settings);
+                flying.Show();
+
+                // The other half of the guard: a card still on its way is re-aimed, or
+                // learning its monitor's DPI mid-slide drops it on the stale slot and eats
+                // the entrance. A fresh tween handle is that re-aim.
+                Assert.True(EnterMotionRunning(flying));
+                object? before = EnterMotion(flying);
+                Invoke(flying, "PositionFromSettings");
+                Assert.NotSame(before, EnterMotion(flying));
+                flying.Hide();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Pinning a card closes it immediately, with no exit flight, and everything else in the
+    /// corner restacks. A card still sliding in must survive that: the restack used to stop
+    /// its entrance outright — before even checking whether the slot had changed — leaving
+    /// the card wherever the slide had reached and re-aiming it off a rectangle that, on a
+    /// monitor stacked above the laptop, belongs to the screen below.
+    /// </summary>
+    [Fact]
+    public void ClosingOneCardDoesNotAbortAnotherCardsEntrance()
+    {
+        RunSta(() =>
+        {
+            using var animations = new AnimationSetting(true);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var first = new SD.Bitmap(600, 400);
+            using var second = new SD.Bitmap(600, 400);
+
+            var landed = new FastQuickActionsWindow(first, settings);
+            landed.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            var arriving = new FastQuickActionsWindow(second, settings);
+            arriving.Show();
+            PumpUntil(() => EnterMotionRunning(arriving), 2000);
+            Assert.True(EnterMotionRunning(arriving), "the second card never started its entrance");
+
+            // A frame in, not at t=0. The second card's entrance origin is exactly the first
+            // card's slot — one card-height plus a gutter below its own — so at t=0 the card
+            // is already standing on the slot the close is about to hand it, there is nothing
+            // left to animate, and the re-aim correctly just lets it stay there.
+            SD.Point origin = arriving.Location;
+            PumpUntil(() => arriving.Location != origin, 1000);
+            Assert.NotEqual(origin, arriving.Location);
+
+            SD.Point onlySlot = QuickAccessOverlayLayout.Place(
+                WF.Screen.PrimaryScreen!.WorkingArea, arriving.Size, settings.Current.OverlayPosition, 0, arriving.DeviceDpi);
+            int before = Math.Abs(arriving.Location.Y - onlySlot.Y);
+
+            landed.CloseWithoutMotion();
+            WF.Application.DoEvents();
+            Assert.True(EnterMotionRunning(arriving), "the restack killed the entrance instead of re-aiming it");
+            // Re-aimed from where the slide had reached, not rewound to its origin. Handing
+            // the entrance back with a fresh EnterOrigin teleported the card a full card-
+            // height away from the slot it was already approaching and replayed the whole
+            // 280 ms — motion that reads as "the card left and came back".
+            Assert.True(
+                Math.Abs(arriving.Location.Y - onlySlot.Y) <= before + 2,
+                $"the re-aimed entrance jumped back from {before} px to " +
+                $"{Math.Abs(arriving.Location.Y - onlySlot.Y)} px away from its slot");
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+            Assert.Equal(onlySlot, arriving.Location);
+
+            arriving.CloseWithoutMotion();
+            PumpUntil(() => Motion.Holders == 0, 3000);
+            landed.Dispose();
+            arriving.Dispose();
+        });
+    }
+
+    /// <summary>
+    /// A card fading out for the annotate hand-off is out of the stack the moment the
+    /// gesture starts, and stays Visible for the 140 ms of the fade. The restack must agree
+    /// with PositionFromSettings and StackedCards about that, or a close landing inside that
+    /// window reserves a slot for a card that is on its way off screen and leaves a gap.
+    /// </summary>
+    [Fact]
+    public void ARestackSkipsACardThatIsSteppingAside()
+    {
+        RunSta(() =>
+        {
+            using var animations = new AnimationSetting(true);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var one = new SD.Bitmap(600, 400);
+            using var two = new SD.Bitmap(600, 400);
+            using var three = new SD.Bitmap(600, 400);
+
+            var a = new FastQuickActionsWindow(one, settings);
+            a.Show();
+            var b = new FastQuickActionsWindow(two, settings);
+            b.Show();
+            var c = new FastQuickActionsWindow(three, settings);
+            c.Show();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            b.StepAside();
+            WF.Application.DoEvents();
+            Assert.True(b.Visible, "the test needs B still inside its fade");
+
+            c.CloseWithoutMotion();
+            PumpUntil(() => Motion.Holders == 0, 4000);
+
+            SD.Point bottomSlot = QuickAccessOverlayLayout.Place(
+                WF.Screen.PrimaryScreen!.WorkingArea, a.Size, settings.Current.OverlayPosition, 0, a.DeviceDpi);
+            SD.Point aSlot = a.Location;
+
+            a.CloseWithoutMotion();
+            b.CloseWithoutMotion();
+            PumpUntil(() => Motion.Holders == 0, 3000);
+            a.Dispose(); b.Dispose(); c.Dispose();
+
+            Assert.Equal(bottomSlot, aSlot);
+        });
+    }
+
+    /// <summary>
+    /// With animations off Motion.Run applies the end state and calls onDone INLINE, before
+    /// the caller is ever handed a tween to store — so the handle field is set AFTER onDone
+    /// cleared it and stays non-null for the life of the card. The entrance carries a
+    /// separate flag for exactly this; the step-aside pair now does too, and ComeBack's
+    /// "already up, nothing to do" fast path reads the flag instead of the handle.
+    /// </summary>
+    [Fact]
+    public void AStepAsideCycleWithAnimationsOffLeavesNothingInFlight()
+    {
+        RunSta(() =>
+        {
+            using var animations = new AnimationSetting(false);
+            using var bitmap = new SD.Bitmap(800, 500);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var card = new FastQuickActionsWindow(bitmap, settings);
+            card.Show();
+            PumpUntil(() => card.IsHandleCreated, 2000);
+
+            double opacity = card.Opacity;
+            SD.Point placed = card.Location;
+
+            card.StepAside();
+            PumpUntil(() => !card.Visible, 2000);
+            Assert.False(card.Visible);
+
+            card.ComeBack();
+            PumpUntil(() => card.Visible, 2000);
+            Assert.True(card.Visible);
+            Assert.Equal(opacity, card.Opacity, 3);
+            Assert.Equal(placed, card.Location);
+            Assert.False(StepAsideRunning(card), "the card still thinks a fade is in flight");
+            Assert.Equal(0, Motion.Holders);
+        });
+    }
+
+    private static bool StepAsideRunning(FastQuickActionsWindow overlay)
+        => (bool)typeof(FastQuickActionsWindow)
+            .GetField("_stepAsideRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+
+    private static object? EnterMotion(FastQuickActionsWindow overlay)
+        => typeof(FastQuickActionsWindow)
+            .GetField("_enterMotion", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay);
+
+    private static bool EnterMotionRunning(FastQuickActionsWindow overlay)
+        => (bool)typeof(FastQuickActionsWindow)
+            .GetField("_enterMotionRunning", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+
+    private sealed class AnimationSetting : IDisposable
+    {
+        private readonly Func<bool> _previous;
+
+        public AnimationSetting(bool enabled)
+        {
+            _previous = Motion.AnimationsEnabled;
+            Motion.AnimationsEnabled = () => enabled;
+        }
+
+        public void Dispose() => Motion.AnimationsEnabled = _previous;
+    }
+
+    private static void PumpUntil(Func<bool> condition, int timeoutMs)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            WF.Application.DoEvents();
+            Thread.Sleep(5);
+        }
+    }
+
     private static void InvokeKey(FastQuickActionsWindow overlay, WF.Keys keys)
         => Invoke(overlay, "OnOverlayKeyDown", overlay, new WF.KeyEventArgs(keys));
+
+    private static object? InvokeWithResult(FastQuickActionsWindow overlay, string method, params object[] args)
+        => typeof(FastQuickActionsWindow)
+            .GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(overlay, args);
+
+    private static void SetPrivate(FastQuickActionsWindow overlay, string field, object value)
+        => typeof(FastQuickActionsWindow)
+            .GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(overlay, value);
 
     private static void Invoke(FastQuickActionsWindow overlay, string method, params object[] args)
         => typeof(FastQuickActionsWindow)

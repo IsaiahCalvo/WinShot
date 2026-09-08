@@ -174,6 +174,16 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         AddRow(4, 22, null, (_keystrokeCheck, 0));
         AddRow(16, 26, null, (countdownLabel, 4), (_countdownBox, 0), (countdownHint, 5));
         AddRow(20, 32, null, (cancel, 0), (start, 0));
+        // CleanShot renders its shortcuts on the action rows themselves; the dialog is the
+        // only place either key is discoverable, so it says both once under the buttons.
+        var shortcutHint = Label(
+            "Enter starts  ·  Alt+Enter records a GIF",
+            PadX,
+            DialogWidth - PadX * 2,
+            color: HintText,
+            size: ThemePalette.TextCaptionPt);
+        shortcutHint.TextAlign = SD.ContentAlignment.MiddleCenter;
+        AddRow(6, 18, null, (shortcutHint, 0));
 
         // Center the action pair on the card.
         int pairWidth = 88 + 10 + 88;
@@ -319,11 +329,9 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         {
             // Re-enumerate devices on every open — the cached dialog otherwise shows
             // the hardware set from first open forever (a webcam plugged in later
-            // would stay invisible). Keep the user's picks when they still exist.
-            string? mic = dialog.MicrophoneDeviceName;
-            string? cam = dialog.WebcamDeviceName;
+            // would stay invisible). ApplySettings then re-selects the persisted picks
+            // where those devices still exist.
             dialog.LoadDevices();
-            dialog.RestoreDeviceSelection(mic, cam);
             dialog.ApplySettings(settings);
             dialog.Opacity = 1;
             dialog.ShowInTaskbar = false;
@@ -448,7 +456,26 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             return;
         }
 
+        // Alt+Enter is the one-key path to a GIF: it switches the format picker over
+        // (so the choice is visible for the frame before the dialog hides) and starts.
+        if (e.KeyCode == WF.Keys.Enter && e.Alt)
+        {
+            SelectGifFormat();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            Complete(WF.DialogResult.OK);
+            return;
+        }
+
         base.OnKeyDown(e);
+    }
+
+    /// <summary>Switches the format picker to GIF. Internal so the Alt+Enter path is
+    /// testable without a message loop.</summary>
+    internal void SelectGifFormat()
+    {
+        if (_format.SelectedIndex != 1)
+            _format.SelectedIndex = 1;
     }
 
     protected override void OnFormClosing(WF.FormClosingEventArgs e)
@@ -520,7 +547,15 @@ public sealed class FastRecordingOptionsDialog : WF.Form
             <= 9 => 3,
             _ => 2,
         };
-        _qualityCombo.SelectedIndex = 1;
+        _qualityCombo.SelectedIndex = RecordingOptions.ClampVideoQuality(settings.RecordingVideoQuality) switch
+        {
+            >= 85 => 0,
+            <= 50 => 2,
+            _ => 1,
+        };
+        // The pickers open on whatever was chosen last, from Settings rather than a
+        // process-local cache, so a device pick survives a restart.
+        RestoreDeviceSelection(settings.RecordingMicrophoneDevice, settings.RecordingWebcamDevice);
         _webcamCombo.SelectedIndex = RecordingOptions.NormalizeWebcamPosition(settings.WebcamOverlayPosition) switch
         {
             "top-left" => 1,
@@ -584,137 +619,13 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         };
 
     private WF.CheckBox Check(string text, bool isChecked) =>
-        new DarkCheckBox(_scale)
+        new DarkCheckBox
         {
+            Scale = _scale,
             Checked = isChecked,
             Location = new SD.Point(S(PadX), 0),
             Text = text,
         };
-
-    /// <summary>
-    /// Owner-drawn dark toggle glyph for <see cref="DarkCheckBox"/>: an accent-filled
-    /// rounded box with a white check, replacing the stock WinForms flat glyph that
-    /// ignores the dialog's palette.
-    /// </summary>
-    private static class ToggleGlyph
-    {
-        private static int Sc(int logical, double scale) => (int)Math.Round(logical * scale);
-
-        public static SD.Size PreferredSize(WF.Control control, double scale)
-        {
-            SD.Size text = WF.TextRenderer.MeasureText(control.Text, control.Font);
-            int box = Sc(16, scale);
-            return new SD.Size(
-                box + Sc(8, scale) + text.Width + 2,
-                Math.Max(box + 2, text.Height + 2));
-        }
-
-        public static void Paint(
-            SD.Graphics g,
-            WF.Control control,
-            double scale,
-            bool isChecked,
-            bool hot,
-            bool round,
-            bool focused)
-        {
-            g.Clear(Back);
-            g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-
-            int box = Sc(16, scale);
-            var rect = new SD.Rectangle(0, (control.Height - box) / 2, box, box);
-            int cornerRadius = Sc(4, scale);
-
-            if (isChecked)
-            {
-                using var fill = new SD.SolidBrush(Accent);
-                if (round)
-                {
-                    g.FillEllipse(fill, rect);
-                    int inset = (int)Math.Round(box * 0.3125);
-                    using var dot = new SD.SolidBrush(SD.Color.White);
-                    g.FillEllipse(dot, SD.Rectangle.Inflate(rect, -inset, -inset));
-                }
-                else
-                {
-                    using (var path = GdiPaths.RoundedRect(rect, cornerRadius))
-                        g.FillPath(fill, path);
-                    using var pen = new SD.Pen(SD.Color.White, Math.Max(2f, box / 8f))
-                    {
-                        StartCap = SD.Drawing2D.LineCap.Round,
-                        EndCap = SD.Drawing2D.LineCap.Round,
-                        LineJoin = SD.Drawing2D.LineJoin.Round,
-                    };
-                    g.DrawLines(pen, new[]
-                    {
-                        new SD.PointF(rect.X + box * 0.26f, rect.Y + box * 0.54f),
-                        new SD.PointF(rect.X + box * 0.43f, rect.Y + box * 0.72f),
-                        new SD.PointF(rect.X + box * 0.75f, rect.Y + box * 0.31f),
-                    });
-                }
-            }
-            else
-            {
-                using var fill = new SD.SolidBrush(FieldBack);
-                using var pen = new SD.Pen(SD.Color.FromArgb(hot ? 120 : 64, 255, 255, 255), 1f);
-                if (round)
-                {
-                    g.FillEllipse(fill, rect);
-                    g.DrawEllipse(pen, rect);
-                }
-                else
-                {
-                    using var path = GdiPaths.RoundedRect(rect, cornerRadius);
-                    g.FillPath(fill, path);
-                    g.DrawPath(pen, path);
-                }
-            }
-
-            int textX = box + Sc(8, scale);
-            var textRect = new SD.Rectangle(textX, 0, Math.Max(1, control.Width - textX), control.Height);
-            WF.TextRenderer.DrawText(
-                g,
-                control.Text,
-                control.Font,
-                textRect,
-                control.ForeColor,
-                WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left | WF.TextFormatFlags.SingleLine);
-            if (focused)
-                WF.ControlPaint.DrawFocusRectangle(g, textRect);
-        }
-    }
-
-    private sealed class DarkCheckBox : WF.CheckBox
-    {
-        private readonly double _scale;
-        private bool _hot;
-
-        public DarkCheckBox(double scale)
-        {
-            _scale = scale;
-            SetStyle(
-                WF.ControlStyles.UserPaint |
-                WF.ControlStyles.AllPaintingInWmPaint |
-                WF.ControlStyles.OptimizedDoubleBuffer |
-                WF.ControlStyles.ResizeRedraw,
-                true);
-            AutoSize = true;
-            BackColor = Back;
-            Cursor = WF.Cursors.Hand;
-            ForeColor = TextColor;
-            CheckedChanged += (_, _) => Invalidate();
-            GotFocus += (_, _) => Invalidate();
-            LostFocus += (_, _) => Invalidate();
-            MouseEnter += (_, _) => { _hot = true; Invalidate(); };
-            MouseLeave += (_, _) => { _hot = false; Invalidate(); };
-        }
-
-        public override SD.Size GetPreferredSize(SD.Size proposedSize)
-            => ToggleGlyph.PreferredSize(this, _scale);
-
-        protected override void OnPaint(WF.PaintEventArgs e)
-            => ToggleGlyph.Paint(e.Graphics, this, _scale, Checked, _hot, round: false, Focused);
-    }
 
     private DarkButton ActionButton(string text, SD.Color fillColor) =>
         new()

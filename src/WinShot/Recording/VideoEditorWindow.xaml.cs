@@ -29,7 +29,7 @@ public partial class VideoEditorWindow : Window
     private double _durationSec;
     private bool _trimInitialized; // trim range is set up once, not on preview reopen
     private bool _playing;
-    private bool _syncingPosition; // true while the timer drives the position slider
+    private bool _scrubbing;       // dragging the filmstrip to move the playhead
     private bool _exporting;
     private bool _closed;
     private bool _exportCancellationRequested;
@@ -42,6 +42,23 @@ public partial class VideoEditorWindow : Window
     private double _trimStartSec;
     private double _trimEndSec;
     private bool _filmstripBuilt; // thumbnails are generated at most once
+
+    // The slice of the clip the strip is showing. At full zoom this is the whole recording;
+    // zoomed in it is a pannable window, which is what makes frame-accurate trimming possible
+    // on a long take.
+    private TimelineView _view = TimelineView.Full(0);
+    private IDisposable? _zoomTween;
+    private IReadOnlyList<System.Windows.Media.Imaging.BitmapImage?> _frameImages =
+        Array.Empty<System.Windows.Media.Imaging.BitmapImage?>();
+    private int _frameHeight = 54;
+
+    // Export resolution choices resolved against this project's real dimensions, so the
+    // picker can label the pixels each one produces instead of a bare percentage.
+    private IReadOnlyList<VideoResolutionPreset> _resolutions =
+        VideoResolutionPresets.For(1920, 1080);
+    private long _sourceBytes;
+    private string? _chosenFolder;      // remembered for the session when "Choose folder…" is used
+    private int _lastDestinationIndex;  // to restore the picker when a folder choice is cancelled
 
     // Drag handles are 12px wide; the accent bar sits on their inner edge so the
     // selection spans from the start-thumb's right edge to the end-thumb's left.
@@ -60,6 +77,8 @@ public partial class VideoEditorWindow : Window
         Closed += (_, _) =>
         {
             _closed = true;
+            _zoomTween?.Dispose();
+            _zoomTween = null;
             _positionTimer.Stop();
             RequestExportCancellation();
             if (_exporting && !_exportCompleted && _pendingOutputPath is not null)
@@ -69,7 +88,7 @@ public partial class VideoEditorWindow : Window
             MemoryCleanup.Request();
         };
 
-        StatusText.Text = "Loading preview...";
+        StatusText.Text = "Loading preview…";
         Dispatcher.BeginInvoke(
             DispatcherPriority.ContextIdle,
             new Action(OpenPreviewSafely));
@@ -86,7 +105,7 @@ public partial class VideoEditorWindow : Window
         Media.Play();
         Media.Pause();
         _playing = false;
-        BtnPlay.Content = "_Play";
+        BtnPlay.Content = "Play";
         _positionTimer.Stop();
     }
 
@@ -99,7 +118,7 @@ public partial class VideoEditorWindow : Window
         catch (Exception ex)
         {
             Log.Error("Failed to open media preview", ex);
-            StatusText.Text = "Preview failed - the file can still be exported.";
+            StatusText.Text = "Preview failed — the file can still be exported.";
         }
     }
 
@@ -110,12 +129,13 @@ public partial class VideoEditorWindow : Window
         if (Media.NaturalDuration.HasTimeSpan)
             _durationSec = Media.NaturalDuration.TimeSpan.TotalSeconds;
         StatusText.Text = "";
-        PositionSlider.Maximum = Math.Max(0.1, _durationSec);
+        PopulateResolutions();
         if (!_trimInitialized)
         {
             _trimInitialized = true;
             _trimStartSec = 0;
             _trimEndSec = Math.Max(0.1, _durationSec);
+            _view = TimelineView.Full(_durationSec);
             UpdateTrimUi();
             _ = BuildFilmstripAsync();
         }
@@ -123,10 +143,37 @@ public partial class VideoEditorWindow : Window
         UpdateTimeLabel();
     }
 
+    /// <summary>
+    /// Rebuilds the resolution picker against the source's real dimensions, keeping whatever the
+    /// user had selected. It always rebuilds: the old "skip when the list matches" guard compared
+    /// the resolved presets against the <c>_resolutions</c> seed rather than against the combo,
+    /// so a 1920x1080 source — the seed's own size — kept the XAML's single "Original"
+    /// placeholder while 75%, 50% and 720p sat in a list nothing could show.
+    /// </summary>
+    private void PopulateResolutions()
+    {
+        if (ResolutionCombo is null || Media is null)
+            return;
+
+        var resolved = VideoResolutionPresets.For(
+            (uint)Math.Max(0, Media.NaturalVideoWidth),
+            (uint)Math.Max(0, Media.NaturalVideoHeight));
+
+        int selected = Math.Max(0, ResolutionCombo.SelectedIndex);
+        _resolutions = resolved;
+        ResolutionCombo.Items.Clear();
+        foreach (VideoResolutionPreset preset in resolved)
+            ResolutionCombo.Items.Add(new ComboBoxItem { Content = preset.Label });
+        ResolutionCombo.SelectedIndex = Math.Min(selected, resolved.Count - 1);
+    }
+
+    private VideoResolutionPreset SelectedResolution =>
+        _resolutions[Math.Clamp(ResolutionCombo?.SelectedIndex ?? 0, 0, _resolutions.Count - 1)];
+
     private void OnMediaEnded(object sender, RoutedEventArgs e)
     {
         _playing = false;
-        BtnPlay.Content = "_Play";
+        BtnPlay.Content = "Play";
         _positionTimer.Stop();
         UpdateTimeLabel();
     }
@@ -144,7 +191,7 @@ public partial class VideoEditorWindow : Window
         {
             Media.Pause();
             _playing = false;
-            BtnPlay.Content = "_Play";
+            BtnPlay.Content = "Play";
             _positionTimer.Stop();
         }
         else
@@ -153,7 +200,7 @@ public partial class VideoEditorWindow : Window
                 Media.Position = TimeSpan.Zero;
             Media.Play();
             _playing = true;
-            BtnPlay.Content = "_Pause";
+            BtnPlay.Content = "Pause";
             _positionTimer.Start();
         }
     }
@@ -170,7 +217,7 @@ public partial class VideoEditorWindow : Window
         if (e.Key == Key.E && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
             if (!_exporting)
-                OnExport(BtnExport, new RoutedEventArgs());
+                _ = RunExportAsync(trimOnly: false);
             e.Handled = true;
             return;
         }
@@ -188,17 +235,6 @@ public partial class VideoEditorWindow : Window
 
     private void OnPositionTimer(object? sender, EventArgs e)
     {
-        _syncingPosition = true;
-        PositionSlider.Value = Media.Position.TotalSeconds;
-        _syncingPosition = false;
-        UpdatePlayhead();
-        UpdateTimeLabel();
-    }
-
-    private void OnPositionSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_syncingPosition || _exporting) return;
-        Media.Position = TimeSpan.FromSeconds(PositionSlider.Value);
         UpdatePlayhead();
         UpdateTimeLabel();
     }
@@ -218,20 +254,19 @@ public partial class VideoEditorWindow : Window
     /// <summary>Usable horizontal span of the track (px) the playhead and thumbs map onto.</summary>
     private double TimelineSpan => Math.Max(1, TimelineTrack.ActualWidth - ThumbWidth * 2);
 
-    /// <summary>Maps a position in seconds to an x offset (px) on the timeline canvas.</summary>
-    private double SecondsToX(double seconds)
-    {
-        double duration = Math.Max(0.1, _durationSec);
-        double fraction = Math.Clamp(seconds / duration, 0, 1);
-        return ThumbWidth + fraction * TimelineSpan;
-    }
+    /// <summary>Maps a position in seconds to an x offset (px) on the timeline canvas, through
+    /// whatever slice of the clip is currently in view.</summary>
+    private double SecondsToX(double seconds) =>
+        ThumbWidth + (_view.ToFraction(seconds) * TimelineSpan);
+
+    /// <summary>Unclamped sibling of <see cref="SecondsToX"/>, so a thumbnail that starts off
+    /// the left edge is drawn partly off the strip instead of piling up against it.</summary>
+    private double SecondsToXUnclamped(double seconds) =>
+        ThumbWidth + ((seconds - _view.StartSeconds) / _view.Span * TimelineSpan);
 
     /// <summary>Maps an x offset (px) on the timeline back to seconds.</summary>
-    private double XToSeconds(double x)
-    {
-        double fraction = Math.Clamp((x - ThumbWidth) / TimelineSpan, 0, 1);
-        return fraction * Math.Max(0.1, _durationSec);
-    }
+    private double XToSeconds(double x) =>
+        _view.ToSeconds((x - ThumbWidth) / TimelineSpan);
 
     private void OnTimelineSizeChanged(object sender, SizeChangedEventArgs e) => UpdateTrimUi();
 
@@ -242,14 +277,145 @@ public partial class VideoEditorWindow : Window
         if (e.OriginalSource is FrameworkElement fe &&
             (ReferenceEquals(fe, TrimStartThumb) || ReferenceEquals(fe, TrimEndThumb)))
             return;
-        double x = e.GetPosition(TimelineCanvas).X;
-        double seconds = XToSeconds(x);
-        Media.Position = TimeSpan.FromSeconds(seconds);
-        _syncingPosition = true;
-        PositionSlider.Value = seconds;
-        _syncingPosition = false;
+
+        // The filmstrip IS the scrub control now, so the press starts a drag rather than
+        // making a single jump — the separate position slider above it said the same thing
+        // twice and neither one showed where the trim range was.
+        _scrubbing = true;
+        TimelineTrack.CaptureMouse();
+        SeekTo(XToSeconds(e.GetPosition(TimelineCanvas).X));
+    }
+
+    private void OnTimelineDragScrub(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_scrubbing || _exporting || _durationSec <= 0) return;
+        SeekTo(XToSeconds(e.GetPosition(TimelineCanvas).X));
+    }
+
+    /// <summary>
+    /// The filmstrip replaced the position slider, so it has to carry the keyboard seek the
+    /// slider had: arrows step, Home/End jump, and +/-/0 work the zoom the wheel otherwise
+    /// owns alone. Without this the frame-accurate trimming the timeline exists for was
+    /// unreachable without a mouse.
+    /// </summary>
+    private void OnTimelineKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0)
+            return;
+
+        double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? 5
+            : Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 1
+            : FrameStepSeconds;
+
+        switch (e.Key)
+        {
+            case Key.Left:
+                SeekTo(Media.Position.TotalSeconds - step);
+                break;
+            case Key.Right:
+                SeekTo(Media.Position.TotalSeconds + step);
+                break;
+            case Key.Home:
+                SeekTo(0);
+                break;
+            case Key.End:
+                SeekTo(_durationSec);
+                break;
+            case Key.OemPlus:
+            case Key.Add:
+                ZoomTimeline(TimelineView.WheelZoomFactor);
+                break;
+            case Key.OemMinus:
+            case Key.Subtract:
+                ZoomTimeline(1 / TimelineView.WheelZoomFactor);
+                break;
+            case Key.D0:
+            case Key.NumPad0:
+                OnZoomFit(TimelineTrack, new RoutedEventArgs());
+                break;
+            default:
+                return;
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>One frame at the clip's own rate, near enough: the editor never learns the
+    /// real frame rate, and 1/30 s is the step a nudge should feel like either way.</summary>
+    private const double FrameStepSeconds = 1.0 / 30;
+
+    /// <summary>Zooms about the playhead — the keyboard has no pointer to zoom about.</summary>
+    private void ZoomTimeline(double factor)
+    {
+        _zoomTween?.Dispose();
+        _zoomTween = null;
+        _view = _view.Zoomed(factor, Media.Position.TotalSeconds, _durationSec);
+        UpdateTrimUi();
+    }
+
+    private void OnTimelineScrubReleased(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_scrubbing) return;
+        _scrubbing = false;
+        if (TimelineTrack.IsMouseCaptured)
+            TimelineTrack.ReleaseMouseCapture();
+    }
+
+    private void SeekTo(double seconds)
+    {
+        Media.Position = TimeSpan.FromSeconds(Math.Clamp(seconds, 0, Math.Max(0, _durationSec)));
         UpdatePlayhead();
         UpdateTimeLabel();
+    }
+
+    /// <summary>
+    /// The wheel zooms the strip about the pointer; Shift pans instead. Direct manipulation, so
+    /// it lands on the frame rather than easing — the pointer has to stay on the moment it is
+    /// pointing at. The animated move is the Fit button, which is a command, not a drag.
+    /// </summary>
+    private void OnTimelineWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (_exporting || _durationSec <= 0 || e.Delta == 0)
+            return;
+
+        _zoomTween?.Dispose();
+        _zoomTween = null;
+        int notches = Math.Sign(e.Delta);
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            _view = _view.Panned(-notches * _view.Span * 0.15, _durationSec);
+        }
+        else
+        {
+            double factor = notches > 0 ? TimelineView.WheelZoomFactor : 1 / TimelineView.WheelZoomFactor;
+            _view = _view.Zoomed(factor, XToSeconds(e.GetPosition(TimelineCanvas).X), _durationSec);
+        }
+
+        UpdateTrimUi();
+        e.Handled = true;
+    }
+
+    /// <summary>Zooms back out to the whole clip. Unlike the wheel this is a command with no
+    /// finger on it, so it eases rather than cutting.</summary>
+    private void OnZoomFit(object sender, RoutedEventArgs e)
+    {
+        if (_durationSec <= 0)
+            return;
+
+        TimelineView from = _view;
+        TimelineView to = TimelineView.Full(_durationSec);
+        _zoomTween?.Dispose();
+        _zoomTween = Motion.Run(
+            Motion.SwapMs,
+            Motion.EaseOutCubic,
+            amount =>
+            {
+                if (_closed)
+                    return;
+                _view = TimelineView.Lerp(from, to, amount);
+                UpdateTrimUi();
+            },
+            () => _zoomTween = null);
     }
 
     private void OnTrimStartDrag(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
@@ -357,10 +523,9 @@ public partial class VideoEditorWindow : Window
     {
         _trimStartSec = range.StartSeconds;
         _trimEndSec = range.EndSeconds;
+        // Nudging a handle off the visible slice would leave it un-nudgeable.
+        _view = _view.Containing(previewSeconds, _durationSec);
         Media.Position = TimeSpan.FromSeconds(previewSeconds);
-        _syncingPosition = true;
-        PositionSlider.Value = previewSeconds;
-        _syncingPosition = false;
         UpdateTrimUi();
         UpdateTimeLabel();
     }
@@ -391,10 +556,19 @@ public partial class VideoEditorWindow : Window
         SelectionBorder.Width = Math.Max(0, endX - startX);
         SelectionBorder.Height = height;
 
+        UpdateExportButtons();
         if (TrimStartLabel is not null) TrimStartLabel.Text = $"In {FormatTime(_trimStartSec)}";
         if (TrimEndLabel is not null) TrimEndLabel.Text = $"Out {FormatTime(_trimEndSec)}";
         if (TrimRangeLabel is not null) TrimRangeLabel.Text = FormatTime(Math.Max(0, _trimEndSec - _trimStartSec));
 
+        UpdateOutputSummary(); // the estimate is a function of the trimmed duration
+        if (BtnZoomFit is not null)
+        {
+            BtnZoomFit.Visibility = _durationSec > 0 && !_view.IsFull(_durationSec)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        LayOutFilmstrip();
         UpdatePlayhead();
     }
 
@@ -442,7 +616,9 @@ public partial class VideoEditorWindow : Window
             }
 
             if (_closed) return;
-            RenderFilmstrip(images, thumbWidth, thumbHeight);
+            _frameImages = images;
+            _frameHeight = thumbHeight;
+            LayOutFilmstrip();
         }
         catch (Exception ex)
         {
@@ -480,26 +656,40 @@ public partial class VideoEditorWindow : Window
         }
     }
 
-    private void RenderFilmstrip(
-        IReadOnlyList<System.Windows.Media.Imaging.BitmapImage?> images, int thumbWidth, int thumbHeight)
+    /// <summary>
+    /// Lays the sampled frames across the strip at the times they were taken from, mapped
+    /// through the current view — so zooming in stretches the tiles that are still on screen
+    /// instead of re-sampling a video that may no longer be open.
+    /// </summary>
+    private void LayOutFilmstrip()
     {
-        FilmstripItems.Items.Clear();
-        if (images.Count == 0) return;
+        if (FilmstripItems is null || TimelineTrack is null)
+            return;
 
-        // Tile thumbnails left-to-right across the full track width.
-        double span = Math.Max(thumbWidth, TimelineTrack.ActualWidth);
-        double step = span / images.Count;
-        for (int i = 0; i < images.Count; i++)
+        FilmstripItems.Items.Clear();
+        if (_frameImages.Count == 0 || _durationSec <= 0)
+            return;
+
+        double slice = _durationSec / _frameImages.Count;
+        for (int i = 0; i < _frameImages.Count; i++)
         {
-            if (images[i] is null) continue;
+            if (_frameImages[i] is null)
+                continue;
+
+            double startSeconds = i * slice;
+            double left = SecondsToXUnclamped(startSeconds);
+            double right = SecondsToXUnclamped(startSeconds + slice);
+            if (right <= 0 || left >= TimelineTrack.ActualWidth)
+                continue; // scrolled out of the visible slice
+
             var image = new System.Windows.Controls.Image
             {
-                Source = images[i],
-                Width = step + 1, // +1 avoids hairline gaps between tiles
-                Height = thumbHeight,
+                Source = _frameImages[i],
+                Width = Math.Max(1, right - left) + 1, // +1 avoids hairline gaps between tiles
+                Height = _frameHeight,
                 Stretch = System.Windows.Media.Stretch.UniformToFill,
             };
-            Canvas.SetLeft(image, i * step);
+            Canvas.SetLeft(image, left);
             Canvas.SetTop(image, 0);
             FilmstripItems.Items.Add(image);
         }
@@ -522,31 +712,121 @@ public partial class VideoEditorWindow : Window
 
     private void OnOutputSettingsChanged(object sender, RoutedEventArgs e) => UpdateOutputSummary();
 
+    /// <summary>
+    /// Trim-only is offered only once the handles have actually moved, and the primary stops
+    /// promising a trim it is not making.
+    /// </summary>
+    private void UpdateExportButtons()
+    {
+        if (BtnExport is null || BtnTrimOnly is null)
+            return;
+
+        bool hasTrim = VideoExportLabels.HasTrim(_trimStartSec, _trimEndSec, _durationSec);
+        BtnExport.Content = VideoExportLabels.PrimaryLabel(hasTrim);
+        System.Windows.Automation.AutomationProperties.SetHelpText(
+            BtnExport, VideoExportLabels.PrimaryHelp(hasTrim) + " Keyboard shortcut: Control E.");
+        BtnTrimOnly.Visibility = hasTrim && !_exporting ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnDestinationChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DestinationCombo is null)
+            return;
+
+        if (DestinationCombo.SelectedIndex != VideoExportDestination.ChooseFolder)
+        {
+            _lastDestinationIndex = DestinationCombo.SelectedIndex;
+            return;
+        }
+
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "Choose where the exported video is saved",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(_chosenFolder)
+                ? _chosenFolder!
+                : Path.GetDirectoryName(_mp4Path) ?? "",
+        };
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            _chosenFolder = dialog.SelectedPath;
+            // Say where it is going rather than leaving the picker on the verb.
+            ((ComboBoxItem)DestinationCombo.Items[VideoExportDestination.ChooseFolder]!).Content =
+                Path.GetFileName(_chosenFolder.TrimEnd(Path.DirectorySeparatorChar));
+            _lastDestinationIndex = VideoExportDestination.ChooseFolder;
+        }
+        else
+        {
+            // Cancelling the browser must not silently change where the file goes.
+            DestinationCombo.SelectedIndex = _lastDestinationIndex;
+        }
+    }
+
     private void UpdateOutputSummary()
     {
         if (OutputSummaryText is null || ResolutionCombo is null || QualityCombo is null ||
             FrameRateCombo is null || MuteCheck is null || MonoCheck is null)
             return;
 
-        string dimensions = "Source dimensions";
-        if (Media is not null && Media.NaturalVideoWidth > 0 && Media.NaturalVideoHeight > 0)
-        {
-            var video = VideoExportVideoSettings.FromControls(
-                (uint)Media.NaturalVideoWidth,
-                (uint)Media.NaturalVideoHeight,
-                sourceFrameRate: 30,
-                ResolutionCombo.SelectedIndex,
-                QualityCombo.SelectedIndex,
-                FrameRateCombo.SelectedIndex);
-            dimensions = $"{video.Width} × {video.Height}";
-        }
+        VideoResolutionPreset preset = SelectedResolution;
+        var video = VideoExportVideoSettings.FromSize(
+            preset.Width,
+            preset.Height,
+            sourceFrameRate: 30,
+            QualityCombo.SelectedIndex,
+            FrameRateCombo.SelectedIndex);
 
         string quality = SelectedComboText(QualityCombo, "High");
         string frameRate = SelectedComboText(FrameRateCombo, "Source") + " FPS";
-        string audio = MuteCheck.IsChecked == true
+        bool muted = MuteCheck.IsChecked == true;
+        string audio = muted
             ? "Mute audio"
             : MonoCheck.IsChecked == true ? "Mono audio" : "Original audio";
-        OutputSummaryText.Text = $"{dimensions}  •  {quality}  •  {frameRate}  •  {audio}";
+
+        // Recomputed on every quality, size, frame-rate and trim change, because the whole
+        // point of an estimate is that it moves when the thing it estimates moves.
+        double seconds = _durationSec > 0 ? Math.Max(0, _trimEndSec - _trimStartSec) : 0;
+        long estimate = VideoExportEstimate.Bytes(
+            video.Bitrate,
+            muted ? 0 : VideoExportEstimate.AudioBitrate,
+            seconds);
+        string size = estimate > 0 ? $"  •  ~{VideoExportEstimate.FormatBytes(estimate)}" : "";
+        OutputSummaryText.Text =
+            $"{video.Width} × {video.Height}  •  {quality}  •  {frameRate}  •  {audio}{size}";
+    }
+
+    /// <summary>The size it really came out at, and how that compares to the source — the
+    /// estimate above is a promise, and this is the receipt.</summary>
+    private string DescribeSavedSize(string savedPath)
+    {
+        try
+        {
+            long saved = new FileInfo(savedPath).Length;
+            if (saved <= 0)
+                return "";
+            string? ratio = VideoExportEstimate.ComparedToSource(saved, SourceBytes());
+            return ratio is null
+                ? $" — {VideoExportEstimate.FormatBytes(saved)}"
+                : $" — {VideoExportEstimate.FormatBytes(saved)}, {ratio}";
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read the exported video size", ex);
+            return "";
+        }
+    }
+
+    private long SourceBytes()
+    {
+        if (_sourceBytes != 0)
+            return _sourceBytes;
+        try { _sourceBytes = new FileInfo(_mp4Path).Length; }
+        catch (Exception ex)
+        {
+            Log.Error("Could not read the source video size", ex);
+            _sourceBytes = -1;
+        }
+        return _sourceBytes;
     }
 
     private static string SelectedComboText(ComboBox combo, string fallback) =>
@@ -554,7 +834,13 @@ public partial class VideoEditorWindow : Window
 
     // ---- export ----
 
-    private async void OnExport(object sender, RoutedEventArgs e)
+    private void OnExport(object sender, RoutedEventArgs e) => _ = RunExportAsync(trimOnly: false);
+
+    private void OnTrimOnly(object sender, RoutedEventArgs e) => _ = RunExportAsync(trimOnly: true);
+
+    /// <param name="trimOnly">Cut to the trimmed range keeping the source encoding — no
+    /// re-compression, and a fraction of the time.</param>
+    private async Task RunExportAsync(bool trimOnly)
     {
         if (_exporting) return;
         if (_durationSec <= 0)
@@ -571,6 +857,12 @@ public partial class VideoEditorWindow : Window
 
         double startSec = trimRange.StartSeconds;
 
+        if (trimOnly && !VideoExportLabels.HasTrim(_trimStartSec, _trimEndSec, _durationSec))
+        {
+            StatusText.Text = "Move a trim handle first, or use Convert.";
+            return;
+        }
+
         _exporting = true;
         _exportCancellationRequested = false;
         _exportCompleted = false;
@@ -582,7 +874,7 @@ public partial class VideoEditorWindow : Window
         {
             Media.Pause();
             _playing = false;
-            BtnPlay.Content = "_Play";
+            BtnPlay.Content = "Play";
             _positionTimer.Stop();
         }
         // Release the preview's handle on the source while the render reads it.
@@ -617,32 +909,51 @@ public partial class VideoEditorWindow : Window
             double sourceFps = props.FrameRate is { Denominator: > 0 } rate
                 ? (double)rate.Numerator / rate.Denominator
                 : 30;
-            var videoSettings = VideoExportVideoSettings.FromControls(
-                srcW,
-                srcH,
+            VideoResolutionPreset preset = SelectedResolution;
+            var videoSettings = VideoExportVideoSettings.FromSize(
+                preset.Width,
+                preset.Height,
                 sourceFps,
-                ResolutionCombo.SelectedIndex,
                 QualityCombo.SelectedIndex,
                 FrameRateCombo.SelectedIndex);
 
-            var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
-            profile.Video.Width = videoSettings.Width;
-            profile.Video.Height = videoSettings.Height;
-            profile.Video.Bitrate = videoSettings.Bitrate;
-            profile.Video.FrameRate.Numerator = (uint)Math.Round(videoSettings.FrameRate);
-            profile.Video.FrameRate.Denominator = 1;
-            if (audioSettings.OutputChannelCount is uint channelCount && profile.Audio is not null)
-                profile.Audio.ChannelCount = channelCount;
+            // Trim-only keeps the source encoding: the whole point is that nothing is
+            // re-compressed, so the size and quality controls do not apply to it.
+            MediaEncodingProfile profile;
+            if (trimOnly)
+            {
+                profile = await MediaEncodingProfile.CreateFromFileAsync(srcFile);
+            }
+            else
+            {
+                profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
+                profile.Video.Width = videoSettings.Width;
+                profile.Video.Height = videoSettings.Height;
+                profile.Video.Bitrate = videoSettings.Bitrate;
+                profile.Video.FrameRate.Numerator = (uint)Math.Round(videoSettings.FrameRate);
+                profile.Video.FrameRate.Denominator = 1;
+                if (audioSettings.OutputChannelCount is uint channelCount && profile.Audio is not null)
+                    profile.Audio.ChannelCount = channelCount;
+            }
 
-            string dir = Path.GetDirectoryName(_mp4Path)!;
-            string baseName = Path.GetFileNameWithoutExtension(_mp4Path);
+            string dir = VideoExportDestination.Resolve(
+                DestinationCombo?.SelectedIndex ?? VideoExportDestination.BesideOriginal,
+                _mp4Path,
+                _settings.Current.SaveFolder,
+                _chosenFolder,
+                Directory.Exists);
             var folder = await StorageFolder.GetFolderFromPathAsync(dir);
             ThrowIfExportCanceled();
-            var outFile = await folder.CreateFileAsync($"{baseName} (edited).mp4", CreationCollisionOption.GenerateUniqueName);
+            var outFile = await folder.CreateFileAsync(
+                VideoExportDestination.EditedFileName(_mp4Path),
+                CreationCollisionOption.GenerateUniqueName);
             _pendingOutputPath = outFile.Path;
             ThrowIfExportCanceled();
 
-            var render = composition.RenderToFileAsync(outFile, MediaTrimmingPreference.Precise, profile);
+            var render = composition.RenderToFileAsync(
+                outFile,
+                trimOnly ? MediaTrimmingPreference.Fast : MediaTrimmingPreference.Precise,
+                profile);
             _activeRender = render;
             if (_exportCancellationRequested)
                 render.Cancel();
@@ -664,21 +975,26 @@ public partial class VideoEditorWindow : Window
 
             string savedPath = outFile.Path;
             _exportCompleted = true;
-            _ = Task.Run(() =>
-            {
-                try { _history.AddFile(savedPath); }
-                catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
-            });
 
             if (_closed)
                 return;
 
-            StatusText.Text = $"Saved {outFile.Name}";
+            // History is written AFTER the replace choice, so replacing never leaves an entry
+            // pointing at a file that was moved out from under it.
+            savedPath = OfferReplaceOriginal(savedPath);
+            string finalPath = savedPath;
+            _ = Task.Run(() =>
+            {
+                try { _history.AddFile(finalPath); }
+                catch (Exception ex) { Log.Error("Failed to add edited video to history", ex); }
+            });
+
+            StatusText.Text = $"Saved {Path.GetFileName(savedPath)}{DescribeSavedSize(savedPath)}";
             Log.Info($"Edited video exported to {savedPath}");
             RecordingCompletionOverlay.Show(
                 savedPath,
                 _settings,
-                onEdit: () => new VideoEditorWindow(savedPath, _settings, _history).Show());
+                onEdit: () => new VideoEditorWindow(finalPath, _settings, _history).Show());
         }
         catch (Exception ex) when (VideoEditorInteraction.IsCancellation(ex) || _exportCancellationRequested)
         {
@@ -715,6 +1031,50 @@ public partial class VideoEditorWindow : Window
                 SetExportUiState(exporting: false);
                 OpenPreviewSafely();
             }
+        }
+    }
+
+    /// <summary>
+    /// Asks what to do with the file that was just written. Save as new is the primary, so the
+    /// default answer never destroys the source. Returns the path the result now lives at.
+    /// </summary>
+    private string OfferReplaceOriginal(string exportedPath)
+    {
+        if (string.Equals(exportedPath, _mp4Path, StringComparison.OrdinalIgnoreCase))
+            return exportedPath;
+
+        // Two buttons for two outcomes. The old third one ("Save as new video") and the
+        // cancel both returned exportedPath, so the user was asked to tell two identical
+        // results apart.
+        bool replace = ThemedMessageDialog.Confirm(
+            this,
+            "Export finished",
+            $"Saved {Path.GetFileName(exportedPath)}. Replace the original with it, or keep both?",
+            confirmLabel: "Replace the original",
+            destructive: true,
+            cancelLabel: "Keep both");
+        if (!replace)
+            return exportedPath;
+
+        try
+        {
+            // The preview still holds the source open; it is reopened by the finally block.
+            try { Media.Close(); }
+            catch (Exception ex) { Log.Error("Failed to close the preview before replacing", ex); }
+            File.Move(exportedPath, _mp4Path, overwrite: true);
+            Log.Info($"Replaced {_mp4Path} with the edited video");
+            _sourceBytes = 0; // the source is a different file now
+            return _mp4Path;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to replace {_mp4Path} with the edited video", ex);
+            ThemedMessageDialog.Show(
+                this,
+                "Could not replace the original",
+                $"The edited video was kept as {Path.GetFileName(exportedPath)}. " +
+                "The original is still in place — close anything playing it and try again.");
+            return exportedPath;
         }
     }
 
@@ -756,13 +1116,13 @@ public partial class VideoEditorWindow : Window
     private void SetExportUiState(bool exporting)
     {
         BtnExport.IsEnabled = !exporting;
+        BtnTrimOnly.IsEnabled = !exporting;
         BtnClose.Visibility = exporting ? Visibility.Collapsed : Visibility.Visible;
         BtnCancelExport.Visibility = exporting ? Visibility.Visible : Visibility.Collapsed;
         BtnCancelExport.IsEnabled = exporting;
         ExportProgress.Visibility = exporting ? Visibility.Visible : Visibility.Collapsed;
 
         BtnPlay.IsEnabled = !exporting;
-        PositionSlider.IsEnabled = !exporting;
         TimelineTrack.IsEnabled = !exporting;
         ResolutionCombo.IsEnabled = !exporting;
         QualityCombo.IsEnabled = !exporting;
@@ -770,6 +1130,8 @@ public partial class VideoEditorWindow : Window
         MuteCheck.IsEnabled = !exporting;
         MonoCheck.IsEnabled = !exporting;
         VolumeSlider.IsEnabled = !exporting;
+        DestinationCombo.IsEnabled = !exporting;
+        UpdateExportButtons();
     }
 
     private static async Task<bool> DeletePartialOutputAndLogAsync(string? partialPath)

@@ -177,8 +177,18 @@
 
                                     <Grid Margin="0,10,0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <Rectangle x:Name="ColorPickerPreview" Grid.Column="0" Width="22" Height="22" RadiusX="4" RadiusY="4"
-                                                   Stroke="{StaticResource BorderStrongBrush}" StrokeThickness="1"/>
+                                        <!-- A real focusable control, not a bare Rectangle: the
+                                             "Copy as" formats hang off this, and a Shape can never
+                                             take keyboard focus, so Shift+F10 went to the hex box
+                                             instead and the whole feature was mouse-only. -->
+                                        <Button x:Name="ColorPickerPreviewButton" Grid.Column="0"
+                                                Style="{StaticResource ColorWellButton}" Cursor="Hand"
+                                                Click="OnColorPickerPreviewClick"
+                                                ToolTip="Copy this color in another format"
+                                                AutomationProperties.Name="Copy as"
+                                                AutomationProperties.HelpText="Open the list of color formats to copy.">
+                                            <Rectangle x:Name="ColorPickerPreview" Width="16" Height="16" RadiusX="3" RadiusY="3"/>
+                                        </Button>
                                         <TextBox x:Name="ColorPickerHex" Grid.Column="1" Style="{StaticResource DarkTextBox}" Margin="8,0"
                                                  KeyDown="OnColorPickerHexKeyDown" TextChanged="OnColorPickerHexChanged"
                                                  ToolTip="Type a hex color" AutomationProperties.Name="Hex color"/>

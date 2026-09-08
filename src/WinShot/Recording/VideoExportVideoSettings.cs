@@ -1,4 +1,4 @@
-namespace WinShot.Recording;
+﻿namespace WinShot.Recording;
 
 public readonly record struct VideoExportVideoSettings(
     uint Width,
@@ -6,6 +6,32 @@ public readonly record struct VideoExportVideoSettings(
     uint Bitrate,
     double FrameRate)
 {
+    /// <summary>
+    /// Same maths, but for an explicit output size — the resolution picker resolves its own
+    /// pixels now (so it can label them and offer named tiers), and only the bitrate and frame
+    /// rate still have to be derived here.
+    /// </summary>
+    public static VideoExportVideoSettings FromSize(
+        uint outputWidth,
+        uint outputHeight,
+        double sourceFrameRate,
+        int qualityIndex,
+        int frameRateIndex)
+    {
+        uint width = (uint)Math.Max(2, (int)outputWidth & ~1);
+        uint height = (uint)Math.Max(2, (int)outputHeight & ~1);
+        double frameRate = frameRateIndex switch
+        {
+            1 => 60,
+            2 => 30,
+            3 => 15,
+            _ => CleanSourceFrameRate(sourceFrameRate),
+        };
+        double bitsPerPixel = qualityIndex switch { 1 => 0.08, 2 => 0.045, _ => 0.13 };
+        uint bitrate = (uint)Math.Clamp(width * height * frameRate * bitsPerPixel, 500_000, 60_000_000);
+        return new VideoExportVideoSettings(width, height, bitrate, frameRate);
+    }
+
     public static VideoExportVideoSettings FromControls(
         uint sourceWidth,
         uint sourceHeight,
