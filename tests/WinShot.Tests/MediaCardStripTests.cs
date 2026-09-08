@@ -26,6 +26,14 @@ public class MediaCardStripTests
         Assert.DoesNotContain("long", unknown);
         Assert.DoesNotContain("Double-click", unknown);
         Assert.Contains("6.8 MB", unknown);
+
+        // Same rule for the size. MediaFileLength returns 0 for a file it could not stat,
+        // the painted strip skips the size entirely then, and "0 B" is the same wrong fact
+        // "0s long" would be.
+        string sizeless = FastQuickActionsWindow.RecordingDescription(TimeSpan.FromSeconds(53), 0, canEdit: false);
+        Assert.Contains("53s long", sizeless);
+        Assert.DoesNotContain("0 B", sizeless);
+        Assert.Contains("Screen recording, 53s long.", sizeless);
     }
 
     /// <summary>

@@ -450,6 +450,81 @@ public class QuickAccessOverlayStackTests
         });
     }
 
+    /// <summary>
+    /// "Temporarily hide" flagged every card in StackedCards(), which does not filter on
+    /// Visible — so a card constructed but never shown (what an overlay.Show() that threw
+    /// leaves behind) got the flag anyway, and the next capture's revive loop faded a card
+    /// onto the screen that nothing had ever asked to show.
+    /// </summary>
+    [Fact]
+    public void HidingTheStackDoesNotFlagACardThatWasNeverShown()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var shown = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+            var never = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+            try
+            {
+                shown.Show();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+
+                Invoke(shown, "HideEveryCard");
+                PumpUntil(() => !shown.Visible, 3000);
+
+                Assert.True((bool)Field(shown, "_temporarilyHidden")!);
+                Assert.False(
+                    (bool)Field(never, "_temporarilyHidden")!,
+                    "a card that was never shown was flagged as temporarily hidden");
+            }
+            finally
+            {
+                DisposeAll(new List<FastQuickActionsWindow> { shown, never });
+                PumpUntil(() => Motion.Holders == 0, 3000);
+            }
+        });
+    }
+
+    /// <summary>
+    /// ComeBack re-renders the thumbnail for the editor round-trip, and that render drops
+    /// the blurred pair the hover cross-fade paints. Only the async pass makes another one,
+    /// and its queue guard used to be once-per-card — so a card that came back without
+    /// going through OnImageChanged (Done with nothing drawn: the editor returns before
+    /// ImageCommitted fires) kept a null blur and a bilinear thumbnail for good, and hover
+    /// painted the sharp picture under a flat tint with no frost at all.
+    /// </summary>
+    [Fact]
+    public void ACardComingBackFromTheEditorGetsItsFrostedHoverBack()
+    {
+        RunSta(() =>
+        {
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            var card = new FastQuickActionsWindow(new SD.Bitmap(600, 400), settings);
+            try
+            {
+                card.Show();
+                PumpUntil(() => Field(card, "_blurredPreview") is not null, 6000);
+                Assert.NotNull(Field(card, "_blurredPreview"));
+
+                // The annotate round-trip: step aside for the editor, come back with the
+                // image untouched.
+                Invoke(card, "StepAside");
+                PumpUntil(() => !card.Visible, 3000);
+                card.ComeBack();
+
+                PumpUntil(() => Field(card, "_blurredPreview") is not null, 6000);
+                Assert.NotNull(Field(card, "_blurredPreview"));
+            }
+            finally
+            {
+                DisposeAll(new List<FastQuickActionsWindow> { card });
+                PumpUntil(() => Motion.Holders == 0, 3000);
+            }
+        });
+    }
+
     private static void DisposeAll(List<FastQuickActionsWindow> cards)
     {
         foreach (var card in cards)

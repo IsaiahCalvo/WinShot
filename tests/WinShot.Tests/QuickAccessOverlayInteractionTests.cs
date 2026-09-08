@@ -1277,7 +1277,7 @@ public class QuickAccessOverlayInteractionTests
     {
         RunSta(() =>
         {
-            using var bitmap = new SD.Bitmap(64, 40);
+            var bitmap = new SD.Bitmap(64, 40);
             WF.DataObject data = FastQuickActionsWindow.CreateDragData(@"C:\captures\shot.png", bitmap);
 
             // The file is what mail clients attach; the bitmap is what canvas and chat
@@ -1285,6 +1285,16 @@ public class QuickAccessOverlayInteractionTests
             Assert.True(data.GetDataPresent(WF.DataFormats.FileDrop));
             Assert.True(data.GetDataPresent(WF.DataFormats.Bitmap));
             Assert.Equal(new[] { @"C:\captures\shot.png" }, (string[])data.GetData(WF.DataFormats.FileDrop)!);
+
+            // The payload has to outlive the card. OLE fetches CF_BITMAP at the drop, and
+            // the auto-close timer and the stack cap both close cards on a WF.Timer that
+            // keeps ticking inside DoDragDrop's modal pump — so the card's _image can be
+            // disposed mid-drag, and handing OLE the live bitmap made every later fetch
+            // throw and the drop deliver nothing.
+            bitmap.Dispose();
+            var payload = Assert.IsAssignableFrom<SD.Image>(data.GetData(WF.DataFormats.Bitmap));
+            Assert.Equal(64, payload.Width);
+            payload.Dispose();
         });
     }
 

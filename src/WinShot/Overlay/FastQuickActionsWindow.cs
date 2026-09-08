@@ -408,8 +408,14 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             BeginInvoke(new Action(() =>
             {
-                if (!_closed && !IsDisposed && !PreviewPipelineClosed())
-                    _previewTask ??= LoadPreviewAsync();
+                if (_closed || IsDisposed || PreviewPipelineClosed())
+                    return;
+                // Not "once ever": RenderFirstPreview drops the blurred pair every time it
+                // runs, and only this pass makes another one. So re-run whenever the last
+                // one has finished and left no blur behind — never while one is in flight,
+                // which is what the old `??=` was really protecting.
+                if (_previewTask is null || (_previewTask.IsCompleted && _blurredPreview is null))
+                    _previewTask = LoadPreviewAsync();
             }));
         }
         catch (InvalidOperationException) when (_closed || IsDisposed || PreviewPipelineClosed())
@@ -585,6 +591,13 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     private void BeginHoverMotion(double target)
     {
+        // A message borrows the frosted thumbnail wholesale. MouseLeave ramps hover back to
+        // 0 without ending the flash, so a fast flick off the card dissolved the backdrop
+        // out from under a message that was not itself changing. EndStatusFlash runs this
+        // ramp itself once the message is gone, which is where the blur is meant to clear.
+        if (_flashMessage is not null && target < _hoverAmount)
+            return;
+
         _hoverMotion?.Dispose();
         _hoverMotion = null;
 
@@ -1039,9 +1052,16 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// </summary>
     internal static string RecordingDescription(TimeSpan? duration, long sizeBytes, bool canEdit)
     {
-        string length = duration is { } value ? $"{MediaCardStrip.FormatDuration(value)} long, " : string.Empty;
+        // A size of 0 means the file could not be stat'd, not that the recording is empty.
+        // The strip already omits it in that case; saying "0 B" out loud states a wrong
+        // fact where leaving it out states a missing one, the same call the duration makes.
+        var facts = new List<string> { "Screen recording" };
+        if (duration is { } value)
+            facts.Add($"{MediaCardStrip.FormatDuration(value)} long");
+        if (sizeBytes > 0)
+            facts.Add(MediaCardStrip.FormatSize(sizeBytes));
         string edit = canEdit ? "Double-click the preview to edit. " : string.Empty;
-        return $"Screen recording, {length}{MediaCardStrip.FormatSize(sizeBytes)}. "
+        return $"{string.Join(", ", facts)}. "
             + edit
             + "Press Tab to move through actions or Shift+F10 for more actions.";
     }
@@ -1384,7 +1404,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             : WF.Screen.PrimaryScreen ?? WF.Screen.FromPoint(WF.Cursor.Position);
         var area = screen.WorkingArea;
         _placedWorkingArea = area;
-        int gutter = QuickAccessOverlayLayout.StackGutter(_dpi);
         // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
         // Cards that are already flying out are skipped: they are still visible and still
         // intersecting, and counting them left an empty slot in the stack for a capture
@@ -1393,7 +1412,11 @@ public sealed class FastQuickActionsWindow : WF.Form
         // agrees with StackedCards() on what is in the corner.
         int offset = OpenWindows.ToArray()
             .Where(w => !ReferenceEquals(w, this) && w.Visible && !w._exitMotionStarted && !w._offScreen && area.IntersectsWith(w.Bounds))
-            .Sum(w => w.Height + gutter);
+            // Each card's own gutter, the way ReflowOpenWindows sums it. Summing every
+            // other card's height with THIS card's gutter agrees only while the whole
+            // column shares a DPI — a card that has not run OnHandleCreated yet still
+            // carries 96, and placement and reflow then put the same column a few px apart.
+            .Sum(w => w.Height + QuickAccessOverlayLayout.StackGutter(w._dpi));
         Location = QuickAccessOverlayLayout.Place(
             area,
             Size,
@@ -1936,7 +1959,12 @@ public sealed class FastQuickActionsWindow : WF.Form
         foreach (FastQuickActionsWindow card in cards)
         {
             card.StepAside();
-            card._temporarilyHidden = true;
+            // Only the cards StepAside actually took off screen. StackedCards() does not
+            // filter on Visible, so a card that was constructed but never shown — what an
+            // overlay.Show() that threw leaves behind — was flagged anyway, and the next
+            // capture's revive loop then faded a card in that nothing ever asked to show.
+            if (card._offScreen)
+                card._temporarilyHidden = true;
         }
         if (cards.Length == 0)
             return;
@@ -2081,6 +2109,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // nothing ever revived it: only _temporarilyHidden cards are revived by the next
         // capture, so the card was invisible for the life of the process, out of the stack,
         // and still holding its full-size bitmap.
+        bool wasHidden = _temporarilyHidden;
         _temporarilyHidden = false;
         _offScreen = false;
         StopStepAsideMotion();
@@ -2102,8 +2131,21 @@ public sealed class FastQuickActionsWindow : WF.Form
         PositionFromSettings();
         // The editor hands its composed image back on the same turn as this call, and the
         // async preview render lands a frame or two later — without this the card fades in
-        // still showing the pre-annotation thumbnail.
-        RenderFirstPreview();
+        // still showing the pre-annotation thumbnail. A temporarily-hidden card is the
+        // opposite case: its image did not change while it was away, so its settled bicubic
+        // preview and hover blur are still the right pixels, and re-rendering would trade
+        // them for a bilinear pass on the next capture's critical path.
+        if (!wasHidden)
+        {
+            RenderFirstPreview();
+            // And re-arm the async pass, which is the only thing that puts the bicubic
+            // preview and the blurred pair RenderFirstPreview just dropped back. Without
+            // this the card kept a null blur — hover painting the sharp thumbnail under a
+            // flat tint with no frost at all — and a bilinear thumbnail for the rest of its
+            // life, on every ComeBack that does not run through OnImageChanged (Done with
+            // nothing drawn, which returns before ImageCommitted fires).
+            QueuePreviewLoad();
+        }
 
         // The card's real opacity, remembered by StepAside: a fade cancelled halfway leaves
         // Opacity somewhere in the middle, so reading it here would fade in to that.
@@ -2846,15 +2888,21 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private void OnOverlayMouseDown(object? sender, WF.MouseEventArgs e)
     {
+        // Before the menu, not only on the left button. The menu's rows advertise a whole
+        // shortcut column — Ctrl+S, Ctrl+W, Ctrl+E, P, O — and the hover hook claims almost
+        // none of them: they run through the card's own KeyDown, which needs focus. Opening
+        // the menu without taking focus first meant dismissing it handed activation back to
+        // whatever was foreground, so every chord the user had just read did nothing to the
+        // card. A right-click on the card is as deliberate as a left-click.
+        Activate();
+        Focus();
+
         if (e.Button == WF.MouseButtons.Right)
         {
             ShowOverflowMenu();
             return;
         }
         if (e.Button != WF.MouseButtons.Left) return;
-
-        Activate();
-        Focus();
 
         int buttonIndex = _hovering ? HitTestButton(e.Location) : -1;
         if (buttonIndex >= 0)
@@ -2939,12 +2987,19 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// The drag payload. The file is what mail clients want — they attach it rather than
     /// pasting it inline — but a lot of chat and canvas apps take CF_BITMAP and not
     /// CF_HDROP, and used to refuse the drop outright. Both go on the object.
+    ///
+    /// The bitmap is a clone the DataObject owns. OLE fetches CF_BITMAP lazily, at the drop
+    /// — which can be long after the card that started the drag has gone: the auto-close
+    /// timer and the stack cap both run <see cref="Close"/> on a WF.Timer that keeps
+    /// ticking inside DoDragDrop's own modal pump, and FormClosed disposes the card's
+    /// _image. Handing OLE the live bitmap meant every one of those fetches threw and the
+    /// drop delivered nothing, on exactly the CF_BITMAP-only targets this format exists for.
     /// </summary>
     internal static WF.DataObject CreateDragData(string path, SD.Bitmap image)
     {
         var data = new WF.DataObject();
         data.SetData(WF.DataFormats.FileDrop, new[] { path });
-        data.SetData(WF.DataFormats.Bitmap, image);
+        data.SetData(WF.DataFormats.Bitmap, CaptureService.CloneBitmap(image));
         return data;
     }
 
@@ -3012,10 +3067,14 @@ public sealed class FastQuickActionsWindow : WF.Form
             edit(this);
             return;
         }
-        // A recording with no editor behind it. Error, not Info: the user just asked for
-        // the editor and is being refused. The same glyph as "Copied" is what the severity
-        // glyph exists to stop.
-        ShowCardToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Error);
+        // Nothing is listening. Error, not Info: the user just asked for the editor and is
+        // being refused. The same glyph as "Copied" is what the severity glyph exists to
+        // stop. Branched on the card's kind — the fall-through called every capture a
+        // recording, including the screenshot card this is also reachable from.
+        if (_mediaFilePath is null)
+            ShowCardToast("This capture can't be edited", "The annotation editor isn't available right now.", Core.ToastSeverity.Error);
+        else
+            ShowCardToast("This recording can't be edited", "No video editor is available for it.", Core.ToastSeverity.Error);
     }
 
     private int HitTestButton(SD.Point point)
@@ -3374,9 +3433,13 @@ public sealed class FastQuickActionsWindow : WF.Form
     private async Task<string> CopyMediaFileIntoAsync(string folder)
     {
         string source = _mediaFilePath!;
-        string extension = Path.GetExtension(source).TrimStart('.');
         Directory.CreateDirectory(folder);
-        string destination = FileNamer.NextUniquePath(_settings, folder, extension);
+        // The recording's own name, the way the single-card Save dialog seeds it. Running
+        // it through the filename template instead meant the same recording landed on disk
+        // under two different names depending on which of the two saves the user used.
+        string destination = Path.Combine(folder, Path.GetFileName(source));
+        if (File.Exists(destination))
+            destination = FileNamer.NextUniquePath(_settings, folder, Path.GetExtension(source).TrimStart('.'));
         await Task.Run(() => File.Copy(source, destination, overwrite: false));
         return destination;
     }
