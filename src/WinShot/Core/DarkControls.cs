@@ -464,18 +464,49 @@ public sealed class DarkDropDown : WF.Control
         {
         }
 
+        /// <summary>
+        /// A decisive accent row rather than a timid grey wash: a rounded rectangle inset a
+        /// few pixels, the way Win11's own menus draw their selection, filled in the app's
+        /// one accent so the row under the pointer is unmistakable.
+        /// </summary>
         protected override void OnRenderMenuItemBackground(WF.ToolStripItemRenderEventArgs e)
         {
-            if (e.Item.Selected || e.Item.Pressed)
-            {
-                using var brush = new SD.SolidBrush(SD.Color.FromArgb(66, 66, 70));
-                e.Graphics.FillRectangle(brush, new SD.Rectangle(SD.Point.Empty, e.Item.Size));
-            }
+            if (!e.Item.Selected && !e.Item.Pressed)
+                return;
+            if (!e.Item.Enabled)
+                return; // the version header is a disabled row; it must not light up
+
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            // WinForms scales the row height and the font for DPI; device pixels here would
+            // leave the bar proportionally tighter and squarer at 150% than at 100%.
+            double scale = Math.Max(1, e.ToolStrip?.DeviceDpi ?? 96) / 96.0;
+            int inset = (int)Math.Round(HighlightInsetDip * scale);
+            var bounds = new SD.Rectangle(SD.Point.Empty, e.Item.Size);
+            bounds.Inflate(-inset, -inset);
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
+
+            using var path = GdiPaths.RoundedRect(bounds, (int)Math.Round(HighlightRadiusDip * scale));
+            // AccentDeep, not Accent: OnRenderItemText puts white on this fill, and white on
+            // the raw accent is 3.65:1 — under the text floor on the one row the user is by
+            // definition looking at. Same hue, so the menu still reads as the one accent.
+            using var brush = new SD.SolidBrush(
+                e.Item.Pressed ? ThemePalette.AccentPressed : ThemePalette.AccentDeep);
+            g.FillPath(brush, path);
         }
+
+        private const int HighlightInsetDip = 4;
+        private const int HighlightRadiusDip = 5;
 
         protected override void OnRenderItemText(WF.ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? DarkControlPalette.Text : DarkControlPalette.TextMuted;
+            // White on the accent fill; the muted grey would disappear into it.
+            e.TextColor = !e.Item.Enabled
+                ? DarkControlPalette.TextMuted
+                : e.Item.Selected || e.Item.Pressed
+                    ? SD.Color.White
+                    : DarkControlPalette.Text;
             base.OnRenderItemText(e);
         }
 

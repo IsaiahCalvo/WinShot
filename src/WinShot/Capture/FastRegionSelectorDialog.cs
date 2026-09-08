@@ -1648,7 +1648,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         if (_mode == SelectorMode.Window)
         {
             if (_hoverWindow is not null)
-                Confirm(VirtualFromScreen(_hoverWindow.Bounds));
+                Confirm(VirtualFromScreen(_hoverWindow.Bounds), _hoverWindow.Handle);
             return;
         }
 
@@ -2093,6 +2093,23 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return crop;
     }
 
+    /// <summary>
+    /// Cuts the shadowed wedges out of the corners of a window capture, when the setting is on
+    /// and that window is rounded. A no-op for a dragged region, a square-cornered window, and
+    /// on the live-grab fallback path, which never reaches this crop at all.
+    /// </summary>
+    private void TrimWindowShadow(IntPtr window, bool wholeWindowCaptured)
+    {
+        if (WinShot.Core.WindowShadowTrim.TrimWindowCapture(
+                _capturedRegion, window,
+                _settings?.Current.TrimWindowShadow ?? true,
+                wholeWindowCaptured) is SD.Bitmap trimmed)
+        {
+            _capturedRegion!.Dispose();
+            _capturedRegion = trimmed;
+        }
+    }
+
     /// <summary>Returns the region cropped from the frozen snapshot at confirm time and transfers
     /// ownership to the caller (null if freeze was unavailable). Null after the first call.</summary>
     public SD.Bitmap? TakeCapturedRegion()
@@ -2418,8 +2435,13 @@ public sealed class FastRegionSelectorDialog : WF.Form
         return false;
     }
 
-    private void Confirm(SD.Rectangle virtualRect)
+    /// <param name="window">
+    /// The window the confirmation picked, when it was a window rather than a dragged region.
+    /// Its handle is what the corner trim needs, and this is the last place that knows it.
+    /// </param>
+    private void Confirm(SD.Rectangle virtualRect, IntPtr window = default)
     {
+        SD.Rectangle requested = virtualRect;
         virtualRect.Intersect(new SD.Rectangle(0, 0, _vs.Width, _vs.Height));
         if (virtualRect.Width < 1 || virtualRect.Height < 1) return;
 
@@ -2428,6 +2450,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         // Crop the result from the frozen snapshot so the capture is exactly what was selected.
         _capturedRegion?.Dispose();
         _capturedRegion = CropFrozen(virtualRect);
+        TrimWindowShadow(window, wholeWindowCaptured: virtualRect == requested);
         if (_settings is not null)
             _settings.Current.LastCaptureRegion = PreviousRegion.Format(
                 new SD.Rectangle(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height));

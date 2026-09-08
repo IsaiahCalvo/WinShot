@@ -25,8 +25,10 @@ public static class StartupRegistration
     /// Applies the Settings toggle. Enabled: the installer's Scheduled Task keeps
     /// ownership when present (Run key cleared), otherwise the Run key is written
     /// with the current exe path. Disabled: both mechanisms are removed.
+    /// Returns false when the registration did not take — the caller says so, because
+    /// "Start at login" is a checkbox that otherwise stays ticked over nothing.
     /// </summary>
-    public static void Apply(bool enabled)
+    public static bool Apply(bool enabled)
     {
         try
         {
@@ -35,17 +37,19 @@ public static class StartupRegistration
                 DeleteAutostartTask();
 
             using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
-            if (key is null) return;
+            if (key is null) return false;
 
             string? command = LaunchCommand;
             if (enabled && !taskOwnsAutostart && command is not null)
                 key.SetValue(RunValueName, command);
             else
                 key.DeleteValue(RunValueName, throwOnMissingValue: false);
+            return true;
         }
         catch (Exception ex)
         {
             Log.Error("Failed to update launch-at-startup registration", ex);
+            return false;
         }
     }
 

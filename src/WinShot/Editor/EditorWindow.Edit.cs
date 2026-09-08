@@ -677,12 +677,17 @@ public partial class EditorWindow : Window
             }
             else
             {
+                // A Save-as dialog is the user choosing the format, so "Automatic" only
+                // preselects PNG here — it decides for real where WinShot names the file
+                // itself, rather than flattening the whole canvas twice to guess a filter.
+                string format = ImageFormatChooser.IsAuto(_settings.Current.ImageFormat)
+                    ? "png" : _settings.Current.ImageFormat;
                 dialog = new SaveFileDialog
                 {
-                    FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
+                    FileName = FileNamer.Next(_settings, format),
                     InitialDirectory = _settings.Current.SaveFolder,
                     Filter = SaveDialogFilter,
-                    FilterIndex = _settings.Current.ImageFormat switch
+                    FilterIndex = format switch
                     {
                         "jpg" => 2,
                         "webp" => 3,

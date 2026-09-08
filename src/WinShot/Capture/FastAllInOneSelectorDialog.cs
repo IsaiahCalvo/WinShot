@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -767,7 +767,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
 
             if (_hoverWindow is not null)
-                Confirm(VirtualFromScreen(_hoverWindow.Bounds));
+                Confirm(VirtualFromScreen(_hoverWindow.Bounds), _hoverWindow.Handle);
             else
                 ClearPending();
             return;
@@ -1261,8 +1261,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         InvalidateAllSurfaces();
     }
 
-    private void Confirm(SD.Rectangle virtualRect)
+    /// <param name="window">
+    /// The window the confirmation picked, when it was a window rather than a dragged region.
+    /// Its handle is what the corner trim needs, and this is the last place that knows it.
+    /// </param>
+    private void Confirm(SD.Rectangle virtualRect, IntPtr window = default)
     {
+        SD.Rectangle requested = virtualRect;
         virtualRect.Intersect(new SD.Rectangle(0, 0, _vs.Width, _vs.Height));
         if (virtualRect.Width < 1 || virtualRect.Height < 1) return;
 
@@ -1272,11 +1277,28 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         // via TakeCapturedRegion for parity with the region selector.)
         _capturedRegion?.Dispose();
         _capturedRegion = CropFrozen(virtualRect);
+        TrimWindowShadow(window, wholeWindowCaptured: virtualRect == requested);
         if (_settings is not null)
             _settings.Current.LastCaptureRegion = PreviousRegion.Format(
                 new SD.Rectangle(virtualRect.X + _vs.X, virtualRect.Y + _vs.Y, virtualRect.Width, virtualRect.Height));
 
         Complete(WF.DialogResult.OK);
+    }
+
+    /// <summary>
+    /// Cuts the shadowed wedges out of the corners of a window capture, when the setting is on
+    /// and that window is rounded. A no-op for a dragged region and for a square-cornered one.
+    /// </summary>
+    private void TrimWindowShadow(IntPtr window, bool wholeWindowCaptured)
+    {
+        if (WinShot.Core.WindowShadowTrim.TrimWindowCapture(
+                _capturedRegion, window,
+                _settings?.Current.TrimWindowShadow ?? true,
+                wholeWindowCaptured) is SD.Bitmap trimmed)
+        {
+            _capturedRegion!.Dispose();
+            _capturedRegion = trimmed;
+        }
     }
 
     private void Complete(WF.DialogResult result)

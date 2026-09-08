@@ -9,7 +9,22 @@ public class Settings
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WinShot");
 
     public string ImageFormat { get; set; } = "png";
+    /// <summary>Migration seed only. Superseded by the after-capture matrix's
+    /// <see cref="ScreenshotCopy"/>; kept so an upgrade preserves the old choice.</summary>
     public bool AutoCopyToClipboard { get; set; } = true;
+
+    /// <summary>False until the first-run welcome bubble has been shown once. Set the moment
+    /// it appears, so a crash mid-onboarding does not re-teach the user on every launch.</summary>
+    public bool HasCompletedFirstRun { get; set; }
+
+    /// <summary>The version that last ran. An update replaces the exe underneath a running
+    /// WinShot and relaunches it, so this is the only way the new process can tell it just
+    /// arrived and say "Updated to X" instead of starting in silence.</summary>
+    public string LastRunVersion { get; set; } = "";
+
+    /// <summary>Bumped by a migration that reshapes existing settings. 0 = a file written
+    /// before the after-capture matrix replaced the single-choice combo.</summary>
+    public int SettingsSchemaVersion { get; set; }
     public int OverlayAutoCloseSeconds { get; set; } = 0; // 0 = stay until dismissed
     public int HistoryLimit { get; set; } = 200;
 
@@ -31,6 +46,8 @@ public class Settings
     public bool DownscaleHiDpi { get; set; } = false;  // halve captures taken on >100% DPI displays
 
     // Capture behavior
+    /// <summary>Migration seed only. Superseded by the after-capture matrix; still the
+    /// vocabulary for per-invocation overrides (tray commands, winshot:// ?then=).</summary>
     public string PostCaptureAction { get; set; } = "overlay"; // overlay | copy | save | edit | pin | background
     public int SelfTimerSeconds { get; set; } = 3;
     public string LastCaptureRegion { get; set; } = "";        // "x,y,w,h" physical screen px
@@ -72,30 +89,38 @@ public class Settings
     // Quick Access overlay (post-capture)
     public bool OverlayAutoClose { get; set; } = false; // CleanShot "Auto-close: Enable"; gates OverlayAutoCloseSeconds
 
-    // General / app behavior (UI-only persisted toggles; behavior wired later)
-    public bool PlaySounds { get; set; } = false;       // TODO: wire behavior — capture/record sound effects
-    public string ShutterSound { get; set; } = "default"; // TODO: wire behavior — which shutter sound to play
-    public bool ShowTrayIcon { get; set; } = true;      // TODO: wire behavior — show the menu/tray icon
+    // General / app behavior
+    public bool PlaySounds { get; set; } = false;       // capture/record sound effects
+    public string ShutterSound { get; set; } = "default"; // which shutter sound to play
+    public bool ShowTrayIcon { get; set; } = true;      // show the tray icon
     public bool CheckForUpdatesOnStartup { get; set; } = true; // poll GitHub Releases on launch
 
-    // Legacy per-action settings. Recording overlay/copy/editor behavior is wired; screenshot
-    // behavior uses PostCaptureAction plus AutoCopyToClipboard. The remaining fields are kept
-    // for migration compatibility and stay hidden until their behavior is unambiguous.
-    public bool ScreenshotShowOverlay { get; set; } = true;   // legacy, hidden
+    // How each routine success confirms itself: "in-app" | "system" | "off".
+    // Failures ignore these — see NotificationStyle.
+    public string NotifyStyleOcr { get; set; } = NotificationStyle.InApp;
+    public string NotifyStyleCopy { get; set; } = NotificationStyle.InApp;
+    public string NotifyStyleSave { get; set; } = NotificationStyle.InApp;
+
+    // The after-capture matrix: an independent set of actions per capture type, not a
+    // single choice. Every one of these runs; see PostCaptureSet.
+    // "Save" has no Recording cell because a recording is always written to the export
+    // location — the temp file is its only other copy and the janitor reclaims it.
+    public bool ScreenshotShowOverlay { get; set; } = true;
     public bool RecordingShowOverlay { get; set; } = true;
-    public bool ScreenshotCopy { get; set; } = true;          // legacy, hidden
+    public bool ScreenshotCopy { get; set; } = true;
     public bool RecordingCopy { get; set; } = false;
-    public bool ScreenshotSave { get; set; } = false;         // TODO: wire behavior
-    public bool RecordingSave { get; set; } = false;          // TODO: wire behavior
-    public bool ScreenshotOpenAnnotate { get; set; } = false; // TODO: wire behavior
-    public bool ScreenshotOpenEditor { get; set; } = false;   // TODO: wire behavior (Open Annotate tool — screenshot only)
-    public bool ScreenshotPin { get; set; } = false;          // TODO: wire behavior (Pin to the screen — screenshot only)
-    public bool RecordingOpenEditor { get; set; } = false;    // legacy alias for OpenVideoEditorAfterRecording
+    public bool ScreenshotSave { get; set; } = false;
+    public bool ScreenshotOpenAnnotate { get; set; } = false;
+    public bool ScreenshotPin { get; set; } = false;
+    public bool RecordingOpenEditor { get; set; } = false;
 
     // Screenshots
     public bool AddPixelBorder { get; set; } = false;   // TODO: wire behavior — add 1px border to screenshots
     public bool ConvertToSrgb { get; set; } = false;    // TODO: wire behavior — convert screenshots to sRGB color profile
-    public string ScreenshotBackground { get; set; } = "none"; // TODO: wire behavior — none | wallpaper | gradient | color
+    public string ScreenshotBackground { get; set; } = "none"; // none | wallpaper | gradient | color
+    public string ScreenshotBackgroundColor { get; set; } = "#1C1C1E"; // used when ScreenshotBackground is "color"
+    public bool ScreenshotBackgroundShadow { get; set; } = true; // drop shadow under the shot on that background
+    public bool TrimWindowShadow { get; set; } = true;   // cut the shadowed wedges out of a rounded window capture's corners
     // Draws the live pointer into captures taken without the selection overlay (fullscreen,
     // display, self-timer, repeat-region). The overlay's own frozen snapshot never has one.
     public bool CursorOnScreenshots { get; set; } = false;
@@ -133,6 +158,7 @@ public class Settings
     public bool ShowRecordingCountdown { get; set; } = false; // TODO: wire behavior — countdown before recording
     public string RecordingMaxResolution { get; set; } = "original"; // original | 4K | 1080p | 720p
     public bool RecordAudioMono { get; set; } = false;      // downmix microphone input
+    /// <summary>Migration seed only. Superseded by the matrix's <see cref="RecordingOpenEditor"/>.</summary>
     public bool OpenVideoEditorAfterRecording { get; set; } = false;
     public int GifQuality { get; set; } = 80;               // 0..100 palette quality
     public string GifSize { get; set; } = "800";            // max GIF width (px) or "auto"
@@ -154,7 +180,7 @@ public class Settings
     public bool PinnedBorder { get; set; } = false;
 
     // Advanced
-    public bool AskForNameAfterCapture { get; set; } = false; // TODO: wire behavior — prompt for a file name after each capture
+    public bool AskForNameAfterCapture { get; set; } = false;
     public bool AddRetinaSuffix { get; set; } = true;         // TODO: wire behavior — add "@2x" suffix to HiDPI screenshots
     public string CopyToClipboardFormat { get; set; } = "file-image"; // TODO: wire behavior — file-image | file | image
     public bool AllInOneRememberLast { get; set; } = true;    // All-in-One restores the last selection
@@ -193,6 +219,23 @@ public class SettingsService
     public void Load()
     {
         _loaded = true;
+        // Read BEFORE the load: a file that predates the matrix schema is an install that
+        // already exists, and an existing install has met WinShot. Without this every
+        // upgrading user would get the first-run onboarding bubble once, because
+        // HasCompletedFirstRun is a new bool and new bools start false.
+        bool upgradingInstall = File.Exists(FilePath) || File.Exists(FilePath + ".bak");
+        LoadCore();
+        if (upgradingInstall && Current.SettingsSchemaVersion < PostCaptureMigration.MatrixSchemaVersion)
+            Current.HasCompletedFirstRun = true;
+        // Reshape anything an older file predates (currently: the single-choice
+        // "After screenshot" combo becoming the after-capture matrix). Runs before any
+        // caller reads Current, so Settings and the capture flow never see the old shape.
+        if (PostCaptureMigration.Apply(Current))
+            Log.Info("Migrated settings to the after-capture matrix");
+    }
+
+    private void LoadCore()
+    {
         // Transient torn reads are real: an exiting instance's exit-save can overlap a starting
         // instance's read during upgrades/restarts (install.ps1 relaunch). The primary is
         // replaced atomically, but the .bak rotation uses File.Copy, which is NOT atomic — a
@@ -255,6 +298,13 @@ public class SettingsService
             Settings? loaded = JsonSerializer.Deserialize<Settings>(text);
             if (loaded is null)
                 return false;
+            // A property initializer does NOT survive a literal null in the file: System.Text.Json
+            // writes the null straight over `= new()`. A hand-edited settings.json carrying
+            // "ShortcutBindings": null therefore hands every reader a null dictionary, and the
+            // first one is App.RegisterHotkeys inside OnStartup — which takes the tray icon, the
+            // welcome bubble and the startup command down with it. Normalize once, here, where
+            // every load path already funnels through.
+            loaded.ShortcutBindings ??= new();
             Current = loaded;
             return true;
         }
@@ -265,33 +315,49 @@ public class SettingsService
         }
     }
 
-    public void Save()
+    /// <summary>
+    /// Writes the settings file. Returns false when nothing reached disk — a refused save, a
+    /// locked or read-only file, a full drive. The failure is still logged and never thrown:
+    /// callers on the capture path must not die of it. But it IS reported, because Settings
+    /// has no OK button any more — a checkbox commits the moment it is ticked, so a swallowed
+    /// failure leaves the control looking applied and the preference gone.
+    /// </summary>
+    public bool Save()
     {
+        bool saved = false;
         try
         {
-            if (GuardSave())
+            saved = GuardSave();
+            if (saved)
                 WriteAtomically(JsonSerializer.Serialize(Current, JsonOptions));
         }
         catch (Exception ex)
         {
+            saved = false;
             Log.Error("Failed to save settings", ex);
         }
         Changed?.Invoke();
+        return saved;
     }
 
-    public async Task SaveAsync()
+    /// <inheritdoc cref="Save"/>
+    public async Task<bool> SaveAsync()
     {
         string json = JsonSerializer.Serialize(Current, JsonOptions);
+        bool saved = false;
         try
         {
-            if (GuardSave())
+            saved = GuardSave();
+            if (saved)
                 await Task.Run(() => WriteAtomically(json));
         }
         catch (Exception ex)
         {
+            saved = false;
             Log.Error("Failed to save settings", ex);
         }
         Changed?.Invoke();
+        return saved;
     }
 
     /// <summary>Pre-save safety: refuse saves before Load(), and preserve an unreadable-but-

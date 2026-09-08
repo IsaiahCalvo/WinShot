@@ -466,7 +466,16 @@ public sealed class FastQuickActionsWindow : WF.Form
         int top = _cardRect.Top + layout.ControlPadding;
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
         // Preserve the user's verified action placement while using the selected HTML design.
-        AddIconButton("quick-access-pin.svg", "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, () => PinRequested?.Invoke(this));
+        AddIconButton(PinAsset, "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, RequestPin);
+        // Rebuilt on every resize, so a capture pinned while the card is still on screen
+        // (its exit runs after the pin) keeps the solid mark.
+        _pinButton = _buttons[^1];
+        if (_pinned)
+        {
+            _pinButton.Icon =
+                CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? layout.IconSize, _visuals.Glyph)
+                ?? _pinButton.Icon;
+        }
         AddIconButton("quick-access-close.svg", "Close (Ctrl+W)", "Close", "Close", right, top, layout.IconSize, Close);
         if (_mediaFilePath is null)
             AddIconButton("quick-access-edit.svg", "Open Annotate tool (Ctrl+E)", "Annotate", "Edit", left, bottom, layout.IconSize, () => EditRequested?.Invoke(this));
@@ -479,6 +488,49 @@ public sealed class FastQuickActionsWindow : WF.Form
 
         AddCopyButton("Copy", "Copy (Ctrl+C)", pillX, pillTop, layout.PillWidth, layout.PillHeight, () => CopyAsync(keepOpen: IsAltDown()));
         _focusedButton = Math.Clamp(_focusedButton, -1, _buttons.Count - 1);
+    }
+
+    // The one outline/filled pair in the icon set: the pin is outlined like its thirteen
+    // stroked siblings until this capture is actually pinned, and solid after — the same
+    // "empty until it means something" grammar a bookmark or a favourite uses.
+    private const string PinAsset = "quick-access-pin.svg";
+    private const string PinnedAsset = "quick-access-pin-filled.svg";
+
+    private ActionButton? _pinButton;
+    private bool _pinned;
+
+    /// <summary>Every route to pinning — the button, <c>P</c>, and the context menu row —
+    /// goes through here so the glyph can never disagree with what happened.</summary>
+    private void RequestPin()
+    {
+        // Once per capture. A pin dismisses the card, but the dismissal is animated, and a
+        // second press landing inside that exit would put a second copy of the same shot on
+        // screen.
+        if (_pinned)
+            return;
+        MarkPinned();
+        PinRequested?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Swaps the outline for the solid mark, with no tween: the card is dismissed by the
+    /// same gesture, so a 140 ms cross-fade would play on a surface already leaving. Marking
+    /// first and raising <see cref="PinRequested"/> second means the solid glyph is what the
+    /// exit carries off.
+    /// </summary>
+    private void MarkPinned()
+    {
+        if (_pinned || _pinButton is null || IsDisposed)
+            return;
+
+        _pinned = true;
+        SD.Bitmap? solid = CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? 16, _visuals.Glyph);
+        if (solid is null)
+            return;
+
+        _pinButton.Icon = solid;
+        Invalidate(_pinButton.Bounds);
+        Update();
     }
 
     private void AddIconButton(
@@ -760,6 +812,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             int x = button.Bounds.Left + (button.Bounds.Width - button.Icon.Width) / 2;
             int y = button.Bounds.Top + (button.Bounds.Height - button.Icon.Height) / 2;
+
             g.DrawImageUnscaled(button.Icon, x, y);
         }
     }
@@ -1126,7 +1179,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                     EditRequested?.Invoke(this);
                     return;
                 case QuickActionsMenu.Pin:
-                    PinRequested?.Invoke(this);
+                    RequestPin();
                     return;
                 case QuickActionsMenu.ExtractText:
                     OcrRequested?.Invoke(this);
@@ -1778,7 +1831,7 @@ public sealed class FastQuickActionsWindow : WF.Form
                 e.Handled = true;
                 break;
             case WF.Keys.P when e.Modifiers == WF.Keys.None:
-                PinRequested?.Invoke(this);
+                RequestPin();
                 e.Handled = true;
                 break;
             case WF.Keys.O when e.Modifiers == WF.Keys.None:
@@ -2034,15 +2087,24 @@ public sealed class FastQuickActionsWindow : WF.Form
                 return;
             }
             Directory.CreateDirectory(_settings.Current.SaveFolder);
+            // "Automatic" reads thousands of pixels out of _image, which the background
+            // thumbnail render is also reading — the same GDI+ "Object is currently in use
+            // elsewhere" race every pixel edit on this card already waits out. Wait it out
+            // here too, or a save landing mid-render silently falls back to PNG (or kills
+            // the thumbnail).
+            if (!await WaitForRenderIdleAsync()) return;
+            // Resolves against this image's own pixels before the name or the dialog's
+            // preselected filter is built from it.
+            string format = ImageFormatChooser.Resolve(_settings.Current.ImageFormat, _image);
             string path;
             if (askForDestination)
             {
                 using var dialog = new WF.SaveFileDialog
                 {
-                    FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
+                    FileName = FileNamer.Next(_settings, format),
                     InitialDirectory = _settings.Current.SaveFolder,
                     Filter = "PNG image|*.png|JPEG image|*.jpg|WebP image|*.webp",
-                    FilterIndex = _settings.Current.ImageFormat switch
+                    FilterIndex = format switch
                     {
                         "jpg" => 2,
                         "webp" => 3,
@@ -2055,7 +2117,7 @@ public sealed class FastQuickActionsWindow : WF.Form
             }
             else
             {
-                path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
+                path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, format);
             }
 
             var copy = CaptureService.CloneBitmap(_image);
@@ -2146,7 +2208,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         public int CornerRadius { get; } = cornerRadius;
         public string? Label { get; set; }
         public SD.Font? LabelFont { get; init; }
-        public SD.Bitmap? Icon { get; } = icon;
+        public SD.Bitmap? Icon { get; set; } = icon;
 
         public void Dispose()
         {

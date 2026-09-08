@@ -13,7 +13,11 @@ public readonly record struct RecordingAfterActions(
     public static RecordingAfterActions FromSettings(Settings settings, bool isGif) => new(
         settings.RecordingShowOverlay,
         settings.RecordingCopy,
-        !isGif && (settings.RecordingOpenEditor || settings.OpenVideoEditorAfterRecording));
+        // RecordingOpenEditor alone. The retired OpenVideoEditorAfterRecording checkbox is a
+        // MIGRATION seed, folded into this field once by PostCaptureMigration — OR-ing it in
+        // here as well made the matrix checkbox undismissable for anyone upgrading: unticking
+        // it wrote false, the seed on disk stayed true, and the editor kept opening.
+        !isGif && settings.RecordingOpenEditor);
 }
 
 public readonly record struct RecordingSessionUiOptions(

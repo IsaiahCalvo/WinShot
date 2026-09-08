@@ -659,7 +659,8 @@ public class ThemedWindowTests
         settings.Current.ShortcutBindings["legacy-placeholder"] = "Ctrl+Alt+Q";
         settings.Current.ShowCrosshair = false;
         settings.Current.CrosshairMode = "always";
-        settings.Current.PostCaptureAction = "save";
+        settings.Current.ScreenshotSave = true;
+        settings.Current.ScreenshotShowOverlay = false;
         var window = SettingsWindow.Show(settings);
         Assert.True(window.IsVisible);
         Assert.True(window.ShowInTaskbar);
@@ -668,10 +669,11 @@ public class ThemedWindowTests
             "never",
             ((System.Windows.Controls.ComboBoxItem)
                 ((System.Windows.Controls.ComboBox)window.FindName("CrosshairModeCombo")).SelectedItem).Tag);
-        Assert.Equal(
-            "save",
-            ((System.Windows.Controls.ComboBoxItem)
-                ((System.Windows.Controls.ComboBox)window.FindName("PostCaptureActionCombo")).SelectedItem).Tag);
+        // The after-capture matrix is a set: Save on, Quick Access off, independently.
+        Assert.True(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotSaveCheck")).IsChecked);
+        Assert.False(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotShowOverlayCheck")).IsChecked);
+        SettingsSectionMotionSmoke(window);
+        SettingsLiveApplyAndDefaultsSmoke(window, settings);
         typeof(SettingsWindow).GetMethod(
             "SaveShortcutBoxes",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -693,36 +695,72 @@ public class ThemedWindowTests
 
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
         Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("LegacyAfterCaptureMatrix").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("UnavailableSoundsRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("AfterCaptureMatrix").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("SoundsRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrayIconRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("AskForNameRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundRow").Visibility);
+        // The shadow switch only means something once a background is on, so it rides the same
+        // reveal as the colour field rather than sitting there greyed out under "None".
+        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundShadowRow").Visibility);
+        // The corner trim applies to every window capture, so unlike the backdrop's shadow it
+        // has nothing to be revealed by and stands on its own.
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrimWindowShadowRow").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("NotificationsCard").Visibility);
+        Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
-        Assert.Equal(Visibility.Collapsed, Named<System.Windows.Controls.Border>("UnavailableCopyFormatCard").Visibility);
+        // Deleted rather than left Collapsed: a row for a setting nothing implements is dead
+        // XAML, and "it is in the file but hidden" is how it comes back by accident.
+        foreach (string gone in new[]
+        {
+            "UnavailableCopyFormatCard", "UnavailableSrgbRow", "UnavailablePixelBorderRow",
+            "UnavailableRetinaSuffixRow", "UnavailableResetWarningsCard",
+        })
+        {
+            Assert.Null(window.FindName(gone));
+        }
 
         var done = Named<System.Windows.Controls.Button>("SaveButton");
         var cancel = Named<System.Windows.Controls.Button>("CancelButton");
         Assert.True(done.IsDefault);
         Assert.True(cancel.IsCancel);
+        // "Close", not "Cancel". Checkboxes, combos and sliders live-apply 250 ms after they
+        // change, so a button labelled Cancel promising to "close without applying changes"
+        // was describing the opposite of what it did.
+        Assert.Equal("Close", cancel.Content);
+        Assert.DoesNotContain(
+            "without applying",
+            AutomationProperties.GetHelpText(cancel) ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(done.FocusVisualStyle);
         Assert.NotNull(cancel.FocusVisualStyle);
 
         string[] accessibleControls =
         [
             "StartupCheck", "UpdatesCheck", "SaveFolderBox", "BrowseSaveFolderButton",
-            "HideIconsCheck", "PostCaptureActionCombo", "PostCaptureCopyCheck", "OverlayPositionCombo",
+            "HideIconsCheck", "ShowTrayIconCheck", "ScreenshotShowOverlayCheck", "RecordingShowOverlayCheck",
+            "ScreenshotCopyCheck", "RecordingCopyCheck", "ScreenshotSaveCheck",
+            "ScreenshotOpenAnnotateCheck", "ScreenshotPinCheck", "RecordingOpenEditorCheck",
+            "OverlayPositionCombo",
             "OverlayMoveToActiveScreenCheck", "OverlaySizeSlider", "OverlayAutoCloseCheck",
             "OverlayActionCombo", "OverlayCloseBox", "OverlayCloseAfterDragCheck", "OverlaySaveBehaviorCombo",
             "ShowRecordingControlsCheck", "ShowRecordingTimerCheck", "ScaleHiDpiVideoCheck", "CaptureCursorCheck",
             "ClickHighlightsCheck", "KeystrokesCheck", "RememberLastSelectionCheck", "DimScreenCheck",
-            "CountdownBox", "WebcamCombo", "WebcamSizeBox", "RecordingShowOverlayCheck",
-            "RecordingCopyCheck", "MaxResolutionCombo", "RecordingFpsBox", "RecordAudioCheck",
-            "SystemAudioCheck", "RecordAudioMonoCheck", "OpenVideoEditorCheck", "GifFpsBox",
+            "CountdownBox", "WebcamCombo", "WebcamSizeBox",
+            "MaxResolutionCombo", "RecordingFpsBox", "RecordAudioCheck",
+            "SystemAudioCheck", "RecordAudioMonoCheck", "GifFpsBox",
             "GifQualitySlider", "OptimizeGifsCheck", "GifSizeCombo", "FormatCombo",
             "HiDpiCheck", "SelfTimerCombo", "FreezeScreenCheck", "CrosshairModeCombo",
             "ShowMagnifierCheck", "TemplateBox", "HistorySlider", "PinnedRoundedCornersCheck",
             "PinnedShadowCheck", "PinnedBorderCheck", "AllInOneRememberCheck",
-            "OcrJoinLinesCheck", "CancelButton", "SaveButton", "AboutCheckUpdatesButton",
-            "AboutRepositoryButton", "AboutLogsButton",
+            "OcrJoinLinesCheck", "AskForNameCheck",
+            "NotifyOcrCombo", "NotifyCopyCombo", "NotifySaveCombo",
+            "BackgroundCombo", "BackgroundColorBox", "BackgroundShadowCheck", "TrimWindowShadowCheck",
+            "RestoreDefaultsButton", "CancelButton", "SaveButton",
+            "AboutCheckUpdatesButton",
+            "AboutRepositoryButton", "AboutLogsButton", "AboutDiagnosticsToggle",
+            "AboutNoticesToggle", "AboutLicensesButton",
         ];
 
         foreach (string name in accessibleControls)
@@ -745,7 +783,7 @@ public class ThemedWindowTests
         {
             Named<System.Windows.Controls.Control>("StartupCheck").TabIndex,
             Named<System.Windows.Controls.Control>("SaveFolderBox").TabIndex,
-            Named<System.Windows.Controls.Control>("PostCaptureActionCombo").TabIndex,
+            Named<System.Windows.Controls.Control>("ScreenshotShowOverlayCheck").TabIndex,
             Named<System.Windows.Controls.Control>("CaptureCursorCheck").TabIndex,
             Named<System.Windows.Controls.Control>("FormatCombo").TabIndex,
             Named<System.Windows.Controls.Control>("TemplateBox").TabIndex,
@@ -1250,6 +1288,146 @@ public class ThemedWindowTests
 
         Assert.True(task.IsCompleted);
         task.GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Switching tabs cross-fades instead of hard-cutting, and the title follows the tab.
+    /// The assertion that matters after the animation is that exactly one pane is left
+    /// visible at full opacity — a fade that forgets to collapse its outgoing pane leaves
+    /// two stacked ScrollViewers and a window that scrolls the wrong content.
+    /// </summary>
+    private static void SettingsSectionMotionSmoke(SettingsWindow window)
+    {
+        var list = (System.Windows.Controls.ListBox)window.FindName("SectionList")!;
+        string[] paneNames =
+        [
+            "SectionGeneral", "SectionShortcuts", "SectionQuickAccess", "SectionRecording",
+            "SectionScreenshots", "SectionAnnotate", "SectionAdvanced", "SectionAbout",
+        ];
+
+        Assert.Contains("General", window.Title);
+
+        var general = (ScrollViewer)window.FindName("SectionGeneral")!;
+        var screenshots = (ScrollViewer)window.FindName("SectionScreenshots")!;
+
+        // Animated pass. Only what the swap does SYNCHRONOUSLY is asserted here: the
+        // incoming pane is up, and the outgoing one has stopped taking input. Everything
+        // after that is a WPF animation clock running on wall time, and an assertion that
+        // races it fails the moment another test class puts load on the machine.
+        list.SelectedIndex = 4;
+        PumpDispatcherOnce();
+        Assert.Contains("Screenshots", window.Title);
+        Assert.Equal(Visibility.Visible, screenshots.Visibility);
+        Assert.True(screenshots.IsHitTestVisible);
+        // The panes are overlapping siblings and WPF hit-tests at Opacity 0 exactly as it
+        // does at 1, so a fading-out pane that is still hit-testable swallows every click
+        // and wheel event aimed at the tab you just picked.
+        Assert.False(general.IsHitTestVisible, "the outgoing pane still takes input mid-fade");
+
+        // Deterministic pass. With animation off every transition collapses to its end
+        // state inside one dispatcher turn, so the end state can be asserted exactly.
+        Func<bool> animations = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            list.SelectedIndex = 0;
+            PumpDispatcherOnce();
+            list.SelectedIndex = 4;
+            PumpDispatcherOnce();
+
+            var live = paneNames
+                .Select(n => (name: n, pane: (ScrollViewer)window.FindName(n)!))
+                .Where(x => x.pane.Visibility == Visibility.Visible)
+                .ToArray();
+            Assert.Single(live);
+            Assert.Equal("SectionScreenshots", live[0].name);
+            Assert.Equal(1d, live[0].pane.Opacity, 3);
+            // General was re-armed on its way in and disarmed again on its way out; the pane
+            // now showing is the one that has to be taking input.
+            Assert.True(screenshots.IsHitTestVisible, "the visible pane must take input");
+            Assert.False(general.IsHitTestVisible);
+
+            // The About pane's disclosures start closed, reveal what they name, and fade
+            // back out rather than snapping — which is why this half needs animations off.
+            var diagnostics = (ToggleButton)window.FindName("AboutDiagnosticsToggle")!;
+            var diagnosticsPanel = (StackPanel)window.FindName("AboutDiagnosticsPanel")!;
+            var notices = (ToggleButton)window.FindName("AboutNoticesToggle")!;
+            var noticesPanel = (StackPanel)window.FindName("AboutNoticesPanel")!;
+            Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
+            Assert.Equal(Visibility.Collapsed, noticesPanel.Visibility);
+            Assert.False(string.IsNullOrWhiteSpace(((TextBlock)window.FindName("AboutNoticesText")!).Text));
+            diagnostics.IsChecked = true;
+            notices.IsChecked = true;
+            PumpDispatcherOnce();
+            Assert.Equal(Visibility.Visible, diagnosticsPanel.Visibility);
+            Assert.Equal(Visibility.Visible, noticesPanel.Visibility);
+            diagnostics.IsChecked = false;
+            notices.IsChecked = false;
+            PumpDispatcherOnce();
+            Assert.Equal(Visibility.Collapsed, diagnosticsPanel.Visibility);
+
+            // Back to General so the rest of the smoke sees the window it expects.
+            list.SelectedIndex = 0;
+            PumpDispatcherOnce();
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = animations;
+        }
+        Assert.Contains("General", window.Title);
+    }
+
+    /// <summary>
+    /// Checkboxes and combos apply as they change — no Done — while typed fields still
+    /// wait for a commit, and "Restore defaults" resets the visible tab only.
+    /// </summary>
+    private static void SettingsLiveApplyAndDefaultsSmoke(SettingsWindow window, SettingsService settings)
+    {
+        var list = (ListBox)window.FindName("SectionList")!;
+        var overlayCheck = (CheckBox)window.FindName("ScreenshotShowOverlayCheck")!;
+        var pinCheck = (CheckBox)window.FindName("ScreenshotPinCheck")!;
+        var freeze = (CheckBox)window.FindName("FreezeScreenCheck")!;
+        var template = (TextBox)window.FindName("TemplateBox")!;
+
+        // A toggle applies without touching Done.
+        bool before = settings.Current.ScreenshotPin;
+        pinCheck.IsChecked = !before;
+        window.FlushLiveApplyForTest();
+        Assert.Equal(!before, settings.Current.ScreenshotPin);
+
+        // A typed field does NOT — that is what Done is still for, and what Escape warns about.
+        string storedTemplate = settings.Current.FileNameTemplate;
+        Assert.False(window.HasUncommittedFieldEditsForTest());
+        template.Text = storedTemplate + " draft";
+        Assert.True(window.HasUncommittedFieldEditsForTest());
+        window.FlushLiveApplyForTest();
+        Assert.Equal(storedTemplate, settings.Current.FileNameTemplate);
+        template.Text = storedTemplate;
+        Assert.False(window.HasUncommittedFieldEditsForTest());
+
+        // Restore defaults resets the tab it is on, and nothing else.
+        settings.Current.FreezeScreen = false;
+        freeze.IsChecked = false;
+        overlayCheck.IsChecked = false;
+        window.FlushLiveApplyForTest();
+        Assert.False(settings.Current.ScreenshotShowOverlay);
+
+        list.SelectedIndex = 0;                       // General owns the after-capture matrix
+        PumpDispatcherOnce();
+        window.RestoreSectionDefaults(0);
+        Assert.True(settings.Current.ScreenshotShowOverlay);   // reset
+        Assert.False(settings.Current.FreezeScreen);           // Screenshots tab untouched
+
+        window.RestoreSectionDefaults(4);                      // now reset Screenshots
+        Assert.True(settings.Current.FreezeScreen);
+
+        // The Shortcuts tab is nothing BUT hotkey boxes, and WriteToggleSettings does not
+        // reach them: the button used to show a confirm, clear every box and write nothing.
+        settings.Current.HotkeyCaptureRegion = "Ctrl+Shift+F9";
+        list.SelectedIndex = 1;
+        PumpDispatcherOnce();
+        window.RestoreSectionDefaults(1);
+        Assert.Equal(new Settings().HotkeyCaptureRegion, settings.Current.HotkeyCaptureRegion);
     }
 
     private static void PumpDispatcherOnce()

@@ -820,7 +820,10 @@ public partial class BackgroundComposerWindow : Window
         try
         {
             Directory.CreateDirectory(_settings.Current.SaveFolder);
-            string format = _settings.Current.ImageFormat;
+            // "Automatic" decides where WinShot names the file itself; a Save-as dialog is
+            // the user choosing, so it only preselects PNG here.
+            string format = ImageFormatChooser.IsAuto(_settings.Current.ImageFormat)
+                ? "png" : _settings.Current.ImageFormat;
             var dialog = new SaveFileDialog
             {
                 FileName = FileNamer.Next(_settings, format),

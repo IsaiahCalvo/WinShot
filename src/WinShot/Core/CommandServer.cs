@@ -4,6 +4,16 @@ using System.IO.Pipes;
 namespace WinShot.Core;
 
 /// <summary>
+/// The per-invocation overrides carried by a <c>winshot://</c> URL's query string —
+/// <c>?then=</c> replaces the after-capture set for this capture only, <c>delayed=</c>
+/// counts down first. <see cref="None"/> means "do exactly what the settings say".
+/// </summary>
+public sealed record CaptureCommandOptions(PostCaptureSet? Then, int DelaySeconds)
+{
+    public static readonly CaptureCommandOptions None = new(null, 0);
+}
+
+/// <summary>
 /// Single-instance command routing over the "WinShot.Commands" named pipe.
 /// A second WinShot process (e.g. launched via winshot://) forwards its command with
 /// <see cref="TrySendToRunningInstance"/> and exits; the primary instance runs a
@@ -152,6 +162,75 @@ public sealed class CommandServer : IDisposable
 
         return ValidCommands.TryGetValue(s, out string? command) ? command : null;
     }
+
+    /// <summary>
+    /// The query half of a <c>winshot://</c> URL: what to do with the capture
+    /// (<c>?then=copy,save,edit,pin,thumbnail</c>) and how long to wait before taking it
+    /// (<c>?delayed=10</c>). Both are per-invocation overrides — nothing here is persisted,
+    /// so a scripted capture cannot quietly change what the user's own hotkeys do.
+    /// </summary>
+    public static CaptureCommandOptions ParseOptions(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+            return CaptureCommandOptions.None;
+
+        string s = arg.Trim().Trim('"');
+        int queryStart = QueryStart(s);
+        if (queryStart < 0 || queryStart == s.Length - 1)
+            return CaptureCommandOptions.None;
+
+        PostCaptureSet? then = null;
+        int delaySeconds = 0;
+        foreach (string pair in s[(queryStart + 1)..].Split(['&', ';'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = pair.IndexOf('=');
+            string key = (eq < 0 ? pair : pair[..eq]).Trim();
+            string value = eq < 0 ? string.Empty : Uri.UnescapeDataString(pair[(eq + 1)..].Trim());
+
+            if (key.Equals("then", StringComparison.OrdinalIgnoreCase))
+                then = PostCaptureSet.TryParseThen(value) ?? then;
+            else if (key.Equals("delayed", StringComparison.OrdinalIgnoreCase) ||
+                     key.Equals("delay", StringComparison.OrdinalIgnoreCase))
+                delaySeconds = ClampDelay(value);
+        }
+        return then is null && delaySeconds == 0 ? CaptureCommandOptions.None : new(then, delaySeconds);
+    }
+
+    /// <summary>
+    /// Re-attaches the raw URL's query to an already-resolved command name. A second
+    /// WinShot process forwards the resolved command (so a relative "Open with" path is
+    /// made absolute against the right working directory) — without this the primary
+    /// instance would receive the verb and lose the <c>?then=</c> that came with it.
+    /// </summary>
+    public static string WithQuery(string command, string? rawArg)
+    {
+        if (string.IsNullOrWhiteSpace(rawArg))
+            return command;
+
+        string s = rawArg.Trim().Trim('"');
+        int queryStart = QueryStart(s);
+        return queryStart < 0 || queryStart == s.Length - 1 ? command : command + "?" + s[(queryStart + 1)..];
+    }
+
+    /// <summary>
+    /// Where a <c>winshot://</c> URL's query begins, or -1 when the argument has none.
+    /// A file path is not a URL: '#' and '?' are legal in a Windows file name, so an
+    /// argument that resolves to an <c>edit:&lt;path&gt;</c> command has no query at all —
+    /// the same guard <see cref="ParseCommand"/> runs before its own URL munging.
+    /// Without it, "Open with" on <c>note#1.png</c> while WinShot was already running was
+    /// forwarded as <c>edit:…note#1.png?1.png</c>, which the running instance could not
+    /// parse back into a path, and the file opened nowhere.
+    /// </summary>
+    private static int QueryStart(string trimmed) =>
+        TryParseEditCommand(trimmed, out _) ? -1 : trimmed.IndexOfAny(['?', '#']);
+
+    /// <summary>
+    /// A delay is seconds, and a capture nobody is waiting for is a bug rather than a
+    /// feature: anything unparseable, negative or past a minute is refused rather than
+    /// parking the app in a countdown a script cannot cancel.
+    /// </summary>
+    private static int ClampDelay(string value) =>
+        int.TryParse(value, out int seconds) && seconds > 0 ? Math.Min(seconds, 60) : 0;
 
     /// <summary>Maps an existing image-file path (bare or "edit:"-prefixed) to
     /// "edit:&lt;full path&gt;"; anything else returns false.</summary>

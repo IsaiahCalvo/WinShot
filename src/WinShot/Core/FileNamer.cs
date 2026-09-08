@@ -37,6 +37,20 @@ public static class FileNamer
         return $"{name}.{ext}";
     }
 
+    /// <summary>
+    /// A free path for an explicit base name — what "Ask for name after every capture"
+    /// needs. Collisions get " (2)", " (3)" and so on rather than overwriting: the user
+    /// typed a name, not a promise that it was unused.
+    /// </summary>
+    public static string UniquePathFor(string directory, string baseName, string extension)
+    {
+        string ext = extension.StartsWith('.') ? extension : "." + extension;
+        string candidate = Path.Combine(directory, baseName + ext);
+        for (int n = 2; File.Exists(candidate) && n < 10_000; n++)
+            candidate = Path.Combine(directory, $"{baseName} ({n}){ext}");
+        return candidate;
+    }
+
     public static string NextUniquePath(SettingsService settings, string directory, string extension)
     {
         string fileName = Next(settings, extension);

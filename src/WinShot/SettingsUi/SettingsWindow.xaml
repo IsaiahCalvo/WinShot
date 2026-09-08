@@ -40,10 +40,13 @@
         </Style>
         <!-- Hint: muted helper text, sits under or beside a control. -->
         <Style x:Key="Hint" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextHintBrush}"/>
             <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
+            <Setter Property="LineHeight" Value="{StaticResource LineHeightBody}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="8,0,0,0"/>
+            <!-- LEADING gutter: an un-overridden hint trails the control it explains inside a
+                 horizontal row, so the gap belongs on its left. -->
+            <Setter Property="Margin" Value="{StaticResource HintGutterMargin}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
         <!-- Full-width hint that sits below a control, indented to the control column. -->
@@ -59,7 +62,7 @@
         <Style x:Key="SettingsTextBox" TargetType="TextBox" BasedOn="{StaticResource DarkTextBox}">
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -101,7 +104,7 @@
                             <Grid>
                                 <TextBlock x:Name="Placeholder" Text="Record shortcut"
                                            Margin="8,0" VerticalAlignment="Center"
-                                           Foreground="{StaticResource TextDisabledBrush}"
+                                           Foreground="{StaticResource TextHintBrush}"
                                            FontSize="{StaticResource TextBody}" FontWeight="Normal"
                                            IsHitTestVisible="False" Visibility="Collapsed"/>
                                 <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
@@ -174,6 +177,31 @@
             <Setter Property="SnapsToDevicePixels" Value="True"/>
         </Style>
 
+        <!-- The tab strip's text half of the selection cross-fade. The chip half is the theme's
+             ChipIn/ChipOut; these are the same MotionQuick step on the label's colour, so the
+             pill and the word it holds arrive together instead of the word hard-cutting.
+             Both target "Fg", the unfrozen brush each tab template declares. -->
+        <Storyboard x:Key="TabTextSelect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="{StaticResource AccentColor}" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+        <Storyboard x:Key="TabTextDeselect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="{StaticResource TextSecondaryColor}" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+        <Storyboard x:Key="SubTabTextSelect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="White" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+        <Storyboard x:Key="SubTabTextDeselect">
+            <ColorAnimation Storyboard.TargetName="Fg" Storyboard.TargetProperty="Color"
+                            To="{StaticResource TextSecondaryColor}" Duration="{StaticResource MotionQuick}"
+                            EasingFunction="{StaticResource EaseOutCubic}"/>
+        </Storyboard>
+
         <!-- Top tab: Fluent glyph stacked above a small label. Active tab tints accent,
              matching CleanShot's icon-over-label tab strip. -->
         <Style x:Key="NavTab" TargetType="ListBoxItem">
@@ -186,15 +214,35 @@
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
                                 Padding="10,6" MinWidth="62">
-                            <ContentPresenter HorizontalAlignment="Center"/>
+                            <!-- Named, template-local, therefore UNFROZEN: a StaticResource brush
+                                 is shared and immutable, so its Color cannot be animated. This is
+                                 what carries the label from secondary to accent. It sits nearer
+                                 the content than the style's own Foreground, so it wins. -->
+                            <TextElement.Foreground>
+                                <SolidColorBrush x:Name="Fg" Color="{StaticResource TextSecondaryColor}"/>
+                            </TextElement.Foreground>
+                            <Grid>
+                                <Border x:Name="Hover" Opacity="0" CornerRadius="8"
+                                        Background="{StaticResource HoverFillBrush}"/>
+                                <Border x:Name="Chip" Opacity="0" CornerRadius="8"
+                                        Background="{StaticResource HoverFillBrush}"/>
+                                <ContentPresenter HorizontalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
-                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource TabTextSelect}"/>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource TabTextDeselect}"/>
+                                </Trigger.ExitActions>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -226,15 +274,32 @@
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Bd" Background="Transparent" CornerRadius="6"
                                 Padding="14,4" Margin="2,0">
-                            <ContentPresenter HorizontalAlignment="Center"/>
+                            <TextElement.Foreground>
+                                <SolidColorBrush x:Name="Fg" Color="{StaticResource TextSecondaryColor}"/>
+                            </TextElement.Foreground>
+                            <Grid>
+                                <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                                        Background="{StaticResource HoverFillBrush}"/>
+                                <!-- AccentDeep, not Accent: the selected pill's label is white. -->
+                                <Border x:Name="Chip" Opacity="0" CornerRadius="6"
+                                        Background="{StaticResource AccentDeepBrush}"/>
+                                <ContentPresenter HorizontalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter Property="Foreground" Value="White"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource SubTabTextSelect}"/>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource SubTabTextDeselect}"/>
+                                </Trigger.ExitActions>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -281,7 +346,11 @@
         <!-- A centered, label-less checkbox for the matrix cells. Uses its OWN template (just
              the box) rather than DarkCheckBox: DarkCheckBox reserves an 8px content gutter, so
              centering it left-shifted the box ~4px off the column center where the "—" dashes
-             sit. Box-only keeps checkbox and dash on the exact same centerline. -->
+             sit. Box-only keeps checkbox and dash on the exact same centerline.
+             The LAYERS and the storyboards are DarkCheckBox's, verbatim — Box / Hover / Chip /
+             Check at zero opacity plus ChipIn/Out, CheckIn/Out, HoverIn/Out — so these eleven
+             boxes tick with the same cross-fade as every other checkbox on the same pane.
+             Opacity, never Visibility: Visibility cannot be animated. -->
         <Style x:Key="MatrixCheck" TargetType="CheckBox">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
@@ -294,25 +363,52 @@
                             <Border x:Name="Box" CornerRadius="5"
                                     Background="{StaticResource SurfaceAltBrush}"
                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
-                            <Path x:Name="Check" Visibility="Collapsed"
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="5"
+                                    BorderBrush="{StaticResource BorderStrongOverBorderBrush}" BorderThickness="1"/>
+                            <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource AccentBrush}"
+                                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"/>
+                            <Path x:Name="Check" Opacity="0"
                                   Stroke="White" StrokeThickness="1.8"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   StrokeLineJoin="Round" Data="M4,9 L8,13 L14,5"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}"/>
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipIn}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource CheckIn}"/>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard Storyboard="{StaticResource ChipOut}"/>
+                                    <BeginStoryboard Storyboard="{StaticResource CheckOut}"/>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- A file-name token in the legend: reads as body text until you point at it. -->
+        <Style x:Key="TokenLink" TargetType="Hyperlink">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="TextDecorations" Value="{x:Null}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="TextDecorations" Value="Underline"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- The "not available for this column" placeholder, centered on the SAME line as the box. -->
         <Style x:Key="MatrixNA" TargetType="TextBlock">
             <Setter Property="Text" Value="—"/>
@@ -322,7 +418,12 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel Margin="0">
+    <!-- ShellRoot carries the entrance transform: a Window's own RenderTransform never
+         reaches the HWND, so the scale-up has to ride on the root content element. -->
+    <DockPanel x:Name="ShellRoot" Margin="0" RenderTransformOrigin="0.5,0.5">
+        <DockPanel.RenderTransform>
+            <ScaleTransform x:Name="ShellScale" ScaleX="1" ScaleY="1"/>
+        </DockPanel.RenderTransform>
 
         <!-- =============================== TOP TAB BAR =============================== -->
         <Border DockPanel.Dock="Top" Background="{StaticResource WindowBgBrush}"
@@ -403,11 +504,20 @@
             <!-- Footer action bar (inset to line up with the section cards) -->
             <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="20,6,20,0">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="CancelButton" Content="Cancel" IsCancel="True"
+                <Grid>
+                    <Button x:Name="RestoreDefaultsButton" Content="Restore defaults"
+                            HorizontalAlignment="Left"
                             FocusVisualStyle="{StaticResource SettingsFocusVisual}"
-                            AutomationProperties.Name="Cancel settings changes"
-                            AutomationProperties.HelpText="Close Settings without applying changes."
+                            AutomationProperties.Name="Restore defaults for this tab"
+                            AutomationProperties.HelpText="Reset every setting on the tab you are looking at to its default."
+                            Style="{StaticResource PillButtonSecondary}" Click="OnRestoreDefaults"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <!-- "Close", not "Cancel": toggles apply as they change, so there is
+                         nothing here to cancel. Only typed fields wait for Done. -->
+                    <Button x:Name="CancelButton" Content="Close" IsCancel="True"
+                            FocusVisualStyle="{StaticResource SettingsFocusVisual}"
+                            AutomationProperties.Name="Close settings"
+                            AutomationProperties.HelpText="Close Settings. Checkboxes and lists have already applied; typed fields need Done."
                             Style="{StaticResource PillButtonSecondary}" Click="OnCancel"/>
                     <Button x:Name="SaveButton" Content="Done" IsDefault="True"
                             FocusVisualStyle="{StaticResource SettingsFocusVisual}"
@@ -415,6 +525,7 @@
                             AutomationProperties.HelpText="Validate and apply the visible settings, then close this window."
                             Style="{StaticResource PillButtonPrimary}" Click="OnSave"/>
                 </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Sections (only one visible at a time; toggled from OnSectionChanged) -->
@@ -424,6 +535,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="App behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Startup"/>
                                     <CheckBox x:Name="StartupCheck" Content="Start at login"/>
@@ -432,23 +544,26 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Updates"/>
                                     <CheckBox x:Name="UpdatesCheck" Content="Check for updates on startup"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableSoundsRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="SoundsRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Sounds"/>
                                     <CheckBox x:Name="PlaySoundsCheck" Content="Play sounds"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableShutterSoundRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="ShutterSoundRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Shutter sound"/>
-                                    <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="ShutterSoundCombo" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnShutterSoundChanged">
                                         <ComboBoxItem Content="Default" Tag="default"/>
                                         <ComboBoxItem Content="Classic" Tag="classic"/>
                                         <ComboBoxItem Content="Subtle" Tag="subtle"/>
                                         <ComboBoxItem Content="Silent" Tag="silent"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableTrayIconRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="TrayIconRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="System tray"/>
                                     <CheckBox x:Name="ShowTrayIconCheck" Content="Show icon"/>
                                 </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}" TextWrapping="Wrap"
+                                           Text="With the icon hidden, your shortcuts still work and winshot://settings reopens this window."/>
 
                                 <Rectangle Style="{StaticResource GroupSep}"/>
 
@@ -468,38 +583,12 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource Card}">
+                        <Border x:Name="AfterCaptureMatrix" Style="{StaticResource Card}">
                             <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="After screenshot"/>
-                                    <ComboBox x:Name="PostCaptureActionCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="Show Quick Access" Tag="overlay"/>
-                                        <ComboBoxItem Content="Copy to clipboard" Tag="copy"/>
-                                        <ComboBoxItem Content="Save to export location" Tag="save"/>
-                                        <ComboBoxItem Content="Open Annotate" Tag="edit"/>
-                                        <ComboBoxItem Content="Pin to screen" Tag="pin"/>
-                                        <ComboBoxItem Content="Add background" Tag="background"/>
-                                    </ComboBox>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Clipboard"/>
-                                    <CheckBox x:Name="PostCaptureCopyCheck" Content="Also copy after other actions"/>
-                                </DockPanel>
-                                <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Recording output is chosen in the recording window."/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Kept only as a migration bridge for older saved matrix values. -->
-                        <Border x:Name="LegacyAfterCaptureMatrix" Style="{StaticResource Card}" Visibility="Collapsed">
-                            <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="After capture"
-                                               VerticalAlignment="Top"/>
-                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
-                                               TextWrapping="Wrap" VerticalAlignment="Top"
-                                               Text="Here you can decide what should happen after taking a screenshot or recording a video."/>
-                                </DockPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="After capture"/>
+                                <TextBlock Style="{StaticResource SubHint}" Margin="0,0,0,2"
+                                           TextWrapping="Wrap"
+                                           Text="Every action you tick runs. Nothing is exclusive."/>
 
                                 <Border Margin="0,10,0,0" HorizontalAlignment="Center"
                                         BorderBrush="{StaticResource BorderBrush}"
@@ -527,46 +616,43 @@
                                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource MatrixColHead}" Text="Screenshot"/>
                                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource MatrixColHead}" Text="Recording"/>
                                         <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource MatrixColHead}"
-                                                   HorizontalAlignment="Left" Margin="10,0,0,0" Text="Action"/>
+                                                   HorizontalAlignment="Left" Margin="{StaticResource MatrixCellMargin}" Text="Action"/>
 
                                         <!-- Row: Show Quick Access Overlay -->
                                         <CheckBox Grid.Row="1" Grid.Column="0" x:Name="ScreenshotShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="1" Grid.Column="1" x:Name="LegacyRecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <CheckBox Grid.Row="1" Grid.Column="1" x:Name="RecordingShowOverlayCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="1" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Show Quick Access Overlay"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Show the Quick Access card"/>
 
                                         <!-- Row: Copy file to clipboard -->
                                         <CheckBox Grid.Row="2" Grid.Column="0" x:Name="ScreenshotCopyCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="LegacyRecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <CheckBox Grid.Row="2" Grid.Column="1" x:Name="RecordingCopyCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="2" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Copy file to clipboard"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Copy file to clipboard"/>
 
                                         <!-- Row: Save -->
                                         <CheckBox Grid.Row="3" Grid.Column="0" x:Name="ScreenshotSaveCheck" Style="{StaticResource MatrixCheck}"/>
-                                        <CheckBox Grid.Row="3" Grid.Column="1" x:Name="RecordingSaveCheck" Style="{StaticResource MatrixCheck}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="3" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Save"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Save to export location"/>
 
                                         <!-- Row: Open Annotate tool (screenshot only) -->
                                         <CheckBox Grid.Row="4" Grid.Column="0" x:Name="ScreenshotOpenAnnotateCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="4" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open Annotate tool"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Open the annotation editor"/>
 
                                         <!-- Row: Pin to the screen (screenshot only) -->
                                         <CheckBox Grid.Row="5" Grid.Column="0" x:Name="ScreenshotPinCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource MatrixNA}"/>
                                         <TextBlock Grid.Row="5" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Pin to the screen"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Pin to the screen"/>
 
                                         <!-- Row: Open Video Editor (recording only) -->
                                         <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource MatrixNA}"/>
                                         <CheckBox Grid.Row="6" Grid.Column="1" x:Name="RecordingOpenEditorCheck" Style="{StaticResource MatrixCheck}"/>
                                         <TextBlock Grid.Row="6" Grid.Column="2" Foreground="{StaticResource TextPrimaryBrush}"
-                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="10,0,0,0" Text="Open Video Editor"/>
-
-                                        <!-- Hidden screenshot-editor checkbox kept for parity/persistence (Open Annotate == screenshot editor). -->
-                                        <CheckBox x:Name="ScreenshotOpenEditorCheck" Visibility="Collapsed"/>
+                                                   FontSize="{StaticResource TextBody}" VerticalAlignment="Center" Margin="{StaticResource MatrixCellMargin}" Text="Open the video editor"/>
                                     </Grid>
                                 </Border>
                             </StackPanel>
@@ -580,6 +666,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Global shortcuts"/>
                                 <!-- Rows are generated from the shortcut catalog in
                                      SettingsWindow.Shortcuts.cs (BuildShortcutsTab). -->
                                 <StackPanel x:Name="ShortcutsHost"/>
@@ -596,6 +683,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Placement"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Position on screen"/>
                                     <ComboBox x:Name="OverlayPositionCombo" HorizontalAlignment="Stretch">
@@ -603,8 +691,8 @@
                                         <ComboBoxItem Content="Right" Tag="right"/>
                                         <ComboBoxItem Content="Top" Tag="top"/>
                                         <ComboBoxItem Content="Bottom" Tag="bottom"/>
-                                        <ComboBoxItem Content="Bottom Left" Tag="bottom-left"/>
-                                        <ComboBoxItem Content="Bottom Right" Tag="bottom-right"/>
+                                        <ComboBoxItem Content="Bottom left" Tag="bottom-left"/>
+                                        <ComboBoxItem Content="Bottom right" Tag="bottom-right"/>
                                     </ComboBox>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
@@ -623,6 +711,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Dismissal"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Auto-close"/>
                                     <CheckBox x:Name="OverlayAutoCloseCheck" Content="Enable"
@@ -631,8 +720,8 @@
                                 <DockPanel x:Name="OverlayActionRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Action"/>
                                     <ComboBox x:Name="OverlayActionCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="Save and Close" Tag="save-close"/>
-                                        <ComboBoxItem Content="Copy and Close" Tag="copy-close"/>
+                                        <ComboBoxItem Content="Save and close" Tag="save-close"/>
+                                        <ComboBoxItem Content="Copy and close" Tag="copy-close"/>
                                         <ComboBoxItem Content="Close" Tag="close"/>
                                     </ComboBox>
                                 </DockPanel>
@@ -651,7 +740,7 @@
                                     <CheckBox x:Name="OverlayCloseAfterDragCheck" Content="Close after dragging"/>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Hold Alt to keep the item on the Overlay after dragging."/>
+                                           Text="Hold Alt to keep the item on the card after dragging."/>
                                 <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Save button behavior"/>
                                     <ComboBox x:Name="OverlaySaveBehaviorCombo" HorizontalAlignment="Stretch">
@@ -675,7 +764,7 @@
                                  HorizontalAlignment="Center" Margin="0,0,0,10"
                                  KeyboardNavigation.TabNavigation="Once"
                                  AutomationProperties.Name="Recording categories"
-                                 AutomationProperties.HelpText="Use the arrow keys to choose General, Video, or GIF settings."
+                                 AutomationProperties.HelpText="Use the arrow keys to choose general, video, or GIF settings."
                                  ItemContainerStyle="{StaticResource SubTab}"
                                  SelectedIndex="0" SelectionChanged="OnRecordingSubChanged">
                             <ListBox.ItemsPanel>
@@ -686,10 +775,17 @@
                             <ListBoxItem Content="GIF" AutomationProperties.Name="GIF recording settings"/>
                         </ListBox>
 
+                        <!-- The three sub-panels overlap in a Grid rather than stacking in
+                             the parent StackPanel: the cross-fade keeps the outgoing panel
+                             visible for its whole fade, and as siblings in a column that
+                             doubled the scroll content and made the incoming panel arrive
+                             below the fold before snapping back. -->
+                        <Grid>
                         <!-- Recording > General -->
-                        <StackPanel x:Name="RecordingGeneralPanel">
+                        <StackPanel x:Name="RecordingGeneralPanel" VerticalAlignment="Top">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="While recording"/>
                                     <DockPanel x:Name="RecordingControlsRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Controls"/>
                                         <CheckBox x:Name="ShowRecordingControlsCheck" Content="Show controls while recording"/>
@@ -766,27 +862,13 @@
                                     </DockPanel>
                                 </StackPanel>
                             </Border>
-
-                            <Border Style="{StaticResource Card}">
-                                <StackPanel>
-                                    <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
-                                        <CheckBox x:Name="RecordingShowOverlayCheck" Content="Show Quick Access"/>
-                                    </DockPanel>
-                                    <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                        <CheckBox x:Name="RecordingCopyCheck" Content="Copy file to clipboard"/>
-                                    </DockPanel>
-                                    <TextBlock Style="{StaticResource SubHint}"
-                                               Text="Completed recordings stay local and are added to History."/>
-                                </StackPanel>
-                            </Border>
                         </StackPanel>
 
                         <!-- Recording > Video -->
-                        <StackPanel x:Name="RecordingVideoPanel" Visibility="Collapsed">
+                        <StackPanel x:Name="RecordingVideoPanel" Visibility="Collapsed" VerticalAlignment="Top">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Video output"/>
                                     <DockPanel x:Name="MaxResolutionRow" Style="{StaticResource Row}">
                                         <TextBlock Style="{StaticResource RowLabel}" Text="Max resolution"/>
                                         <ComboBox x:Name="MaxResolutionCombo" HorizontalAlignment="Stretch">
@@ -800,7 +882,7 @@
                                                Text="Set maximum resolution to reduce file size and upload time."/>
 
                                     <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="Video FPS"/>
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Video frames per second"/>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBox x:Name="RecordingFpsBox" Width="80"/>
                                             <TextBlock Style="{StaticResource Hint}" Text="10-60 fps"/>
@@ -821,25 +903,17 @@
                                         <TextBlock Style="{StaticResource RowLabel}" Text=""/>
                                         <CheckBox x:Name="RecordAudioMonoCheck" Content="Record audio in mono"/>
                                     </DockPanel>
-
-                                    <Rectangle x:Name="VideoEditorSeparator" Style="{StaticResource GroupSep}"/>
-
-                                    <DockPanel x:Name="VideoEditorRow" Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="After recording"/>
-                                        <CheckBox x:Name="OpenVideoEditorCheck" Content="Open Video Editor after recording"/>
-                                    </DockPanel>
-                                    <TextBlock x:Name="VideoEditorHint" Style="{StaticResource SubHint}"
-                                               Text="Open the local editor to trim and export the finished video."/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
 
                         <!-- Recording > GIF -->
-                        <StackPanel x:Name="RecordingGifPanel" Visibility="Collapsed">
+                        <StackPanel x:Name="RecordingGifPanel" Visibility="Collapsed" VerticalAlignment="Top">
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="GIF output"/>
                                     <DockPanel Style="{StaticResource Row}">
-                                        <TextBlock Style="{StaticResource RowLabel}" Text="GIF FPS"/>
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="GIF frames per second"/>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBox x:Name="GifFpsBox" Width="80"/>
                                             <TextBlock Style="{StaticResource Hint}" Text="5-20 fps"/>
@@ -876,6 +950,7 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
+                        </Grid>
                     </StackPanel>
                 </ScrollViewer>
 
@@ -885,6 +960,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Output"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="File format"/>
                                     <ComboBox x:Name="FormatCombo" HorizontalAlignment="Stretch"
@@ -892,43 +968,54 @@
                                         <ComboBoxItem Content="PNG" Tag="png"/>
                                         <ComboBoxItem Content="JPG" Tag="jpg"/>
                                         <ComboBoxItem Content="WEBP" Tag="webp"/>
+                                        <ComboBoxItem Content="Automatic" Tag="auto"/>
                                     </ComboBox>
                                 </DockPanel>
+                                <TextBlock x:Name="FormatAutoHint" Style="{StaticResource SubHint}"
+                                           Visibility="Collapsed"
+                                           Text="Automatic saves screenshots of text and interfaces as PNG, and photographic captures as JPEG."/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="HiDPI"/>
                                     <CheckBox x:Name="HiDpiCheck" Content="Scale HiDPI screenshots to 1x"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableSrgbRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Color management"/>
-                                    <CheckBox x:Name="ConvertToSrgbCheck" Content="Convert to sRGB profile"/>
-                                </DockPanel>
-                                <DockPanel x:Name="UnavailablePixelBorderRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Frame"/>
-                                    <CheckBox x:Name="AddPixelBorderCheck" Content="Add 1px border to all screenshots"/>
-                                </DockPanel>
-                                <DockPanel x:Name="UnavailableScreenshotBackgroundRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="ScreenshotBackgroundRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Background"/>
-                                    <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch">
+                                    <ComboBox x:Name="BackgroundCombo" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnBackgroundModeChanged">
                                         <ComboBoxItem Content="None" Tag="none"/>
                                         <ComboBoxItem Content="Wallpaper" Tag="wallpaper"/>
                                         <ComboBoxItem Content="Gradient" Tag="gradient"/>
                                         <ComboBoxItem Content="Solid color" Tag="color"/>
                                     </ComboBox>
                                 </DockPanel>
-                                <TextBlock x:Name="UnavailableScreenshotBackgroundHint" Style="{StaticResource SubHint}" Visibility="Collapsed"
-                                           Text="Apply Background Tool to all screenshots. Create presets in Annotate. Hold Shift while taking a screenshot to disable."/>
+                                <DockPanel x:Name="ScreenshotBackgroundColorRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Color"/>
+                                    <Border x:Name="BackgroundColorSwatch" Width="22" Height="22" CornerRadius="4"
+                                            DockPanel.Dock="Right" Margin="8,0,0,0"
+                                            BorderThickness="1" BorderBrush="{StaticResource BorderBrush}"/>
+                                    <TextBox x:Name="BackgroundColorBox" Style="{StaticResource SettingsTextBox}"
+                                             TextChanged="OnBackgroundColorChanged"/>
+                                </DockPanel>
+                                <DockPanel x:Name="ScreenshotBackgroundShadowRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Shadow"/>
+                                    <CheckBox x:Name="BackgroundShadowCheck" Content="Drop a shadow under the screenshot"/>
+                                </DockPanel>
+                                <TextBlock x:Name="ScreenshotBackgroundHint" Style="{StaticResource SubHint}"
+                                           Visibility="Collapsed"
+                                           Text="Every screenshot is padded and placed on this background as it is taken. The Quick Access card's background button still composes one capture at a time."/>
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Self-timer"/>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Self-Timer interval"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Self-timer interval"/>
                                     <ComboBox x:Name="SelfTimerCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="3 Seconds" Tag="3"/>
-                                        <ComboBoxItem Content="5 Seconds" Tag="5"/>
-                                        <ComboBoxItem Content="10 Seconds" Tag="10"/>
-                                        <ComboBoxItem Content="15 Seconds" Tag="15"/>
+                                        <ComboBoxItem Content="3 seconds" Tag="3"/>
+                                        <ComboBoxItem Content="5 seconds" Tag="5"/>
+                                        <ComboBoxItem Content="10 seconds" Tag="10"/>
+                                        <ComboBoxItem Content="15 seconds" Tag="15"/>
                                     </ComboBox>
                                 </DockPanel>
                                 <DockPanel Style="{StaticResource Row}">
@@ -942,6 +1029,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Selection"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Freeze screen"/>
                                     <CheckBox x:Name="FreezeScreenCheck" Content="Freeze screen when taking a screenshot"/>
@@ -950,7 +1038,7 @@
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Crosshair mode"/>
                                     <ComboBox x:Name="CrosshairModeCombo" HorizontalAlignment="Stretch">
                                         <ComboBoxItem Content="Always show" Tag="always"/>
-                                        <ComboBoxItem Content="When Ctrl is pressed" Tag="command"/>
+                                        <ComboBoxItem Content="When Ctrl is held" Tag="command"/>
                                         <ComboBoxItem Content="Never" Tag="never"/>
                                     </ComboBox>
                                 </DockPanel>
@@ -981,6 +1069,12 @@
                                         <ComboBoxItem Content="Max" Tag="max"/>
                                     </ComboBox>
                                 </DockPanel>
+                                <DockPanel x:Name="TrimWindowShadowRow" Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Window shadow"/>
+                                    <CheckBox x:Name="TrimWindowShadowCheck" Content="Trim the shadow from rounded corners"/>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource SubHint}"
+                                           Text="Windows 11 rounds a window and draws its shadow behind those corners. Trimming leaves them transparent instead of keeping a grey wedge of whatever was underneath."/>
                                 <!-- Legacy "Show crosshair" toggle kept for persistence; folded into Crosshair mode. -->
                                 <CheckBox x:Name="ShowCrosshairCheck" Visibility="Collapsed"/>
                             </StackPanel>
@@ -994,6 +1088,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Tools"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Arrow tool"/>
                                     <CheckBox x:Name="InverseArrowCheck" Content="Inverse arrow direction"/>
@@ -1023,6 +1118,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Editor behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Accessibility"/>
                                     <CheckBox x:Name="ShowColorNamesCheck" Content="Show color names"/>
@@ -1046,6 +1142,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="File names"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="File name"/>
                                     <TextBox x:Name="TemplateBox" TextChanged="OnTemplateChanged"/>
@@ -1056,42 +1153,63 @@
                                                FontSize="{StaticResource TextBody}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableAskForNameRow" Style="{StaticResource Row}" Visibility="Collapsed">
+                                <DockPanel x:Name="AskForNameRow" Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="AskForNameCheck" Content="Ask for name after every capture"/>
+                                    <CheckBox x:Name="AskForNameCheck" Content="Ask for a name when a capture saves automatically"/>
                                 </DockPanel>
-                                <DockPanel x:Name="UnavailableRetinaSuffixRow" Style="{StaticResource Row}" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text=""/>
-                                    <CheckBox x:Name="AddRetinaSuffixCheck" Content="Add &quot;@2x&quot; suffix to HiDPI screenshots"/>
-                                </DockPanel>
-                                <TextBlock FontSize="{StaticResource TextCaption}" Foreground="{StaticResource TextSecondaryBrush}"
-                                           LineHeight="17" Margin="{StaticResource SettingsHintBelowMargin}">
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{date}"/><Run Text="  current date"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{time}"/><Run Text="  current time"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{n}"/><Run Text="  auto-incrementing counter"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{app}"/><Run Text="  active application name"/><LineBreak/>
-                                    <Run Foreground="{StaticResource TextPrimaryBrush}" Text="{}{title}"/><Run Text="  active window title"/>
+                                <!-- Every token is a link that inserts itself at the caret. A
+                                     legend you have to retype is a legend you read once and
+                                     then guess at. -->
+                                <TextBlock x:Name="TemplateLegend" FontSize="{StaticResource TextCaption}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           LineHeight="{StaticResource LineHeightBody}" Margin="{StaticResource SettingsHintBelowMargin}">
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{date}" Click="OnInsertToken"><Run Text="{}{date}"/></Hyperlink><Run Text="  current date"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{time}" Click="OnInsertToken"><Run Text="{}{time}"/></Hyperlink><Run Text="  current time"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{n}" Click="OnInsertToken"><Run Text="{}{n}"/></Hyperlink><Run Text="  auto-incrementing counter"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{app}" Click="OnInsertToken"><Run Text="{}{app}"/></Hyperlink><Run Text="  active application name"/><LineBreak/>
+                                    <Hyperlink Style="{StaticResource TokenLink}" Tag="{}{title}" Click="OnInsertToken"><Run Text="{}{title}"/></Hyperlink><Run Text="  active window title"/><LineBreak/>
+                                    <Run Text="Click a token to insert it."/>
                                 </TextBlock>
                             </StackPanel>
                         </Border>
 
-                        <Border x:Name="UnavailableCopyFormatCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                        <Border x:Name="NotificationsCard" Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Confirmations"/>
                                 <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copy to clipboard"/>
-                                    <ComboBox x:Name="CopyFormatCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="File &amp; image (default)" Tag="file-image"/>
-                                        <ComboBoxItem Content="File only" Tag="file"/>
-                                        <ComboBoxItem Content="Image only" Tag="image"/>
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Text captured"/>
+                                    <ComboBox x:Name="NotifyOcrCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="In WinShot (default)" Tag="in-app"/>
+                                        <ComboBoxItem Content="Windows notification" Tag="system"/>
+                                        <ComboBoxItem Content="Nothing" Tag="off"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <Rectangle Style="{StaticResource GroupSep}"/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Copied"/>
+                                    <ComboBox x:Name="NotifyCopyCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="In WinShot (default)" Tag="in-app"/>
+                                        <ComboBoxItem Content="Windows notification" Tag="system"/>
+                                        <ComboBoxItem Content="Nothing" Tag="off"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <Rectangle Style="{StaticResource GroupSep}"/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Saved"/>
+                                    <ComboBox x:Name="NotifySaveCombo" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="In WinShot (default)" Tag="in-app"/>
+                                        <ComboBoxItem Content="Windows notification" Tag="system"/>
+                                        <ComboBoxItem Content="Nothing" Tag="off"/>
                                     </ComboBox>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
-                                           Text="Adjust this option if you've encountered any issues with pasting from clipboard or clipboard managers."/>
+                                           Text="Windows notifications can be held back by Focus assist and carry no buttons. Nothing also stops the tray icon's confirmation. Failures are always shown."/>
                             </StackPanel>
                         </Border>
 
                         <Border x:Name="PinnedStyleCard" Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Pinned screenshots"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Pinned screenshots"/>
                                     <StackPanel Orientation="Horizontal">
@@ -1105,6 +1223,7 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Capture history"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Keep history"/>
                                     <Slider x:Name="HistorySlider" HorizontalAlignment="Stretch"
@@ -1123,20 +1242,21 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="0.5*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Never" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Left"/>
-                                    <TextBlock Grid.Column="1" Text="No age limit" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="2" Text="1 day" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="3" Text="3 days" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="4" Text="1 week" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
-                                    <TextBlock Grid.Column="5" Text="1 month" Foreground="{StaticResource TextDisabledBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Right"/>
+                                    <TextBlock Grid.Column="0" Text="Never" Foreground="{StaticResource TextHintBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Left"/>
+                                    <TextBlock Grid.Column="1" Text="No age limit" Foreground="{StaticResource TextHintBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="1 day" Foreground="{StaticResource TextHintBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="3 days" Foreground="{StaticResource TextHintBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="4" Text="1 week" Foreground="{StaticResource TextHintBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Center"/>
+                                    <TextBlock Grid.Column="5" Text="1 month" Foreground="{StaticResource TextHintBrush}" FontSize="{StaticResource TextMicro}" HorizontalAlignment="Right"/>
                                 </Grid>
                                 <TextBlock x:Name="HistoryRetentionHint" Style="{StaticResource SubHint}" Margin="{StaticResource SettingsHintBelowMargin}"
-                                           Text="Age cleanup is separate from the local item limit shown in Capture History."/>
+                                           Text="Age cleanup is separate from the item limit shown in capture history."/>
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Capture behavior"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="All-In-One"/>
                                     <CheckBox x:Name="AllInOneRememberCheck" Content="Remember last selection"/>
@@ -1146,10 +1266,11 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Text recognition"/>
                                 <DockPanel x:Name="UnavailableOcrLanguageRow" Style="{StaticResource Row}" Visibility="Collapsed">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Text recognition"/>
                                     <ComboBox x:Name="OcrLanguageCombo" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="Automatically Detect Language" Tag="auto"/>
+                                        <ComboBoxItem Content="Detect language automatically" Tag="auto"/>
                                         <ComboBoxItem Content="English" Tag="en"/>
                                         <ComboBoxItem Content="Spanish" Tag="es"/>
                                         <ComboBoxItem Content="French" Tag="fr"/>
@@ -1168,17 +1289,6 @@
                             </StackPanel>
                         </Border>
 
-                        <Border x:Name="UnavailableResetWarningsCard" Style="{StaticResource Card}" Visibility="Collapsed">
-                            <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Dialogs"/>
-                                    <Button Content="Reset All Warning Dialogs" MinWidth="160"
-                                            HorizontalAlignment="Left"
-                                            Style="{StaticResource PillButtonSecondary}" Click="OnResetWarnings"/>
-                                </DockPanel>
-                            </StackPanel>
-                        </Border>
-
                         <!-- Hidden: retention is now driven by the Keep-history slider above. -->
                         <TextBox x:Name="RetentionDaysBox" Visibility="Collapsed"/>
                         <TextBox x:Name="HistoryLimitBox" Visibility="Collapsed"/>
@@ -1192,9 +1302,12 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel Margin="4,8" HorizontalAlignment="Center">
-                                <TextBlock Text="&#xE722;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="{StaticResource GlyphHero}" HorizontalAlignment="Center"
-                                           Foreground="{StaticResource AccentBrush}"/>
+                                <!-- The shipped mark itself, not a stand-in glyph: About, the tray
+                                     and the exe all show one WinShot icon. -->
+                                <Image x:Name="AboutIconImage" Width="{StaticResource GlyphHero}"
+                                       Height="{StaticResource GlyphHero}" HorizontalAlignment="Center"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       AutomationProperties.Name="WinShot icon"/>
                                 <TextBlock Text="WinShot" FontSize="{StaticResource TextDisplay}" FontWeight="SemiBold"
                                            HorizontalAlignment="Center" Margin="0,8,0,0"
                                            Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -1209,32 +1322,88 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Version"/>
-                                    <TextBlock x:Name="AboutVersionValue" VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Runtime"/>
-                                    <TextBlock x:Name="AboutRuntimeValue" VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Windows"/>
-                                    <TextBlock x:Name="AboutOsValue" VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextPrimaryBrush}"/>
-                                </DockPanel>
-                                <DockPanel Style="{StaticResource Row}">
-                                    <TextBlock Style="{StaticResource RowLabel}" Text="Install folder"/>
-                                    <TextBlock x:Name="AboutInstallValue" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="What's new"/>
+                                <TextBlock x:Name="AboutReleaseNotesStatus" Style="{StaticResource SubHint}"
+                                           Margin="0,0,0,4" Text="Checking GitHub for the latest release notes…"/>
+                                <ScrollViewer x:Name="AboutReleaseNotesScroll" MaxHeight="150"
+                                              Visibility="Collapsed"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <TextBlock x:Name="AboutReleaseNotesText" TextWrapping="Wrap"
+                                               LineHeight="{StaticResource LineHeightBody}" Margin="{StaticResource ChipGutterMargin}"
+                                               FontSize="{StaticResource TextBody}"
                                                Foreground="{StaticResource TextSecondaryBrush}"/>
-                                </DockPanel>
+                                </ScrollViewer>
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Build"/>
+                                <DockPanel Style="{StaticResource Row}">
+                                    <TextBlock Style="{StaticResource RowLabel}" Text="Version"/>
+                                    <TextBlock x:Name="AboutVersionValue" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                </DockPanel>
+
+                                <ToggleButton x:Name="AboutDiagnosticsToggle" Style="{StaticResource DisclosureToggle}"
+                                              Content="Diagnostics"
+                                              AutomationProperties.Name="Show diagnostics"
+                                              AutomationProperties.HelpText="Show the runtime, Windows version, and install folder."
+                                              Checked="OnDiagnosticsToggled" Unchecked="OnDiagnosticsToggled"/>
+                                <StackPanel x:Name="AboutDiagnosticsPanel" Visibility="Collapsed">
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Runtime"/>
+                                        <TextBlock x:Name="AboutRuntimeValue" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Windows"/>
+                                        <TextBlock x:Name="AboutOsValue" VerticalAlignment="Center"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </DockPanel>
+                                    <DockPanel Style="{StaticResource Row}">
+                                        <TextBlock Style="{StaticResource RowLabel}" Text="Install folder"/>
+                                        <TextBlock x:Name="AboutInstallValue" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    </DockPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Third-party notices"/>
+                                <TextBlock Style="{StaticResource SubHint}" Margin="0,0,0,4" TextWrapping="Wrap"
+                                           Text="WinShot ships thirteen MIT packages and one under Apache-2.0. Their notices travel with the app."/>
+                                <ToggleButton x:Name="AboutNoticesToggle" Style="{StaticResource DisclosureToggle}"
+                                              Content="Read the notices"
+                                              AutomationProperties.Name="Show third-party notices"
+                                              AutomationProperties.HelpText="Show the licence notices for the packages WinShot ships."
+                                              Checked="OnNoticesToggled" Unchecked="OnNoticesToggled"/>
+                                <StackPanel x:Name="AboutNoticesPanel" Visibility="Collapsed">
+                                    <ScrollViewer MaxHeight="220" Margin="0,4,0,6"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <TextBlock x:Name="AboutNoticesText" TextWrapping="Wrap"
+                                                   LineHeight="{StaticResource LineHeightBody}" Margin="{StaticResource ChipGutterMargin}"
+                                                   FontSize="{StaticResource TextCaption}"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    </ScrollViewer>
+                                    <Button x:Name="AboutLicensesButton" Content="Open the licence files"
+                                            MinWidth="170" HorizontalAlignment="Left"
+                                            FocusVisualStyle="{StaticResource SettingsFocusVisual}"
+                                            AutomationProperties.Name="Open the licence files"
+                                            AutomationProperties.HelpText="Open the folder holding the full licence texts shipped with WinShot."
+                                            Style="{StaticResource PillButtonSecondary}" Click="OnAboutOpenLicenses"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Updates and links"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Updates"/>
                                     <Button x:Name="AboutCheckUpdatesButton" Content="Check for updates"

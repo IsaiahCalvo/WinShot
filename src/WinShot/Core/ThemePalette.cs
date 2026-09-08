@@ -40,6 +40,24 @@ public static class ThemePalette
     public static readonly SD.Color AccentPressed = SD.Color.FromArgb(0x00, 0x60, 0xDF);
 
     /// <summary>
+    /// The accent as a fill that carries WHITE TEXT — Theme.xaml's AccentDeepColor, which is
+    /// why it exists there. White on <see cref="Accent"/> is 3.65:1, under the 4.5:1 text
+    /// floor; on this it is 4.6:1. Same hue, so it still reads as the one accent — use
+    /// <see cref="Accent"/> everywhere the accent is a graphic rather than a text ground.
+    /// </summary>
+    public static readonly SD.Color AccentDeep = SD.Color.FromArgb(0x0A, 0x73, 0xE0);
+
+    /// <summary>The destructive red as a fill that carries white text; Theme.xaml's
+    /// RedDeepColor. White on <see cref="Red"/> is 3.4:1, on this 5.0:1.</summary>
+    public static readonly SD.Color RedDeep = SD.Color.FromArgb(0xD4, 0x2B, 0x21);
+
+    /// <summary>The accent's gradient partner: the second stop of the editor's "Azure"
+    /// background preset. Named here because the headless capture-path backdrop needs the
+    /// same colour and cannot reach a WPF Brush for it — two hex literals for one colour
+    /// is how a palette drifts.</summary>
+    public static readonly SD.Color AccentGradientEnd = SD.Color.FromArgb(0x6D, 0xD5, 0xED);
+
+    /// <summary>
     /// The keyboard focus RING on a dark field. Never a fill: nothing white may sit on top
     /// of it — use <see cref="AccentHovered"/> for a hovered accent surface. This is
     /// Theme.xaml's InfoColor, which is what the WPF half already strokes its focus rings

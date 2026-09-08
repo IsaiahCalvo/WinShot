@@ -35,8 +35,14 @@ public static class ImageSaver
         }
     }
 
-    private static void SaveJpeg(SD.Bitmap bmp, string path)
+    private static void SaveJpeg(SD.Bitmap source, string path)
     {
+        // JPEG has no alpha channel and the GDI+ encoder does not composite: it writes the
+        // RGB under a transparent pixel, which for anything GDI+ cleared is black. A window
+        // capture with its rounded corners trimmed would come out with four black wedges.
+        using SD.Bitmap? flattened = AlphaFlatten.OverWhite(source);
+        SD.Bitmap bmp = flattened ?? source;
+
         ImageCodecInfo? codec = ImageCodecInfo.GetImageEncoders()
             .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
         if (codec is null)

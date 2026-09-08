@@ -42,8 +42,28 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Assets\download-window-svgrepo-com.svg"
-                      LogicalName="WinShot.Assets.download-window-svgrepo-com.svg" />
+    <!-- MIT and Apache-2.0 attach their notice obligations to the DISTRIBUTED BINARY, not to
+         the repository, so these travel into the publish output (and therefore into the
+         installer payload, which copies publish\WinShot\*) and the About pane reads them
+         from beside the exe. -->
+    <Content Include="..\..\THIRD_PARTY_NOTICES.md"
+             Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\licenses\*.txt"
+             Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shutter sounds, synthesised by tools\make-sounds.ps1 (no sampled audio ships). -->
+    <EmbeddedResource Include="Assets\sounds\shutter-default.wav"
+                      LogicalName="WinShot.Assets.sounds.shutter-default.wav" />
+    <EmbeddedResource Include="Assets\sounds\shutter-classic.wav"
+                      LogicalName="WinShot.Assets.sounds.shutter-classic.wav" />
+    <EmbeddedResource Include="Assets\sounds\shutter-subtle.wav"
+                      LogicalName="WinShot.Assets.sounds.shutter-subtle.wav" />
+    <!-- The one WinShot mark: exe icon (ApplicationIcon above), tray icon and About pane
+         all read this file. Re-cut it with tools\make-icon.ps1. -->
+    <EmbeddedResource Include="Assets\winshot.ico"
+                      LogicalName="WinShot.Assets.winshot.ico" />
     <EmbeddedResource Include="Assets\quick-access-close.svg"
                       LogicalName="WinShot.Assets.quick-access-close.svg" />
     <EmbeddedResource Include="Assets\quick-access-copy.svg"
@@ -54,6 +74,10 @@
                       LogicalName="WinShot.Assets.quick-access-lock.svg" />
     <EmbeddedResource Include="Assets\quick-access-pin.svg"
                       LogicalName="WinShot.Assets.quick-access-pin.svg" />
+    <!-- The filled half of the pin's outline/filled pair: the pinned (active) state only.
+         The outlined asset above is the default, matching the thirteen stroked siblings. -->
+    <EmbeddedResource Include="Assets\quick-access-pin-filled.svg"
+                      LogicalName="WinShot.Assets.quick-access-pin-filled.svg" />
     <EmbeddedResource Include="Assets\quick-access-unlock.svg"
                       LogicalName="WinShot.Assets.quick-access-unlock.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"

@@ -37,6 +37,14 @@ public partial class App : Application
     /// <summary>Process that owned the foreground window when the current capture was asked
     /// for. Stamped into the history file name so the tile can show a source-app badge.</summary>
     private string? _captureSourceApp;
+
+    /// <summary>
+    /// The <c>?then=</c> set from the URL that started the capture now running, consumed by
+    /// the first <see cref="HandleCapture"/> that follows. A single slot is safe because a
+    /// single capture is: <see cref="QueueCaptureCommand"/> and <see cref="RunCaptureFlow"/>
+    /// both drop anything that arrives while <see cref="_captureInProgress"/> is set.
+    /// </summary>
+    private PostCaptureSet? _pendingThenOverride;
     private bool _pendingCaptureDrainActive;
 
     /// <summary>One-shot, run when the current capture flow ends: the History window that hid
@@ -54,7 +62,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        string? incomingCommand = e.Args.Length > 0 ? CommandServer.ParseCommand(e.Args[0]) : null;
+        string? incomingArg = e.Args.Length > 0 ? e.Args[0] : null;
+        string? incomingCommand = incomingArg is null ? null : CommandServer.ParseCommand(incomingArg);
+        CaptureCommandOptions incomingOptions = incomingArg is null
+            ? CaptureCommandOptions.None
+            : CommandServer.ParseOptions(incomingArg);
 
         _mutex = new Mutex(true, "WinShot-SingleInstance", out _ownsMutex);
         if (!_ownsMutex)
@@ -64,7 +76,7 @@ public partial class App : Application
             // behind; without this probe WinShot would refuse to launch (no tray icon, no way
             // to recover short of a reboot).
             bool handledByRunningInstance = incomingCommand is not null
-                ? CommandServer.TrySendToRunningInstance(incomingCommand)
+                ? CommandServer.TrySendToRunningInstance(CommandServer.WithQuery(incomingCommand, incomingArg))
                 : CommandServer.IsInstanceRunning();
 
             if (handledByRunningInstance)
@@ -162,11 +174,20 @@ public partial class App : Application
         // whoever presses the Extract text hotkey first.
         OcrService.Warm();
 
+        AnnounceCompletedUpdate();
+
+        // After the tray icon exists (it is what the bubble points at) and after any startup
+        // command has had its turn, so onboarding never lands on top of a capture.
+        if (!_settings.Current.HasCompletedFirstRun && incomingCommand is null)
+        {
+            Dispatcher.BeginInvoke(ShowFirstRunWelcome, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+
         if (_settings.Current.CheckForUpdatesOnStartup)
             _ = StartupUpdateCheckAsync();
 
         if (incomingCommand is not null)
-            RunCommand(incomingCommand);
+            RunCommand(incomingCommand, incomingOptions);
 
         // Recovery stays behind normal startup initialization and never interrupts an
         // activation that immediately opens a capture/recording/settings surface.
@@ -278,7 +299,9 @@ public partial class App : Application
         _tray = new WF.NotifyIcon
         {
             Icon = TrayIconFactory.Create(),
-            Visible = true,
+            // "Hide the tray icon" is a real preference; the registered hotkeys and
+            // winshot://settings stay as the way back in.
+            Visible = _settings.Current.ShowTrayIcon,
             Text = "WinShot",
         };
 
@@ -286,28 +309,39 @@ public partial class App : Application
         var menu = new WF.ContextMenuStrip
         {
             Renderer = new DarkDropDown.DarkMenuRenderer(),
-            ShowImageMargin = false,
+            // A fixed left gutter for the capture verbs. The housekeeping group at the
+            // bottom deliberately gets no glyphs, which demotes it without another separator.
+            ShowImageMargin = true,
         };
         // Non-clickable header showing the running version — always visible at a glance.
         var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
         menu.Items.Add(versionHeader);
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area")));
-        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window")));
-        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background")));
-        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen")));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer")));
-        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region")));
-        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display")));
-        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow));
-        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous")));
-        menu.Items.Add(MenuItem("All-in-One…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one")));
+        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"), ""));
+        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"), ""));
+        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background"), ""));
+        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"), ""));
+        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"), ""));
+        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region"), ""));
+        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display"), ""));
+        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow, ""));
+        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"), ""));
+        menu.Items.Add(MenuItem("All-in-one…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"), ""));
         menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow));
-        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow));
-        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr")));
-        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling")));
-        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal")));
+        menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow, "\uE714"));
+        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow, "\uE7F4"));
+        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr"), "\uE8D2"));
+        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"), "\uE8CB"));
+        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal"), "\uE8AB"));
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(MenuItem("Open image…", null, OpenImageFileFlow, "\uE8E5"));
+        menu.Items.Add(MenuItem("Pin to the screen…", null, PinFromFileFlow, "\uE718"));
+        menu.Items.Add(MenuItem("Restore recently closed", null, RestoreLastFlow, "\uE7A7"));
+        _desktopIconsMenuItem = MenuItem("Hide desktop icons", null, ToggleDesktopIcons, "\uE8B7");
+        menu.Items.Add(_desktopIconsMenuItem);
+        _recentsMenuItem = new WF.ToolStripMenuItem("Recent captures");
+        _recentsMenuItem.DropDownOpening += (_, _) => PopulateRecentCaptures();
+        menu.Items.Add(_recentsMenuItem);
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(MenuItem("History…", s.HotkeyHistory, OpenHistory));
         menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
@@ -320,16 +354,303 @@ public partial class App : Application
         menu.Items.Add(MenuItem("Check for updates…", null, () => _ = CheckForUpdatesFlowAsync()));
         menu.Items.Add(MenuItem("About WinShot…", null, OpenAbout));
         menu.Items.Add(MenuItem("Exit", null, Shutdown));
+        // The desktop-icon row's checked state is only true while WinShot is holding them
+        // hidden, and a capture guard can change that behind the menu's back.
+        menu.Opening += (_, _) => RefreshDesktopIconsMenuItem();
+        // Re-rasterized on every open, not once: the tray menu follows the pointer, and a
+        // 100 % raster opening on the 150 % monitor is the whole defect.
+        ScaleMenuGlyphs(menu);
+        menu.Opening += (_, _) => ScaleMenuGlyphs(menu);
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => QueueCaptureCommand("capture-area");
         _tray.BalloonTipClicked += (_, _) => { if (_pendingUpdate is not null) _ = InstallPendingUpdateAsync(); };
+        _settings.Changed += ApplyTrayVisibility;
     }
 
-    private static WF.ToolStripMenuItem MenuItem(string text, string? shortcut, Action onClick)
+    private IDisposable? _trayConfirmation;
+
+    /// <summary>
+    /// A short confirmation beat on the tray mark for the two silent successes — a copy and
+    /// a save. Both currently finish with a toast that can be missed and nothing else; the
+    /// icon is the one thing already on screen and already looked at.
+    /// </summary>
+    private void PlayTrayConfirmation()
     {
-        var item = new WF.ToolStripMenuItem(text) { ShortcutKeyDisplayString = shortcut };
+        if (_tray is null || !_tray.Visible)
+            return;
+
+        _trayConfirmation?.Dispose();
+        _trayConfirmation = Motion.Run(
+            TrayConfirmationMs,
+            // Linear, because the callback below is a three-phase TIMELINE and needs the
+            // clock, not a shape. EaseOutBack driving it directly put the eased value above
+            // 1.0 from t=0.36 to t=0.85, which the clamp then flattened: the badge collapsed
+            // at a third of the way in and the rest of the tween drew nothing while still
+            // holding the high-resolution timer.
+            static p => p,
+            progress =>
+            {
+                double scale = TrayIconFactory.ConfirmationBadgeScale(progress);
+                if (_tray is null)
+                    return;
+                // TrayIconFactory quantizes the badge to seven cached steps, so ~78 frames
+                // produce at most 7 icons. Assigning every frame anyway cost a
+                // Shell_NotifyIcon round-trip per frame for no visible difference.
+                SD.Icon icon = TrayIconFactory.Create(TrayIconVariant.Confirm, scale);
+                if (!ReferenceEquals(_tray.Icon, icon))
+                    _tray.Icon = icon;
+            },
+            () =>
+            {
+                _trayConfirmation = null;
+                RefreshDesktopIconsMenuItem(); // restores Normal, or Slashed if that is the state
+            });
+    }
+
+    private const int TrayConfirmationMs = TrayIconFactory.ConfirmationMs;
+
+    private WF.ToolStripMenuItem? _desktopIconsMenuItem;
+    private WF.ToolStripMenuItem? _recentsMenuItem;
+    private bool _desktopIconsHiddenByTray;
+
+    private void ApplyTrayVisibility()
+    {
+        if (_tray is null) return;
+        bool wanted = _settings.Current.ShowTrayIcon;
+        if (_tray.Visible != wanted)
+            _tray.Visible = wanted;
+    }
+
+    /// <summary>The manual toggle over the same DesktopIcons the capture guard uses. The
+    /// tray mark picks up a slash while WinShot is the one holding them hidden, because a
+    /// hidden desktop with no visible cause is a support call.</summary>
+    private void ToggleDesktopIcons()
+    {
+        try
+        {
+            if (DesktopIcons.Visible)
+            {
+                DesktopIcons.Hide();
+                _desktopIconsHiddenByTray = true;
+            }
+            else
+            {
+                DesktopIcons.Show();
+                _desktopIconsHiddenByTray = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Toggling desktop icons failed", ex);
+            ShowBalloon("Desktop icons", "Windows would not let WinShot change the desktop right now.", ToastSeverity.Error);
+        }
+        RefreshDesktopIconsMenuItem();
+    }
+
+    private void RefreshDesktopIconsMenuItem()
+    {
+        if (_desktopIconsMenuItem is null) return;
+        bool hidden = !DesktopIcons.Visible;
+        _desktopIconsMenuItem.Checked = hidden;
+        _desktopIconsMenuItem.Text = hidden ? "Show desktop icons" : "Hide desktop icons";
+        if (!hidden)
+            _desktopIconsHiddenByTray = false;
+        if (_tray is not null)
+        {
+            _tray.Icon = _desktopIconsHiddenByTray
+                ? TrayIconFactory.Create(TrayIconVariant.Slashed)
+                : TrayIconFactory.Create();
+        }
+    }
+
+    /// <summary>The last few captures, with their own thumbnails in the icon gutter that is
+    /// now there anyway.</summary>
+    private void PopulateRecentCaptures()
+    {
+        if (_recentsMenuItem is null) return;
+        foreach (WF.ToolStripItem item in _recentsMenuItem.DropDownItems)
+            item.Image?.Dispose();
+        _recentsMenuItem.DropDownItems.Clear();
+
+        List<string> recent;
+        try
+        {
+            recent = _history.GetItems().Take(RecentCaptureCount).ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Reading recent captures for the tray menu failed", ex);
+            recent = [];
+        }
+
+        if (recent.Count == 0)
+        {
+            _recentsMenuItem.DropDownItems.Add(new WF.ToolStripMenuItem("No captures yet") { Enabled = false });
+            return;
+        }
+
+        foreach (string path in recent)
+        {
+            string file = path;
+            var item = new WF.ToolStripMenuItem(Path.GetFileName(file))
+            {
+                // Same gutter as the Segoe glyphs above it, so it has to be the same size at
+                // the same DPI — a fixed 16 px thumbnail sits small in a 24 px gutter at 150%.
+                Image = TryLoadThumbnail(file, MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96)),
+            };
+            item.Click += (_, _) => EditFromHistory(file);
+            _recentsMenuItem.DropDownItems.Add(item);
+        }
+    }
+
+    private const int RecentCaptureCount = 6;
+
+    private static SD.Image? TryLoadThumbnail(string path, int size)
+    {
+        try
+        {
+            if (!File.Exists(path) || Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+                return null;
+            using var source = new SD.Bitmap(path);
+            return source.GetThumbnailImage(size, size, null, IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Thumbnail for the tray menu failed ({Path.GetFileName(path)})", ex);
+            return null;
+        }
+    }
+
+    /// <summary>Open an image from disk straight into the editor.</summary>
+    private void OpenImageFileFlow()
+    {
+        string? path = AskForImageFile("Open an image");
+        if (path is not null)
+            EditFromHistory(path);
+    }
+
+    /// <summary>Pin an image from disk to the screen — FastPinWindow already takes a bitmap.</summary>
+    private async void PinFromFileFlow()
+    {
+        string? path = AskForImageFile("Pin an image to the screen");
+        if (path is null)
+            return;
+        if (await LoadBitmapCopyAsync(path) is not SD.Bitmap bmp)
+            return;
+        try
+        {
+            var win = new FastPinWindow(bmp, _settings);
+            PerfLog.TrackFirstShown(win, "pin window");
+            win.Show();
+        }
+        catch (Exception ex)
+        {
+            bmp.Dispose();
+            Log.Error("Pinning an opened image failed", ex);
+            ShowBalloon("Pin to the screen", FriendlyError.For(ex), ToastSeverity.Error);
+        }
+    }
+
+    private static string? AskForImageFile(string title)
+    {
+        try
+        {
+            using var dialog = new WF.OpenFileDialog
+            {
+                Title = title,
+                Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp|All files|*.*",
+                CheckFileExists = true,
+            };
+            return dialog.ShowDialog() == WF.DialogResult.OK ? dialog.FileName : null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Opening the file picker failed", ex);
+            return null;
+        }
+    }
+
+    /// <param name="glyph">A Segoe Fluent codepoint for the capture verbs. Housekeeping rows
+    /// pass none on purpose: an empty gutter is what visually demotes them.</param>
+    private static WF.ToolStripMenuItem MenuItem(
+        string text, string? shortcut, Action onClick, string? glyph = null)
+    {
+        var item = new WF.ToolStripMenuItem(text)
+        {
+            ShortcutKeyDisplayString = shortcut,
+            // The glyph rides on the item so ScaleMenuGlyphs can re-render it at whatever
+            // DPI the menu is opening on; the raster itself is made there, not here.
+            Tag = glyph,
+        };
         item.Click += (_, _) => onClick();
         return item;
+    }
+
+    /// <summary>
+    /// Rasterizes the menu's glyphs for the DPI the strip is on right now. WinForms scales
+    /// the row's font and height for us and does nothing for a bitmap, so a fixed 16 px
+    /// raster sat next to text that had grown to 24 px on Isaiah's 150 % primary — the
+    /// AutoScaleMode.Dpi landmine on a new surface. Both the bitmap and the point size come
+    /// off <see cref="WF.Control.DeviceDpi"/>, and ImageScalingSize is set to match so the
+    /// strip does not bilinearly resample what we just drew at the right size.
+    /// </summary>
+    private static void ScaleMenuGlyphs(WF.ContextMenuStrip menu)
+    {
+        int dpi = menu.DeviceDpi <= 0 ? 96 : menu.DeviceDpi;
+        int size = MenuGlyphPixels(dpi);
+        menu.ImageScalingSize = new SD.Size(size, size);
+        foreach (WF.ToolStripItem item in menu.Items)
+        {
+            if (item.Tag is string glyph && glyph.Length > 0)
+                item.Image = RenderMenuGlyph(glyph, dpi);
+        }
+    }
+
+    /// <summary>16 DIP in device pixels. The tray menu is a WinForms surface, so nothing
+    /// scales a bitmap for us — 16 device px sat beside text WinForms had already grown to
+    /// ~24 on a 150 % monitor.</summary>
+    internal static int MenuGlyphPixels(int dpi) => Math.Max(16, (int)Math.Round(16 * dpi / 96.0));
+
+    private static readonly Dictionary<(string Glyph, int Dpi), SD.Image> MenuGlyphCache = new();
+
+    /// <summary>A monoline glyph for the menu's left gutter, 16 DIP at <paramref name="dpi"/>,
+    /// cached for the process per size — a cache keyed by glyph alone hands a 100 % raster to
+    /// a 150 % monitor the moment the menu opens on one.</summary>
+    private static SD.Image? RenderMenuGlyph(string glyph, int dpi)
+    {
+        if (MenuGlyphCache.TryGetValue((glyph, dpi), out SD.Image? cached))
+            return cached;
+        try
+        {
+            int size = MenuGlyphPixels(dpi);
+            var bmp = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(bmp))
+            {
+                g.Clear(SD.Color.Transparent);
+                // AntiAliasGridFit, not ClearType: subpixel AA needs an opaque ground to
+                // blend against, and this bitmap is transparent — the glyph edges would come
+                // back colour-fringed with partial alpha. It is also the only text rendering
+                // hint the rest of the app uses.
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                // A point size renders at the Graphics' DPI, and a bitmap's is always 96 —
+                // so the glyph has to be told to grow, exactly like the box around it.
+                using var font = ThemePalette.IconFont(ThemePalette.TextBodyPt * dpi / 96f);
+                using var brush = new SD.SolidBrush(ThemePalette.TextPrimary);
+                using var format = new SD.StringFormat
+                {
+                    Alignment = SD.StringAlignment.Center,
+                    LineAlignment = SD.StringAlignment.Center,
+                };
+                g.DrawString(glyph, font, brush, new SD.RectangleF(0, 0, size, size), format);
+            }
+            MenuGlyphCache[(glyph, dpi)] = bmp;
+            return bmp;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Tray menu glyph could not be rendered", ex);
+            return null;
+        }
     }
 
     private System.Windows.Threading.DispatcherTimer? _hotkeyRetryTimer;
@@ -363,6 +684,15 @@ public partial class App : Application
         Reg(s.HotkeyHistory, OpenHistory);
         Reg(s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"));
         Reg(s.HotkeyLoadClipboard, LoadClipboardImageFlow);
+
+        // The rest of the tray's commands, bound through the ShortcutBindings dictionary
+        // rather than a Settings field each. Unbound actions are absent from it, so this
+        // registers only what the user actually asked for.
+        foreach ((string id, Action handler) in BindableCommands())
+        {
+            if (s.ShortcutBindings.TryGetValue(id, out string? gesture))
+                Reg(gesture, handler);
+        }
 
         if (failed.Count == 0)
         {
@@ -398,6 +728,29 @@ public partial class App : Application
             ToastSeverity.Error);
     }
 
+    /// <summary>
+    /// Every command that can be bound but has no dedicated Hotkey* field. The ids match
+    /// SettingsTruthCatalog.ExecutableShortcutIds, which the truth-catalog test pins, so a
+    /// row can never appear in Settings without something here to run it.
+    /// </summary>
+    private IEnumerable<(string Id, Action Handler)> BindableCommands()
+    {
+        yield return ("capture-window-background", () => QueueCaptureCommand("capture-window-background"));
+        yield return ("capture-display", () => QueueCaptureCommand("capture-display"));
+        yield return ("record-display", RecordDisplayFlow);
+        yield return ("scroll-horizontal", () => QueueCaptureCommand("scroll-horizontal"));
+        yield return ("open-image", OpenImageFileFlow);
+        yield return ("pin-to-screen", PinFromFileFlow);
+        yield return ("restore-last", RestoreLastFlow);
+        yield return ("unlock-pins", FastPinWindow.UnlockAllPins);
+        yield return ("toggle-desktop-icons", ToggleDesktopIcons);
+        yield return ("settings", OpenSettings);
+        yield return ("about", OpenAbout);
+    }
+
+    /// <summary>Test seam: the ids this app can actually dispatch.</summary>
+    internal IEnumerable<string> BindableCommandIdsForTest() => BindableCommands().Select(c => c.Id);
+
     private System.Windows.Threading.DispatcherTimer CreateHotkeyRetryTimer()
     {
         var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -414,15 +767,22 @@ public partial class App : Application
     private void OnCommandReceived(string raw)
     {
         string? cmd = CommandServer.ParseCommand(raw);
-        if (cmd is not null)
-            Dispatcher.BeginInvoke(() => RunCommand(cmd));
+        if (cmd is null)
+            return;
+        CaptureCommandOptions options = CommandServer.ParseOptions(raw);
+        Dispatcher.BeginInvoke(() => RunCommand(cmd, options));
     }
 
-    private void RunCommand(string cmd)
+    private void RunCommand(string cmd, CaptureCommandOptions? options = null)
     {
+        options ??= CaptureCommandOptions.None;
+
         if (IsCaptureCommand(cmd))
         {
-            QueueCaptureCommand(cmd);
+            if (options.DelaySeconds > 0)
+                RunDelayedCaptureCommand(cmd, options);
+            else
+                QueueCaptureCommand(cmd, options.Then);
             return;
         }
 
@@ -451,9 +811,40 @@ public partial class App : Application
         "all-in-one" or "ocr" or "scrolling" or "scroll-horizontal" or "self-timer" or "self-timer-region"
         || cmd.StartsWith("scroll-region:", StringComparison.OrdinalIgnoreCase);
 
+    private bool _delayedCountdownActive;
+
+    /// <summary>
+    /// Counts the delay down on screen rather than sleeping: <c>?delayed=5</c> means the user
+    /// is arranging something, and a countdown they can watch is the difference between a
+    /// timer and an app that has hung. The ring is click-through and never activates, so it
+    /// cannot be cancelled — Escape goes to whatever is underneath it, which is the point of
+    /// a countdown you can keep working during. Runs outside the capture guard so the command
+    /// still queues normally when the count reaches zero, and takes a guard of its own so two
+    /// links cannot stack two rings — the second capture would be dropped by the capture
+    /// guard anyway, leaving the user watching a countdown that produced nothing.
+    /// </summary>
+    private async void RunDelayedCaptureCommand(string cmd, CaptureCommandOptions options)
+    {
+        if (_captureInProgress || _delayedCountdownActive || Recording.SelectionUiActive) return;
+        _delayedCountdownActive = true;
+        try
+        {
+            await FastSelfTimerWindow.RunAsync(options.DelaySeconds);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Delayed capture countdown failed", ex);
+        }
+        finally
+        {
+            _delayedCountdownActive = false;
+        }
+        QueueCaptureCommand(cmd, options.Then);
+    }
+
     /// <summary>Queues a capture command, or returns false when one was already running and this
     /// press is dropped — callers that moved a window out of the way need to know which.</summary>
-    private bool QueueCaptureCommand(string cmd)
+    private bool QueueCaptureCommand(string cmd, PostCaptureSet? thenOverride = null)
     {
         // A capture flow is already active (selector open, overlay finishing): drop the
         // command instead of parking it in the pending slot. Every caller is user-initiated
@@ -465,6 +856,7 @@ public partial class App : Application
         // is WinShot. History tags the file with it so the card can wear an app badge.
         _captureSourceApp = FileNamer.GetForegroundInfo().App;
         _pendingCaptureCommand = cmd;
+        _pendingThenOverride = thenOverride;
         SchedulePendingCaptureDrain();
         return true;
     }
@@ -539,9 +931,20 @@ public partial class App : Application
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
 
+    /// <summary>Takes the URL's <c>?then=</c> set once; null for every capture that did not
+    /// come from a URL carrying one.</summary>
+    private PostCaptureSet? TakeThenOverride()
+    {
+        PostCaptureSet? then = _pendingThenOverride;
+        _pendingThenOverride = null;
+        return then;
+    }
+
     private void FinishCaptureFlow()
     {
         _captureInProgress = false;
+        // A cancelled flow never reached HandleCapture; drop its override with it.
+        _pendingThenOverride = null;
         MemoryCleanup.Request();
         ResumeAfterCaptureFlow();
         SchedulePendingCaptureDrain();
@@ -614,6 +1017,7 @@ public partial class App : Application
                     // QueueCaptureCommand — a press made while a capture is active must
                     // never replay after the user cancels.
                     _pendingCaptureCommand = null;
+                    _pendingThenOverride = null;
                     return;
                 }
 
@@ -942,12 +1346,23 @@ public partial class App : Application
             TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
 
-    /// <summary>Every captured bitmap funnels through here: optional downscale, history, then the post-capture action.</summary>
+    /// <summary>Every captured bitmap funnels through here: optional downscale, then the
+    /// after-capture set (history included).</summary>
     private void HandleCapture(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
-        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular)
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        PostCaptureSet? actionsOverride = null)
     {
+        // A winshot://…?then=copy,save URL overrides the after-capture set for this capture
+        // only. Taken (and cleared) unconditionally, so an override that never reached a
+        // capture — a cancelled selector — cannot leak into the next hotkey press.
+        actionsOverride ??= TakeThenOverride();
+
+        // The shutter, at the moment the pixels exist. Fire-and-forget: audio never
+        // delays the capture or the surface that follows it.
+        CaptureSound.Play(_settings.Current);
+
         if (_settings.Current.DownscaleHiDpi)
         {
             if (HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out int w, out int h))
@@ -962,79 +1377,162 @@ public partial class App : Application
             }
         }
 
-        string action = PostCaptureAction.Normalize(postCaptureActionOverride ?? _settings.Current.PostCaptureAction);
-        if (!PostCaptureAction.IsDirectAction(action))
+        // The standing "frame every shot like this" preference, applied after the downscale
+        // so the padding is measured against the pixels that ship. None (the default) does
+        // nothing, and a backdrop that fails to compose returns null rather than a capture.
+        //
+        // AppliesTo, not IsEnabled: the "Capture window with background" override is on its
+        // way to the interactive composer, which frames the shot itself.
+        if (ScreenshotBackdrop.AppliesTo(_settings.Current.ScreenshotBackground, postCaptureActionOverride) &&
+            ScreenshotBackdrop.Compose(
+                bmp,
+                _settings.Current.ScreenshotBackground,
+                _settings.Current.ScreenshotBackgroundColor,
+                _settings.Current.ScreenshotBackgroundShadow) is SD.Bitmap framed)
         {
-            try { ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: _settings.Current.AutoCopyToClipboard, historyKind); }
+            bmp.Dispose();
+            bmp = framed;
+        }
+
+        // "Add background" has no matrix cell — it only ever arrives as a per-invocation
+        // override (the tray's "Capture window with background").
+        if (postCaptureActionOverride == PostCaptureAction.Background)
+        {
+            _ = AddHistoryAsync(bmp, cloneOnCallerThread: true, historyKind);
+            try
+            {
+                var composer = new BackgroundComposerWindow(bmp, _settings, _history);
+                TrackFirstRender(composer, "background window");
+                composer.Show();
+            }
             catch { bmp.Dispose(); throw; }
             return;
         }
 
-        if (action == PostCaptureAction.Edit)
-        {
-            OpenDirectEditCapture(bmp, historyKind);
-            return;
-        }
+        PostCaptureSet actions = actionsOverride
+            ?? (postCaptureActionOverride is not null
+                ? PostCaptureSet.Single(postCaptureActionOverride, alsoCopy: _settings.Current.ScreenshotCopy)
+                : PostCaptureSet.ForScreenshot(_settings.Current));
 
-        _ = AddHistoryAsync(
-            bmp,
-            cloneOnCallerThread: PostCaptureAction.NeedsCallerThreadHistoryClone(action),
-            historyKind);
-        // Direct actions below take ownership of bmp (Save disposes it, Pin/Background
-        // hand it to a window), and the auto-copy clones on its OWN STA thread — sharing
-        // bmp raced use-against-dispose (save failing "Parameter is not valid", or the
-        // copy dying and arming the 8s auto-copy suppression). Clone on this thread so
-        // the copy owns its bitmap outright, mirroring the history path.
-        if (_settings.Current.AutoCopyToClipboard && action != PostCaptureAction.Copy)
-            _ = QueueAutoClipboardCopy(CaptureService.CloneBitmap(bmp), takeOwnership: true);
+        // Every box unticked would mean a capture that vanishes with no trace on screen.
+        // Show the card instead — history still has it, and the user can see what happened.
+        if (actions.IsEmpty)
+            actions = actions with { Overlay = true };
 
-        switch (action)
-        {
-            case PostCaptureAction.Copy:
-                _ = CopyToClipboardAndNotifyAsync(bmp, takeOwnership: true, showSuccess: true, showFailure: true, includePng: true, failureContext: "Copy failed");
-                break;
-            case PostCaptureAction.Save:
-                SaveSilently(bmp); // takes ownership
-                break;
-            case PostCaptureAction.Pin:
-                try
-                {
-                    var win = new FastPinWindow(bmp, _settings);
-                    PerfLog.TrackFirstShown(win, "pin window");
-                    win.Show();
-                }
-                catch { bmp.Dispose(); throw; }
-                break;
-            case PostCaptureAction.Background:
-                try
-                {
-                    var win = new BackgroundComposerWindow(bmp, _settings, _history);
-                    TrackFirstRender(win, "background window");
-                    win.Show();
-                }
-                catch { bmp.Dispose(); throw; }
-                break;
-        }
+        RunPostCaptureSet(bmp, actions, historyKind);
     }
 
-    private void OpenDirectEditCapture(SD.Bitmap bmp, HistoryCaptureKind historyKind)
+    /// <summary>
+    /// Runs the after-capture <b>set</b>. Order is fixed: history, then the disk write, then
+    /// the windows that stay open, then the clipboard, and the Quick Access card last so it
+    /// lands on top. Each consumer holds its own clone, so the clipboard write landing after
+    /// two windows opened costs nothing.
+    /// </summary>
+    /// <remarks>
+    /// One consumer owns the original bitmap and the deferred history + auto-copy work that
+    /// hangs off it — the Quick Access card when it is on, otherwise the annotation editor.
+    /// Every other consumer gets its own clone taken on THIS thread: a background clone races
+    /// the new owner's LockBits/Dispose on a single-accessor GDI+ bitmap, and a set can hand
+    /// the same capture to four owners at once.
+    /// </remarks>
+    private void RunPostCaptureSet(SD.Bitmap bmp, PostCaptureSet actions, HistoryCaptureKind historyKind)
+    {
+        bool cardOwns = actions.Overlay;
+        bool editorOwns = !cardOwns && actions.Annotate;
+        bool ownerRunsHistoryAndCopy = cardOwns || editorOwns;
+
+        try
+        {
+            if (!ownerRunsHistoryAndCopy)
+                _ = AddHistoryAsync(bmp, cloneOnCallerThread: true, historyKind);
+
+            // PostCaptureSet's field order IS this order, and its remarks say why: the sinks
+            // that finish and let go of their copy first, then the windows that stay open,
+            // then the card on top. Copy leads because it is the one the user can lose — with
+            // "Ask for a name" on, Save opens a modal, and a clipboard write queued behind
+            // that modal does not happen until the user answers it.
+            if (actions.Copy && !ownerRunsHistoryAndCopy)
+            {
+                _ = CopyToClipboardAndNotifyAsync(
+                    CaptureService.CloneBitmap(bmp),
+                    takeOwnership: true,
+                    showSuccess: true,
+                    showFailure: true,
+                    includePng: true,
+                    failureContext: "Copy failed");
+            }
+
+            if (actions.Save)
+                SaveSilently(CaptureService.CloneBitmap(bmp)); // takes ownership
+
+            if (actions.Annotate && !editorOwns)
+                OpenDirectEditCapture(CaptureService.CloneBitmap(bmp), historyKind, addHistory: false, autoCopy: false);
+
+            if (actions.Pin)
+            {
+                // The clone is the pin's the moment the constructor takes it; the outer catch
+                // only knows about the original, so a pin window that fails to CONSTRUCT must
+                // free it. Past the constructor the window owns it — freeing it there would
+                // leave a live window painting from a disposed bitmap.
+                SD.Bitmap forPin = CaptureService.CloneBitmap(bmp);
+                FastPinWindow pin;
+                try { pin = new FastPinWindow(forPin, _settings); }
+                catch { forPin.Dispose(); throw; }
+                PerfLog.TrackFirstShown(pin, "pin window");
+                pin.Show();
+            }
+
+            if (cardOwns)
+            {
+                ShowOverlayWithDeferredCaptureWork(bmp, autoCopy: actions.Copy, historyKind);
+                return;
+            }
+
+            if (editorOwns)
+            {
+                OpenDirectEditCapture(bmp, historyKind, addHistory: true, autoCopy: actions.Copy);
+                return;
+            }
+        }
+        catch
+        {
+            bmp.Dispose();
+            throw;
+        }
+
+        // No owner took the original (copy/save/pin already hold their own clones).
+        bmp.Dispose();
+    }
+
+    /// <param name="addHistory">False when another consumer in the same after-capture set
+    /// already owns the single history add.</param>
+    private void OpenDirectEditCapture(
+        SD.Bitmap bmp,
+        HistoryCaptureKind historyKind,
+        bool addHistory = true,
+        bool autoCopy = true)
     {
         DirectEditCaptureTestHooks? hooks = DirectEditTestHooks;
         // Read the tag NOW, on the caller's thread. The field is overwritten by the next
         // QueueCaptureCommand and this write runs later on the thread pool, so a second hotkey
         // press straight after a capture used to stamp capture B's "@app" onto capture A's file.
         string? sourceApp = _captureSourceApp;
-        Func<SD.Bitmap, Task> historyWork = hooks?.HistoryWork ?? (source =>
-            Task.Run(() =>
-            {
-                try { _history.Add(source, historyKind, sourceApp); }
-                catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
-            }));
-        Func<SD.Bitmap, Task>? autoCopyWork = _settings.Current.AutoCopyToClipboard
+        Func<SD.Bitmap, Task> historyWork = addHistory
+            ? hooks?.HistoryWork ?? (source =>
+                Task.Run(() =>
+                {
+                    try { _history.Add(source, historyKind, sourceApp); }
+                    catch (Exception ex) { Log.Error("Failed to add direct Edit capture to history", ex); }
+                }))
+            : _ => Task.CompletedTask;
+        Func<SD.Bitmap, Task>? autoCopyWork = autoCopy
             ? hooks?.AutoCopyWork ?? CopyBorrowedCaptureToClipboardAsync
             : null;
         var handoff = new DirectEditCaptureHandoff(bmp, historyWork, autoCopyWork);
 
+        // This method owns the bitmap it is handed, so the guard lives here: it is the only
+        // one that also covers the CLONE the "annotate alongside the card" branch passes,
+        // which RunPostCaptureSet's own catch knows nothing about.
         try
         {
             var win = EditorWindow.CreateForDirectCapture(bmp, _settings, _history, handoff.RunAsync);
@@ -1053,8 +1551,9 @@ public partial class App : Application
     internal void HandleCaptureForTest(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
-        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular) =>
-        HandleCapture(bmp, postCaptureActionOverride, historyKind);
+        HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
+        PostCaptureSet? actionsOverride = null) =>
+        HandleCapture(bmp, postCaptureActionOverride, historyKind, actionsOverride);
 
     internal void SetHistoryForTest(HistoryService history) => _history = history;
 
@@ -1186,7 +1685,12 @@ public partial class App : Application
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
             if (showSuccess)
-                await Dispatcher.InvokeAsync(() => ShowBalloon("Copied", "The capture is on the clipboard.", ToastSeverity.Success));
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    NotifyAction(
+                        NotifiedAction.Copy, "Copied", "The capture is on the clipboard.",
+                        trayBeat: true);
+                });
         }
         catch (Exception ex)
         {
@@ -1311,7 +1815,10 @@ public partial class App : Application
         try
         {
             Directory.CreateDirectory(_settings.Current.SaveFolder);
-            path = FileNamer.NextUniquePath(_settings, _settings.Current.SaveFolder, _settings.Current.ImageFormat);
+            path = FileNamer.NextUniquePath(
+                _settings,
+                _settings.Current.SaveFolder,
+                ImageFormatChooser.Resolve(_settings.Current.ImageFormat, bmp));
         }
         catch (Exception ex)
         {
@@ -1321,6 +1828,56 @@ public partial class App : Application
             return;
         }
 
+        if (_settings.Current.AskForNameAfterCapture)
+        {
+            // The resolved template is the default, so the prompt costs one Enter for
+            // anyone who only wanted the option available.
+            string suggested = Path.GetFileNameWithoutExtension(path);
+            string? answer;
+            try
+            {
+                answer = ThemedInputDialog.Ask(
+                    null,
+                    "Name this capture",
+                    $"Saving into {_settings.Current.SaveFolder}",
+                    suggested);
+            }
+            catch (Exception ex)
+            {
+                // This runs inside the after-capture set. Letting a dialog failure escape kills
+                // every action queued behind it — the pin and the card never open — and the user
+                // gets one generic "Capture failed". Fall back to the resolved name instead.
+                Log.Error("The name prompt could not be shown; saving under the default name", ex);
+                answer = suggested;
+            }
+            if (answer is null)
+            {
+                // Cancelling a name prompt is a decision, not a failure — but it is still a
+                // decision the user has to see landing, or the app just goes quiet on them.
+                bmp.Dispose();
+                Log.Info("Save cancelled at the name prompt");
+                NotifyAction(NotifiedAction.Save, "Save cancelled",
+                    "The capture is still in History.", severity: ToastSeverity.Info);
+                return;
+            }
+            string chosen = ThemedInputDialog.SanitizeFileName(answer, suggested);
+            if (!string.Equals(chosen, suggested, StringComparison.Ordinal))
+            {
+                try
+                {
+                    path = FileNamer.UniquePathFor(
+                        _settings.Current.SaveFolder, chosen, Path.GetExtension(path));
+                }
+                catch (Exception ex)
+                {
+                    bmp.Dispose();
+                    Log.Error("Could not use the name you entered", ex);
+                    ShowBalloon("Save failed", FriendlyError.For(ex), ToastSeverity.Error);
+                    return;
+                }
+            }
+        }
+
         _ = Task.Run(() =>
         {
             using (bmp)
@@ -1328,7 +1885,11 @@ public partial class App : Application
                 try
                 {
                     ImageSaver.Save(bmp, path);
-                    Dispatcher.InvokeAsync(() => ShowBalloon("Saved", Path.GetFileName(path), ToastSeverity.Success));
+                    Dispatcher.InvokeAsync(() =>
+                    {
+                        NotifyAction(
+                            NotifiedAction.Save, "Saved", Path.GetFileName(path), trayBeat: true);
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -1461,7 +2022,7 @@ public partial class App : Application
     private void ShowOcrToast(
         string title, string preview, SD.Point? anchor, Action? onOpen,
         ToastSeverity severity = ToastSeverity.Success, bool holdLong = false) =>
-        ShowToast(title, preview, anchor, onOpen, severity, holdLong);
+        NotifyAction(NotifiedAction.Ocr, title, preview, anchor, onOpen, severity, holdLong);
 
     private void ScrollingFlow(ScrollDirection? direction = null) => RunCaptureFlow(
         "Scrolling capture failed", "Scrolling capture failed", async () =>
@@ -1580,6 +2141,11 @@ public partial class App : Application
         var win = new FastPinWindow(overlay.CloneImage(), _settings);
         PerfLog.TrackFirstShown(win, "pin window");
         win.Show();
+        // The card is dismissed by a pin, exactly as it always has been — that dismissal is
+        // part of the pinned surface and not this track's to change. The outline-to-solid
+        // swap therefore has to be instant rather than a 140 ms cross-fade: it lands before
+        // the card's own exit begins, so the glyph reads solid for the length of the exit
+        // instead of racing it.
         overlay.Close();
     }
 
@@ -1693,6 +2259,59 @@ public partial class App : Application
         ShowToast(title, message, anchor: null, onOpen: null, severity, holdLong);
 
     /// <summary>
+    /// One message whose body keeps changing — a download percentage — not twenty messages.
+    /// Re-showing a toast builds a new window and disposes the old one outright, so a
+    /// progress readout replayed the 280 ms entrance twenty times and announced itself to a
+    /// screen reader on each one. Updating the live card in place is what progress means.
+    /// </summary>
+    private void ShowProgressToast(string title, string message)
+    {
+        if (!ToastWindow.TryUpdateBody(title, message))
+            ShowBalloon(title, message, holdLong: true);
+    }
+
+    /// <summary>
+    /// A routine success — text recognised, capture copied, capture saved — confirmed in
+    /// whichever channel the user chose for that action. Off means off, tray beat included:
+    /// someone who silenced "Copied" is not asking for a quieter "Copied".
+    /// </summary>
+    /// <remarks>
+    /// Only successes come through here. <see cref="ShowBalloon"/> stays the path for
+    /// failures, which are never silenced by a preference about confirmations.
+    /// </remarks>
+    private void NotifyAction(
+        NotifiedAction action,
+        string title,
+        string message,
+        SD.Point? anchor = null,
+        Action? onOpen = null,
+        ToastSeverity severity = ToastSeverity.Success,
+        bool holdLong = false,
+        bool trayBeat = false)
+    {
+        switch (NotificationStyle.For(action, _settings.Current))
+        {
+            case NotificationStyle.Off:
+                return;
+            // A shell balloon needs a visible NotifyIcon to come out of. With "Show icon"
+            // off the NotifyIcon is alive but invisible and ShowBalloonTip is a silent
+            // no-op, so the user picks a confirmation channel and gets nothing. Fall back
+            // to the in-app toast, which needs no tray at all.
+            case NotificationStyle.System when _tray is { Visible: true }:
+                // The shell notification carries no buttons, so an action (the OCR "Open
+                // link") is lost here by construction. The text is already on the clipboard.
+                ShowShellBalloon(title, message, severity);
+                break;
+            default:
+                ShowToast(title, message, anchor, onOpen, severity, holdLong);
+                break;
+        }
+
+        if (trayBeat)
+            PlayTrayConfirmation();
+    }
+
+    /// <summary>
     /// The one way to put a toast on screen, for callers outside App as well: it is what
     /// carries the dispose-on-throw guard and the tray-balloon fallback, so a window that
     /// fails to create still tells the user something instead of leaking a form and going
@@ -1729,7 +2348,8 @@ public partial class App : Application
         catch (Exception ex)
         {
             // The toast is a window and a window can fail to create; the balloon is the one
-            // piece of feedback that never needs one.
+            // piece of feedback that never needs one — as long as the tray icon is showing.
+            // When it is not there is nowhere left to put this, and the log is the record.
             Log.Error("Toast failed; falling back to the tray balloon", ex);
             ShowShellBalloon(title, message, severity);
         }
@@ -1748,6 +2368,110 @@ public partial class App : Application
         });
 
     // ---- Updates ----------------------------------------------------------
+
+    private FirstRunWelcomeWindow? _welcome;
+
+    /// <summary>
+    /// The first launch, once. Three rows that RUN the commands rather than describing them,
+    /// so the user's first capture happens inside onboarding — which is the only part of a
+    /// tour anyone remembers.
+    /// </summary>
+    private void ShowFirstRunWelcome()
+    {
+        if (_welcome is not null || _settings.Current.HasCompletedFirstRun)
+            return;
+
+        // Written before the window opens: if anything below throws, or the process dies
+        // mid-onboarding, the user is not taught the same lesson again on every launch.
+        _settings.Current.HasCompletedFirstRun = true;
+        try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to record first run", ex); }
+
+        try
+        {
+            var s = _settings.Current;
+            var actions = new List<FirstRunWelcomeWindow.WelcomeAction>
+            {
+                new("\uE7C5", "Capture a region", HintFor(s.HotkeyCaptureRegion), () => QueueCaptureCommand("capture-area")),
+                new("\uE714", "Record the screen", HintFor(s.HotkeyRecord), RecordFlow),
+                new("\uE8D2", "Extract text", HintFor(s.HotkeyOcr), () => QueueCaptureCommand("ocr")),
+            };
+
+            _welcome = new FirstRunWelcomeWindow(TrayAnchorPoint(), actions, () => _welcome = null);
+            _welcome.Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("First-run welcome could not be shown", ex);
+            _welcome = null;
+        }
+    }
+
+    private static string HintFor(string? gesture) =>
+        string.IsNullOrWhiteSpace(gesture) ? "No shortcut set" : gesture;
+
+    /// <summary>
+    /// A point on the notification area, for the welcome bubble's tail. The tray icon has no
+    /// public rectangle, so this uses the notification area's own window — and falls back to
+    /// the taskbar corner, which is where it is even when Shell_TrayWnd cannot be found.
+    /// </summary>
+    private static SD.Point? TrayAnchorPoint()
+    {
+        try
+        {
+            IntPtr tray = FindWindow("Shell_TrayWnd", null);
+            if (tray != IntPtr.Zero)
+            {
+                IntPtr notify = FindWindowEx(tray, IntPtr.Zero, "TrayNotifyWnd", null);
+                if (notify != IntPtr.Zero && GetWindowRect(notify, out NativeRect r))
+                    return new SD.Point((r.Left + r.Right) / 2, r.Top);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not locate the notification area for the welcome bubble", ex);
+        }
+
+        SD.Rectangle area = WF.Screen.PrimaryScreen?.WorkingArea ?? SD.Rectangle.Empty;
+        return area.IsEmpty ? null : new SD.Point(area.Right - 60, area.Bottom);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string? className, string? windowName);
+
+    [DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string? className, string? windowName);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
+
+    /// <summary>
+    /// The installer swaps WinShot.exe under the running process and relaunches it, so the
+    /// only thing the user saw was the app vanishing and coming back. Comparing the stored
+    /// version to this build's is what turns that into "Updated to 1.4.0".
+    /// </summary>
+    private void AnnounceCompletedUpdate()
+    {
+        string current = AppInfo.Version;
+        string previous = _settings.Current.LastRunVersion;
+        if (string.Equals(previous, current, StringComparison.Ordinal))
+            return;
+
+        _settings.Current.LastRunVersion = current;
+        try { _settings.Save(); } catch (Exception ex) { Log.Error("Failed to record the running version", ex); }
+
+        // A first run has nothing to compare against, and announcing "updated" to someone who
+        // just installed WinShot would be a lie.
+        if (string.IsNullOrEmpty(previous))
+            return;
+
+        ShowBalloon($"Updated to {current}", $"You were on {previous}. See what changed in Settings, About.", ToastSeverity.Success, holdLong: true);
+    }
 
     /// <summary>Silent startup poll: only surfaces UI when a newer release is found.</summary>
     private async Task StartupUpdateCheckAsync()
@@ -1813,7 +2537,22 @@ public partial class App : Application
             // long: without this the working state vanished and the user watched a silent
             // screen until the app exited and the installer took over.
             ShowBalloon("Downloading update…", "WinShot restarts once it is installed.", holdLong: true);
-            await UpdateService.DownloadAndLaunchAsync(update.DownloadUrl, update.LatestVersion ?? "latest");
+            int lastShownPercent = 0;
+            await UpdateService.DownloadAndLaunchAsync(
+                update.DownloadUrl,
+                update.LatestVersion ?? "latest",
+                onProgress: fraction =>
+                {
+                    if (fraction is not double value) return;
+                    int percent = (int)Math.Round(value * 100);
+                    // Re-showing the toast replaces the one on screen; every byte would
+                    // rebuild a window, so only move in visible steps.
+                    if (percent < lastShownPercent + 5 && percent < 100) return;
+                    lastShownPercent = percent;
+                    Dispatcher.InvokeAsync(() => ShowProgressToast(
+                        "Downloading update…",
+                        $"{percent}% of WinShot {update.LatestVersion}. It restarts once installed."));
+                });
             // Reached only when the installer launched (failures throw). Exit so it can replace our
             // files; the installer relaunches WinShot itself.
             await Dispatcher.InvokeAsync(Shutdown);

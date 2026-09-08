@@ -33,10 +33,15 @@ public class SettingsTruthCatalogTests
         Assert.Equal(
         [
             "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
-            "capture-window", "record-screen", "scrolling-capture", "capture-text",
-            "history", "self-timer", "load-clipboard",
+            "capture-window", "capture-window-background", "capture-display", "self-timer",
+            "record-screen", "record-display", "scrolling-capture", "scroll-horizontal",
+            "capture-text", "load-clipboard", "open-image", "pin-to-screen", "restore-last",
+            "unlock-pins", "toggle-desktop-icons", "history", "settings", "about",
         ],
         SettingsTruthCatalog.ExecutableShortcutIds);
+        Assert.Equal(
+            SettingsTruthCatalog.ExecutableShortcutIds.Count,
+            SettingsTruthCatalog.ExecutableShortcutIds.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
@@ -76,5 +81,40 @@ public class SettingsTruthCatalogTests
         Assert.Equal("Ctrl+Alt+Q", reopened.ShortcutBindings["future-action"]);
         Assert.DoesNotContain("annotate-print", SettingsTruthCatalog.ExecutableShortcutIds);
         Assert.DoesNotContain("future-action", SettingsTruthCatalog.ExecutableShortcutIds);
+    }
+
+    /// <summary>
+    /// A shortcut row with nothing behind it is exactly the fake control this catalog exists
+    /// to prevent. The eight originals have dedicated Hotkey* fields; every other id must be
+    /// dispatched by App.BindableCommands, so the two lists are checked against each other.
+    /// </summary>
+    [Fact]
+    public void EveryBindableShortcut_HasSomethingInTheAppToRunIt()
+    {
+        string[] fieldBacked =
+        [
+            "all-in-one", "capture-area", "capture-previous", "capture-fullscreen",
+            "capture-window", "record-screen", "scrolling-capture", "capture-text",
+            "history", "self-timer", "load-clipboard",
+        ];
+
+        string app = System.IO.File.ReadAllText(
+            System.IO.Path.Combine(TestPaths.RepoRoot(), "src", "WinShot", "App.xaml.cs"));
+        string[] dispatched = System.Text.RegularExpressions.Regex
+            .Matches(app, @"yield return \(""(?<id>[a-z0-9-]+)""")
+            .Select(m => m.Groups["id"].Value)
+            .Order()
+            .ToArray();
+
+        string[] expected = SettingsTruthCatalog.ExecutableShortcutIds
+            .Except(fieldBacked, StringComparer.Ordinal)
+            .Order()
+            .ToArray();
+
+        Assert.Equal(expected, dispatched);
+
+        // And every field-backed id really does have its own Hotkey* property.
+        foreach (string id in fieldBacked)
+            Assert.Contains(id, SettingsTruthCatalog.ExecutableShortcutIds);
     }
 }

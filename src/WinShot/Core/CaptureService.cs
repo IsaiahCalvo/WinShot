@@ -777,6 +777,15 @@ public static class CaptureService
     {
         lock (bmp)
         {
+            // CF_DIB is the fallback format for paste targets that ignore alpha — MS Paint,
+            // older Office, most chat clients. They read the RGB under a transparent pixel,
+            // which GDI+ leaves at black, so a trimmed window capture pastes with four black
+            // corners. Flatten onto white for them; the PNG format on the clipboard still
+            // carries the real transparency for everything that understands it.
+            using var flattened = AlphaFlatten.OverWhite(bmp);
+            if (flattened is not null)
+                return CreateDibGlobalMemoryFromLocked32Bpp(flattened, out byteLength);
+
             if (bmp.PixelFormat is PixelFormat.Format32bppArgb or PixelFormat.Format32bppPArgb or PixelFormat.Format32bppRgb)
                 return CreateDibGlobalMemoryFromLocked32Bpp(bmp, out byteLength);
 
