@@ -1239,7 +1239,7 @@ public class MeasureModeTests
     {
         // Measure mode is the first surface in the app to raise a toast over its own live
         // overlay, and the toast lands top-centre of the measured monitor — a band the
-        // pointer is often resting in. Without this, "Could not copy — another app is
+        // pointer is often resting in. Without this, "Copy failed — another app is
         // holding the clipboard." shows for one frame and is covered for the rest of its
         // dwell.
         using var selector = Measuring(new Point(80, 60), out _);

@@ -203,10 +203,12 @@ the binary: sixteen SVGs as `EmbeddedResource`, plus `winshot.ico` — which is 
 load the same file rather than drawing a second mark.
 
 All seventeen are WinShot's own, drawn for this app and carrying no upstream marker.
-`winshot.ico` is generated from `tools\make-icon.ps1`. The sixteen SVGs share a
-viewBox of `0 0 24 24` and paint with `currentColor`; fifteen are stroked at 1.85,
-and `quick-access-pin-filled.svg` is a solid path with no stroke — deliberately, as
-the filled half of the pin's outline/filled pair.
+`winshot.ico` is generated from `tools\make-icon.ps1`. The sixteen SVGs are drawn on a
+24-unit grid and fitted by content extent, not by the declared viewBox — fifteen declare
+`0 0 24 24` and `quick-access-camcorder.svg` declares `1 5 22 14` — and all of them paint
+with `currentColor`; fifteen are stroked at 1.85, and `quick-access-pin-filled.svg` is a
+solid path with no stroke — deliberately, as the filled half of the pin's outline/filled
+pair.
 
 The three shutter sounds in `src/WinShot/Assets/sounds/` are also WinShot's own: no
 sampled audio ships. Each `.wav` is synthesised from a recipe in `tools\make-sounds.ps1`.

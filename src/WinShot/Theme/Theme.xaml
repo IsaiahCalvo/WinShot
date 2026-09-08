@@ -94,6 +94,11 @@
          hovers by dipping the same 12 %, which puts it at 4.44:1 — brighter contrast than
          the button at rest, in the direction the press already goes. -->
     <Color x:Key="HoverFillColor">#1FFFFFFF</Color>      <!-- ~12% white circular/row hover -->
+    <!-- The same wash, calibrated for a control sitting ON arbitrary content (a thumbnail)
+         rather than on a panel ground. 12 % white reads as feedback over #262628 and as
+         nothing at all over a screenshot; it is also numerically BorderColor, i.e. the
+         faintest value in the palette doing the work of an affordance. -->
+    <Color x:Key="OverlayHoverFillColor">#3AFFFFFF</Color> <!-- ~23% white: hover ON an image -->
     <Color x:Key="HoverShadeColor">#1F000000</Color>     <!-- ~12% black: hover on a SATURATED fill -->
     <Color x:Key="PressedShadeColor">#2E000000</Color>   <!-- ~18% black pressed -->
 
@@ -145,6 +150,7 @@
     <SolidColorBrush x:Key="TextHintBrush"      Color="{StaticResource TextHintColor}"/>
 
     <SolidColorBrush x:Key="HoverFillBrush"     Color="{StaticResource HoverFillColor}"/>
+    <SolidColorBrush x:Key="OverlayHoverFillBrush" Color="{StaticResource OverlayHoverFillColor}"/>
     <SolidColorBrush x:Key="HoverShadeBrush"    Color="{StaticResource HoverShadeColor}"/>
     <SolidColorBrush x:Key="PressedShadeBrush"   Color="{StaticResource PressedShadeColor}"/>
     <SolidColorBrush x:Key="BadgeScrimBrush"    Color="{StaticResource BadgeScrimColor}"/>
@@ -287,6 +293,10 @@
     <sys:TimeSpan x:Key="MotionHintDwell">0:0:0.9</sys:TimeSpan>
 
     <CubicEase x:Key="EaseOutCubic" EasingMode="EaseOut"/>
+    <!-- Motion.EaseInCubic's WPF half: the mirror of EaseOutCubic, so leaving reads as the
+         entrance played backwards. Every WinForms exit already uses it; the *Out storyboards
+         below were carrying the ENTRANCE ease, which is the shape of an arrival. -->
+    <CubicEase x:Key="EaseInCubic"  EasingMode="EaseIn"/>
     <BackEase  x:Key="EaseOutBack"  EasingMode="EaseOut" Amplitude="0.4"/>
     <SineEase  x:Key="EaseInOutSine" EasingMode="EaseInOut"/>
 
@@ -305,7 +315,7 @@
     <Storyboard x:Key="HoverOut">
         <DoubleAnimation Storyboard.TargetName="Hover" Storyboard.TargetProperty="Opacity"
                          To="0" Duration="{StaticResource MotionQuick}"
-                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                         EasingFunction="{StaticResource EaseInCubic}"/>
     </Storyboard>
     <Storyboard x:Key="PressIn">
         <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="Opacity"
@@ -315,7 +325,7 @@
     <Storyboard x:Key="PressOut">
         <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="Opacity"
                          To="0" Duration="{StaticResource MotionQuick}"
-                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                         EasingFunction="{StaticResource EaseInCubic}"/>
     </Storyboard>
     <Storyboard x:Key="ChipIn">
         <DoubleAnimation Storyboard.TargetName="Chip" Storyboard.TargetProperty="Opacity"
@@ -325,7 +335,7 @@
     <Storyboard x:Key="ChipOut">
         <DoubleAnimation Storyboard.TargetName="Chip" Storyboard.TargetProperty="Opacity"
                          To="0" Duration="{StaticResource MotionQuick}"
-                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                         EasingFunction="{StaticResource EaseInCubic}"/>
     </Storyboard>
     <Storyboard x:Key="CheckIn">
         <DoubleAnimation Storyboard.TargetName="Check" Storyboard.TargetProperty="Opacity"
@@ -335,7 +345,7 @@
     <Storyboard x:Key="CheckOut">
         <DoubleAnimation Storyboard.TargetName="Check" Storyboard.TargetProperty="Opacity"
                          To="0" Duration="{StaticResource MotionQuick}"
-                         EasingFunction="{StaticResource EaseOutCubic}"/>
+                         EasingFunction="{StaticResource EaseInCubic}"/>
     </Storyboard>
 
     <!-- A popover arriving: it grows the last 2 % into place from the edge it is

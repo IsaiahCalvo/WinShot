@@ -868,11 +868,27 @@ public sealed class ToastWindow : WF.Form
             // working on (the pointer's), which is where the balloon used to appear on a
             // single-monitor PC and is closer to the eye than the primary's tray on a stack.
             SD.Point corner = CornerPlacement(
-                area, Size, Overlay.FastQuickActionsWindow.StackBounds(area), edge, gap);
+                area, Size, OccupiedCorner(area), edge, gap);
             x = corner.X;
             y = corner.Y;
         }
         Location = new SD.Point(x, y);
+    }
+
+    /// <summary>
+    /// Everything already standing in the bottom-right corner of <paramref name="area"/>: the
+    /// quick-actions stack, plus the first-run bubble, which parks itself above the tray icon
+    /// in the same corner and stays up until it is dismissed. Both are TopMost and both are
+    /// interactive, so a toast landing on either hides an answer or swallows a click.
+    /// </summary>
+    private static SD.Rectangle OccupiedCorner(SD.Rectangle area)
+    {
+        SD.Rectangle cards = Overlay.FastQuickActionsWindow.StackBounds(area);
+        SD.Rectangle bubble = FirstRunWelcomeWindow.LiveBounds;
+        if (!bubble.IsEmpty && !area.IntersectsWith(bubble)) bubble = SD.Rectangle.Empty;
+        if (cards.IsEmpty) return bubble;
+        if (bubble.IsEmpty) return cards;
+        return SD.Rectangle.Union(cards, bubble);
     }
 
     /// <summary>

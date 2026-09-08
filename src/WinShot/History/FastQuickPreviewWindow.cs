@@ -17,15 +17,23 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private readonly string _filePath;
     private readonly bool _looksLikeImage;
+    /// <summary>The creation monitor's scale. <see cref="WF.AutoScaleMode.Dpi"/> never fires
+    /// for the monitor a window is born on, so every logical measurement here is scaled by
+    /// hand like every other WinForms surface in the app.</summary>
+    private readonly double _scale;
     private SD.Image? _image;
     private bool _closing;
     private bool _exiting;
     private IDisposable? _motion;
     private double _enterAmount;
 
+    private int S(int logical) => Recording.RecordingMonitorDpi.Px(logical, _scale);
+
     public FastQuickPreviewWindow(string filePath)
     {
         _filePath = filePath;
+        _scale = Recording.RecordingMonitorDpi.ScaleFor(
+            WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
         _looksLikeImage = PreviewableExtensions.Contains(Path.GetExtension(filePath).ToLowerInvariant());
         _image = _looksLikeImage ? TryLoadImage(filePath) : null;
 
@@ -127,7 +135,8 @@ public sealed class FastQuickPreviewWindow : WF.Form
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.Clear(Back);
 
-        var content = new SD.Rectangle(8, 8, Width - 16, Height - 16);
+        int inset = S(8);
+        var content = new SD.Rectangle(inset, inset, Width - inset * 2, Height - inset * 2);
         if (_image is not null)
         {
             e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
@@ -139,7 +148,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
             DrawFallback(e.Graphics, content);
         }
 
-        PopupChrome.DrawBorder(e.Graphics, ClientSize, 14);
+        PopupChrome.DrawBorder(e.Graphics, ClientSize, S(14));
     }
 
     protected override WF.CreateParams CreateParams
@@ -158,23 +167,30 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
         if (_image is not null)
         {
+            // The image is already in physical pixels — a screenshot is not resized by DPI —
+            // so only the chrome around it scales.
             return HistoryPreviewLayout.CalculateImageSize(
                 new SD.Size(_image.Width, _image.Height),
-                area.Size);
+                area.Size,
+                S(8) * 2);
         }
 
-        return HistoryPreviewLayout.FallbackSize;
+        SD.Size fallback = HistoryPreviewLayout.FallbackSize;
+        return new SD.Size(S(fallback.Width), S(fallback.Height));
     }
 
     private void DrawFallback(SD.Graphics g, SD.Rectangle content)
     {
         string fileName = string.IsNullOrWhiteSpace(_filePath) ? "Preview" : Path.GetFileName(_filePath);
         string message = _looksLikeImage ? "Preview unavailable" : "Press Open to play";
-        using var titleFont = ThemePalette.UiFont(ThemePalette.TextTitlePt);
+        // Pixel-unit fonts, not point: a GraphicsUnit.Point font drawn with TextRenderer
+        // resolves against a different monitor's DPI than the one this card is on, which is
+        // exactly the mismatch ThemePalette.UiFontPx exists to avoid.
+        using var titleFont = ThemePalette.UiFontPx(ThemePalette.PxForPt(ThemePalette.TextTitlePt, _scale));
         // Two steps apart on purpose: the filename is the heading, the status line is not.
-        using var messageFont = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
-        var titleRect = new SD.Rectangle(content.X + 20, content.Y + 22, content.Width - 40, 28);
-        var messageRect = new SD.Rectangle(content.X + 20, content.Y + 56, content.Width - 40, 24);
+        using var messageFont = ThemePalette.UiFontPx(ThemePalette.PxForPt(ThemePalette.TextBodyLgPt, _scale));
+        var titleRect = new SD.Rectangle(content.X + S(20), content.Y + S(22), content.Width - S(40), S(28));
+        var messageRect = new SD.Rectangle(content.X + S(20), content.Y + S(56), content.Width - S(40), S(24));
         var flags = WF.TextFormatFlags.HorizontalCenter |
                     WF.TextFormatFlags.VerticalCenter |
                     WF.TextFormatFlags.SingleLine |
@@ -196,7 +212,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
         if (Width <= 0 || Height <= 0)
             return;
 
-        PopupChrome.ApplyRegion(this, 14);
+        PopupChrome.ApplyRegion(this, S(14));
     }
 
     private void CloseOnce()
@@ -205,6 +221,20 @@ public sealed class FastQuickPreviewWindow : WF.Form
             return;
 
         _closing = true;
+        Close();
+    }
+
+    /// <summary>
+    /// Closes in this call, skipping the exit fade. The fade cancels the first close and
+    /// finishes it 220 ms later, so <see cref="WF.Form.Close"/> returns with the window still
+    /// on screen, TopMost and hit-testable. That is correct for a dismissal the user asked
+    /// for, and wrong for a REPLACEMENT: History rebuilds this window on every Left/Right
+    /// step, and the outgoing preview would frame the incoming one and swallow the next
+    /// click. A caller about to show a successor uses this.
+    /// </summary>
+    public void CloseNow()
+    {
+        _exiting = true;
         Close();
     }
 

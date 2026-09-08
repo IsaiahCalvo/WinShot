@@ -1141,7 +1141,7 @@ public partial class BackgroundComposerWindow : Window
         catch (Exception ex)
         {
             Log.Error($"Background image load failed: {path}", ex);
-            ThemedMessageDialog.Show(this, "Couldn't load that image", FriendlyError.For(ex));
+            ThemedMessageDialog.Show(this, "Load failed", FriendlyError.For(ex));
         }
     }
 
@@ -1209,7 +1209,7 @@ public partial class BackgroundComposerWindow : Window
             // Success flashes the button; failure used to do nothing at all, so a busy
             // clipboard read as "Copy" simply not registering the click.
             if (IsVisible)
-                ThemedMessageDialog.Show(this, "Could not copy", FriendlyError.For(ex));
+                ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
         }
     }
 
@@ -1249,7 +1249,7 @@ public partial class BackgroundComposerWindow : Window
             // Same reason as Copy above: a full disk, a locked file or a read-only folder
             // used to leave the pill un-flashed and say nothing at all.
             if (IsVisible)
-                ThemedMessageDialog.Show(this, "Could not save", FriendlyError.For(ex));
+                ThemedMessageDialog.Show(this, "Save failed", FriendlyError.For(ex));
         }
     }
 

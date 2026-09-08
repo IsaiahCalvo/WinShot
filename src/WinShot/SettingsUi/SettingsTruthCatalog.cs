@@ -151,7 +151,7 @@ internal static class SettingsTruthCatalog
     internal static readonly IReadOnlySet<string> StoredButUnavailableProperties =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "AddPixelBorder", "ConvertToSrgb", "ShowRecordingCountdown",
+            "AddPixelBorder", "ConvertToSrgb",
             "RememberLastTool", "DrawShadowOnObjects",
             "ShowColorNames", "ShowDockIcon",
             "AddRetinaSuffix", "CopyToClipboardFormat",

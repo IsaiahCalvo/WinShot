@@ -105,7 +105,8 @@ public partial class HistoryWindow : Window
             _closed = true;
             _loadCts?.Cancel();
             StopWatcher();
-            _preview?.Close();
+            // History is going away; a preview left fading has nothing to fade in front of.
+            _preview?.CloseNow();
             _windowFade?.Dispose();
             _windowFade = null;
             _emptyStateFade?.Dispose();
@@ -1190,7 +1191,9 @@ public partial class HistoryWindow : Window
         if (!File.Exists(target.FilePath)) return;
 
         _previewItem = target;
-        _preview?.Close();
+        // The successor is about to appear in the same spot: the outgoing window has to be
+        // gone in this call, not 220 ms of exit fade later, or the two overlap.
+        _preview?.CloseNow();
         var preview = new FastQuickPreviewWindow(target.FilePath);
         PerfLog.TrackFirstShown(preview, "history quick preview");
         _preview = preview;

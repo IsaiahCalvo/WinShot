@@ -29,6 +29,9 @@ public class FeedbackCopyTests
     {
         // The longest fixed string in the app, and the one whose whole value is its tail.
         "No OCR language pack is installed. Add one in Settings > Time & language.",
+        // Longer still, and two clauses: the second one is the instruction, so an ellipsis
+        // that eats it leaves the user told off with no way forward.
+        "That area has over 250 words. Redact a smaller piece, or turn Text only off.",
         "8 shortcuts are in use by other apps — see Settings > Shortcuts.",
         FriendlyError.For(new UnauthorizedAccessException()),
         FriendlyError.For(new DirectoryNotFoundException()),

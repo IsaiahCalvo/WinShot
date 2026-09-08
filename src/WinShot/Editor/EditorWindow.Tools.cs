@@ -287,7 +287,7 @@ public partial class EditorWindow : Window
         {
             // Every mark failed to rebuild. The reasons are in the log; without this the
             // paste simply looks like it did nothing.
-            App.Toast("Paste", "WinShot could not paste those marks.", severity: ToastSeverity.Error);
+            App.Toast("Paste failed", "WinShot could not paste those marks.", severity: ToastSeverity.Error);
             return;
         }
 
@@ -350,7 +350,12 @@ public partial class EditorWindow : Window
         }
         catch (Exception ex)
         {
+            // Silent before this: the user Alt-dragged, nothing appeared, nothing was said,
+            // so they Alt-dragged again. Every other user-initiated failure in the editor
+            // raises something.
             Log.Error($"Could not clone a '{data.Type}' annotation", ex);
+            App.Toast("Duplicate failed", "WinShot could not copy that mark.",
+                severity: ToastSeverity.Error);
             return null;
         }
         if (clone is FrameworkElement cloneFe)

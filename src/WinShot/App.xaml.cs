@@ -278,7 +278,7 @@ public partial class App : Application
         foreach (RecordingRecoveryFailure failure in result.Failures)
         {
             Log.Error($"Failed to recover recording; source retained at {failure.TempPath}", failure.Error);
-            ThemedMessageDialog.Show(null, "Couldn't recover a recording",
+            ThemedMessageDialog.Show(null, "Recovery failed",
                 $"{failure.TempPath}\n\n" +
                 "The original file is still safe at that location. Check the save folder and available space, then try again next time.\n\n" +
                 FriendlyError.For(failure.Error));
@@ -2211,12 +2211,17 @@ public partial class App : Application
                     CloseWorkingToast(working);
             }
         }
-        catch (COMException ex)
+        catch (ExternalException ex)
         {
+            // ExternalException, not COMException: SetTextToClipboardAsync gives up with a
+            // BARE ExternalException (CaptureService's own comment says why), and COMException
+            // derives FROM it — so the narrower catch missed the one failure it was written
+            // for and the user was told "OCR failed" for a busy clipboard.
             Log.Info($"OCR clipboard copy skipped: {ex.Message}");
             // One condition reads one way across surfaces: this used to name the state
             // ("the clipboard is busy") without saying what to do about it, while every
             // other copy path said to try again in a moment.
+            CloseWorkingToast(working);
             ShowBalloon("Copy failed", FriendlyError.For(ex), ToastSeverity.Error);
         }
     }

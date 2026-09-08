@@ -248,7 +248,12 @@ public class ThemeContrastTests
 
             // A ProgressBar's Foreground is the bar itself, not a label — the one legitimate
             // place the accent lands on a "Foreground" property.
-            foreach (Match tag in Regex.Matches(xaml, @"<(?<el>[\w:.]+)[^>]*?Foreground=""\{StaticResource AccentBrush\}""",
+            // Every accent token, not just the base one: AccentDeep (#0A73E0) and
+            // AccentPressed (#0060DF) are darker still, and a raw hex Foreground bypasses
+            // the resource lookup entirely.
+            foreach (Match tag in Regex.Matches(
+                         xaml,
+                         @"<(?<el>[\w:.]+)[^>]*?Foreground=""(\{StaticResource Accent\w*Brush\}|#[0-9A-Fa-f]{0,2}0A84FF|#[0-9A-Fa-f]{0,2}0A73E0|#[0-9A-Fa-f]{0,2}0060DF)""",
                          RegexOptions.Singleline))
             {
                 Assert.True(tag.Groups["el"].Value == "ProgressBar",
@@ -256,10 +261,12 @@ public class ThemeContrastTests
                     "accent type reads 4.14:1 on the card; use InfoBrush");
             }
 
-            Assert.DoesNotContain(
-                @"<Setter Property=""Foreground"" Value=""{StaticResource AccentBrush}""",
+            Match setter = Regex.Match(
                 xaml,
-                StringComparison.Ordinal);
+                @"<Setter\s+Property=""Foreground""\s+Value=""(?<v>\{StaticResource Accent\w*Brush\}|#[0-9A-Fa-f]{0,2}0A84FF|#[0-9A-Fa-f]{0,2}0A73E0|#[0-9A-Fa-f]{0,2}0060DF)""");
+            Assert.False(setter.Success,
+                $"{Path.GetFileName(file)} sets Foreground to {setter.Groups["v"].Value} — " +
+                "accent type reads 4.14:1 on the card; use InfoBrush");
         }
     }
 

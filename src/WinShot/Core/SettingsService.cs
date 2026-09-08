@@ -189,7 +189,6 @@ public class Settings
     public bool RememberLastSelection { get; set; } = false; // recording area
     public string LastRecordingRegion { get; set; } = "";   // "x,y,w,h" physical screen px
     public bool DimScreenWhileRecording { get; set; } = true;
-    public bool ShowRecordingCountdown { get; set; } = false; // TODO: wire behavior — countdown before recording
     public string RecordingMaxResolution { get; set; } = "original"; // original | 4K | 1080p | 720p
     public bool RecordAudioMono { get; set; } = false;      // downmix microphone input
     /// <summary>Migration seed only. Superseded by the matrix's <see cref="RecordingOpenEditor"/>.</summary>

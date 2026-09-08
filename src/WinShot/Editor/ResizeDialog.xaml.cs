@@ -28,11 +28,17 @@ public partial class ResizeDialog : Window
         ResultWidth = _originalWidth;
         ResultHeight = _originalHeight;
 
+        // try/finally on every raise of this flag, like every sibling guard in the app: a
+        // throw between the raise and the lower latches it, and the W/H/percent fields then
+        // silently stop syncing for the life of the dialog.
         _updating = true;
-        WidthBox.Text = _originalWidth.ToString();
-        HeightBox.Text = _originalHeight.ToString();
-        PercentBox.Text = "100";
-        _updating = false;
+        try
+        {
+            WidthBox.Text = _originalWidth.ToString();
+            HeightBox.Text = _originalHeight.ToString();
+            PercentBox.Text = "100";
+        }
+        finally { _updating = false; }
         UpdateInfo();
 
         Loaded += (_, _) =>
@@ -52,16 +58,19 @@ public partial class ResizeDialog : Window
             return;
         }
         _updating = true;
-        var layout = ResizeLayout.FromWidth(
-            _originalWidth,
-            _originalHeight,
-            CurrentOrOriginalHeight(),
-            w,
-            LockRatio.IsChecked == true);
-        WidthBox.Text = layout.Width.ToString();
-        HeightBox.Text = layout.Height.ToString();
-        PercentBox.Text = layout.Percent.ToString();
-        _updating = false;
+        try
+        {
+            var layout = ResizeLayout.FromWidth(
+                _originalWidth,
+                _originalHeight,
+                CurrentOrOriginalHeight(),
+                w,
+                LockRatio.IsChecked == true);
+            WidthBox.Text = layout.Width.ToString();
+            HeightBox.Text = layout.Height.ToString();
+            PercentBox.Text = layout.Percent.ToString();
+        }
+        finally { _updating = false; }
         UpdateInfo();
     }
 
@@ -74,16 +83,19 @@ public partial class ResizeDialog : Window
             return;
         }
         _updating = true;
-        var layout = ResizeLayout.FromHeight(
-            _originalWidth,
-            _originalHeight,
-            CurrentOrOriginalWidth(),
-            h,
-            LockRatio.IsChecked == true);
-        WidthBox.Text = layout.Width.ToString();
-        HeightBox.Text = layout.Height.ToString();
-        PercentBox.Text = layout.Percent.ToString();
-        _updating = false;
+        try
+        {
+            var layout = ResizeLayout.FromHeight(
+                _originalWidth,
+                _originalHeight,
+                CurrentOrOriginalWidth(),
+                h,
+                LockRatio.IsChecked == true);
+            WidthBox.Text = layout.Width.ToString();
+            HeightBox.Text = layout.Height.ToString();
+            PercentBox.Text = layout.Percent.ToString();
+        }
+        finally { _updating = false; }
         UpdateInfo();
     }
 
@@ -96,11 +108,14 @@ public partial class ResizeDialog : Window
             return;
         }
         _updating = true;
-        var layout = ResizeLayout.FromPercent(_originalWidth, _originalHeight, pct);
-        WidthBox.Text = layout.Width.ToString();
-        HeightBox.Text = layout.Height.ToString();
-        PercentBox.Text = layout.Percent.ToString();
-        _updating = false;
+        try
+        {
+            var layout = ResizeLayout.FromPercent(_originalWidth, _originalHeight, pct);
+            WidthBox.Text = layout.Width.ToString();
+            HeightBox.Text = layout.Height.ToString();
+            PercentBox.Text = layout.Percent.ToString();
+        }
+        finally { _updating = false; }
         UpdateInfo();
     }
 

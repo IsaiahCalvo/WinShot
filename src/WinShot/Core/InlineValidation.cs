@@ -104,7 +104,9 @@ internal sealed class InlineValidationAdorner : Adorner
                 UIElement.OpacityProperty,
                 new DoubleAnimation(1, new Duration(TimeSpan.FromMilliseconds(Motion.QuickMs)))
                 {
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                    // The exit ease, not the entrance one: the message leaves the way it arrived,
+            // reversed. Same curve as Theme.xaml's EaseInCubic and Motion.EaseInCubic.
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
                 });
         }
         else
@@ -128,7 +130,9 @@ internal sealed class InlineValidationAdorner : Adorner
 
         var fade = new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(Motion.QuickMs)))
         {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            // The exit ease, not the entrance one: the message leaves the way it arrived,
+            // reversed. Same curve as Theme.xaml's EaseInCubic and Motion.EaseInCubic.
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
         };
         fade.Completed += (_, _) => layer.Remove(this);
         _label.BeginAnimation(UIElement.OpacityProperty, fade);

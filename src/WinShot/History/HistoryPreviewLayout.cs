@@ -8,9 +8,13 @@ public static class HistoryPreviewLayout
     private const int MinContentLength = 48;
     private const double MaxWorkAreaFactor = 0.8;
 
+    /// <summary>Logical (96 dpi) size of the no-preview card; the caller scales it.</summary>
     public static SD.Size FallbackSize => new(360, 128);
 
-    public static SD.Size CalculateImageSize(SD.Size imageSize, SD.Size workAreaSize)
+    /// <param name="totalPadding">Chrome around the image, in physical pixels — the caller's
+    /// inset doubled. Defaults to the 100% value so existing callers are unchanged.</param>
+    public static SD.Size CalculateImageSize(
+        SD.Size imageSize, SD.Size workAreaSize, int totalPadding = TotalPadding)
     {
         int imageWidth = Math.Max(1, imageSize.Width);
         int imageHeight = Math.Max(1, imageSize.Height);
@@ -20,8 +24,9 @@ public static class HistoryPreviewLayout
             maxWidth / (double)imageWidth,
             maxHeight / (double)imageHeight));
 
-        int width = Math.Max(MinContentLength, (int)Math.Round(imageWidth * scale)) + TotalPadding;
-        int height = Math.Max(MinContentLength, (int)Math.Round(imageHeight * scale)) + TotalPadding;
+        int pad = Math.Max(0, totalPadding);
+        int width = Math.Max(MinContentLength, (int)Math.Round(imageWidth * scale)) + pad;
+        int height = Math.Max(MinContentLength, (int)Math.Round(imageHeight * scale)) + pad;
         return new SD.Size(width, height);
     }
 }

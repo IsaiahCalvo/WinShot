@@ -140,10 +140,38 @@ public sealed class FirstRunWelcomeWindow : WF.Form
             Motion.ExitDurationMs,
             Motion.EaseInCubic,
             p => ApplyEntrance(1 - p),
-            Close);
+            // Disposed mid-fade (the card retiring the bubble races a Dispose in tests):
+            // the tween still runs to its end, and Close on a dead form throws.
+            () => { if (!IsDisposed) Close(); });
     }
 
     private bool _dismissing;
+
+    /// <summary>
+    /// The bubble that is currently up, or null. The bottom-right corner is shared with the
+    /// quick-actions card and with unanchored toasts, and neither of those knew this surface
+    /// existed: on a 150 % primary the card lands wholly INSIDE the bubble and covers its
+    /// "Got it" button, so the app's first screen has no reachable dismissal.
+    /// </summary>
+    private static FirstRunWelcomeWindow? _live;
+
+    /// <summary>The bubble's screen rect while it is up, or <see cref="SD.Rectangle.Empty"/>.
+    /// Corner arbitration folds this in beside the card stack.</summary>
+    internal static SD.Rectangle LiveBounds =>
+        _live is { IsDisposed: false } w && w.Visible && w.Width > 0 && w.Height > 0
+            ? w.Bounds
+            : SD.Rectangle.Empty;
+
+    /// <summary>
+    /// Onboarding is over the moment a capture lands: the bubble asking the user to try a
+    /// capture is stale once they have taken one, and it is standing exactly where the
+    /// result appears. Called by the quick-actions card; no-op when no bubble is up.
+    /// </summary>
+    internal static void DismissLive()
+    {
+        if (_live is { IsDisposed: false, IsHandleCreated: true } bubble)
+            bubble.Dismiss();
+    }
 
     public IReadOnlyList<WelcomeAction> Actions { get; }
 
@@ -181,6 +209,7 @@ public sealed class FirstRunWelcomeWindow : WF.Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        _live = this;
         Position();
         LayoutRows();
         _restLocation = Location;
@@ -192,6 +221,10 @@ public sealed class FirstRunWelcomeWindow : WF.Form
 
     private void ApplyEntrance(double amount)
     {
+        // The tween outlives a form disposed mid-flight (Motion.Run's own frame is already
+        // queued); touching Opacity on a dead window throws.
+        if (IsDisposed || !IsHandleCreated) return;
+
         // Opacity is the one property that HAS to be clamped - Form.Opacity throws outside
         // 0..1. The rise is not: EaseOutBack passes 1.0 about halfway through, and letting
         // the offset go negative is what makes the bubble overshoot the anchor and settle
@@ -319,6 +352,7 @@ public sealed class FirstRunWelcomeWindow : WF.Form
     protected override void OnFormClosed(WF.FormClosedEventArgs e)
     {
         base.OnFormClosed(e);
+        if (ReferenceEquals(_live, this)) _live = null;
         try { _onDismissed(); }
         catch (Exception ex) { Log.Error("First-run dismissal handler failed", ex); }
     }

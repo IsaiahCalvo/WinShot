@@ -397,6 +397,10 @@ public sealed class FastQuickActionsWindow : WF.Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        // The first-run bubble sits in this same corner and outlives the first capture; on a
+        // 150 % primary the card lands wholly inside it and covers its "Got it" button. A
+        // capture has now happened, which is all the bubble was asking for, so it retires.
+        Core.FirstRunWelcomeWindow.DismissLive();
         QueueRegionUpdate();
     }
 

@@ -150,7 +150,8 @@ public partial class EditorWindow : Window
             // identically to every other way of getting text out of a shot.
             if (OcrClipboardFormatter.Build(result) is not { } payload)
             {
-                App.Toast("Extract text", "No text found in that area.");
+                // Same answer as the tray path, so it holds for the same length there.
+                App.Toast("Extract text", "No text found in that area.", holdLong: true);
                 return;
             }
 
@@ -213,9 +214,13 @@ public partial class EditorWindow : Window
         {
             // An empty result and a missing language pack look identical from here, and
             // "no text found" sends the user hunting for text that was never readable.
-            App.Toast("Redact text", OcrService.HasLanguagePack()
-                ? "No text found in that area."
-                : "No OCR language pack is installed. Add one in Settings > Time & language.");
+            bool havePack = OcrService.HasLanguagePack();
+            // A missing pack is a failure that names its own fix, and Error is what buys the
+            // 4.5 s dwell — the same sentence is already Error on the tray and OCR paths.
+            App.Toast("Redact text", havePack
+                    ? "No text found in that area."
+                    : "No OCR language pack is installed. Add one in Settings > Time & language.",
+                severity: havePack ? ToastSeverity.Info : ToastSeverity.Error, holdLong: true);
             return;
         }
 
@@ -224,8 +229,12 @@ public partial class EditorWindow : Window
             // Every box is a live redaction: its own GDI render now, and another one each
             // time the picture is cropped, rotated or resized. A full page of text is ~800
             // of them on the UI thread, which is where a nice feature becomes a freeze.
+            // Two clauses, and the second one is the way out — so it has to survive the
+            // toast's three-row box whole. The original was 108 characters and landed ON the
+            // clamp, i.e. one word from having the instruction ellipsed away.
             App.Toast("Redact text",
-                $"That area has more than {MaxTextOnlyBoxes} words. Redact it in smaller pieces, or drop Text only to cover the whole region.");
+                $"That area has over {MaxTextOnlyBoxes} words. Redact a smaller piece, or turn Text only off.",
+                holdLong: true);
             return;
         }
 

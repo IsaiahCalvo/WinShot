@@ -886,9 +886,7 @@ public sealed partial class FastRegionSelectorDialog
             NothingToMeasureYet();
             return;
         }
-        if (TrySetClipboardText(text))
-            MeasureToast(_measure.Holds.Count > 1 ? "Measurements copied." : "Dimensions copied.",
-                ToastSeverity.Success);
+        CopyToClipboard(text, _measure.Holds.Count > 1 ? "Measurements copied." : "Dimensions copied.");
     }
 
     private void CopyPixelColor(SD.Point at)
@@ -922,24 +920,31 @@ public sealed partial class FastRegionSelectorDialog
         }
 
         string hex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
-        if (TrySetClipboardText(hex))
-            MeasureToast($"Copied {hex}.", ToastSeverity.Success);
+        CopyToClipboard(hex, $"Copied {hex}.");
     }
 
-    private bool TrySetClipboardText(string text)
+    /// <summary>
+    /// The shared clipboard helper, not a bare <c>Clipboard.SetText</c>: it retries four
+    /// times, 100 ms apart, which is what makes a transiently busy clipboard invisible on
+    /// every other copy path in the app. Measure mode was the one copy that gave up on the
+    /// first exception, so the same keypress could fail here and succeed everywhere else.
+    /// </summary>
+    private async void CopyToClipboard(string text, string success)
     {
         try
         {
-            WF.Clipboard.SetText(text);
-            return true;
+            await CaptureService.SetTextToClipboardAsync(text).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
             // Another app can hold the clipboard open; say so rather than going quiet.
             Log.Error("Copying the measurement to the clipboard failed", ex);
-            MeasureToast("Could not copy — another app is holding the clipboard.", ToastSeverity.Error);
-            return false;
+            if (!IsDisposed)
+                MeasureToast("Copy failed — another app is holding the clipboard.", ToastSeverity.Error);
+            return;
         }
+        if (!IsDisposed)
+            MeasureToast(success, ToastSeverity.Success);
     }
 
     /// <summary>Closes the menu without disposing it — see the field's note.</summary>

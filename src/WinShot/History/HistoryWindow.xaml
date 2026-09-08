@@ -16,12 +16,29 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="{StaticResource RadiusButton}" Padding="16,8">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        <!-- Layered like every other chip in Theme.xaml: the wash and the
+                             checked fill are their own borders so both cross-fade. Check
+                             paints over Hover, so the accent is not washed lighter under the
+                             pointer (white on it is already 3.65:1). -->
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButton}"
+                                    Background="{StaticResource SurfaceBrush}"/>
+                            <Border x:Name="Check" Opacity="0" CornerRadius="{StaticResource RadiusButton}"
+                                    Background="{StaticResource AccentBrush}"/>
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="{StaticResource RadiusButton}" Padding="16,8">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceBrush}"/></Trigger>
-                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}"/><Setter Property="Foreground" Value="White"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="White"/>
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource CheckIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource CheckOut}"/></Trigger.ExitActions>
+                            </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Bd" Property="BorderThickness" Value="1"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -42,11 +59,27 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusButton}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        <!-- OverlayHoverFillBrush, not HoverFillBrush: the panel-calibrated 12 %
+                             wash is invisible over a dark screenshot. Its own layer so it
+                             cross-fades like every other hover in the app. -->
+                        <Grid>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButton}"
+                                    Background="{StaticResource OverlayHoverFillBrush}"/>
+                            <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButton}"
+                                    Background="{StaticResource PressedShadeBrush}"/>
+                            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusButton}" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                            </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/><Setter TargetName="Bd" Property="BorderThickness" Value="1"/></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.3"/></Trigger>
                         </ControlTemplate.Triggers>

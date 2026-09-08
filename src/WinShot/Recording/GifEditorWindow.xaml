@@ -6,7 +6,12 @@
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display" KeyDown="OnWindowKeyDown">
 
-    <Grid Margin="16">
+    <!-- ShellRoot carries the entrance transform: a Window's own RenderTransform is never
+         applied, so the scale has to live on the first child. -->
+    <Grid x:Name="ShellRoot" Margin="16" RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+            <ScaleTransform x:Name="ShellScale" ScaleX="1" ScaleY="1"/>
+        </Grid.RenderTransform>
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>

@@ -36,6 +36,11 @@ public partial class GifEditorWindow : Window
     private bool _scrubbing;
     private bool _closed;
     private bool _saving;
+    /// <summary>A trim already written to disk. Save stays disabled until the range moves,
+    /// or a user who missed the completion card clicks it again and gets a second identical
+    /// file plus a second history entry.</summary>
+    private bool _savedCurrentRange;
+    private bool _dismissing;
     private IReadOnlyList<BitmapSource?> _filmstrip = Array.Empty<BitmapSource?>();
 
     public GifEditorWindow(string gifPath, SettingsService settings, HistoryService history)
@@ -58,6 +63,8 @@ public partial class GifEditorWindow : Window
         StatusText.Text = "Loading frames…";
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(Load));
         DarkTitleBar.Apply(this);
+        // The window arrives and leaves the way every other surface in the sweep does.
+        Loaded += (_, _) => WindowMotion.PlayEntrance(ShellRoot, ShellScale);
     }
 
     private void Load()
@@ -171,7 +178,7 @@ public partial class GifEditorWindow : Window
 
         if (e.Key == Key.Escape && !_saving)
         {
-            Close();
+            Dismiss();
             e.Handled = true;
             return;
         }
@@ -324,6 +331,15 @@ public partial class GifEditorWindow : Window
                 _first = _last;
         }
 
+        // A different range is a different file, so Save comes back. Any flash still showing
+        // restores this same label when its beat ends, so it needs no cancelling.
+        if (_savedCurrentRange)
+        {
+            _savedCurrentRange = false;
+            BtnSave.Content = "Save trimmed";
+            BtnSave.IsEnabled = true;
+        }
+
         ShowFrame(previewFirst ? _first : _last);
         UpdateTrimUi();
     }
@@ -378,10 +394,16 @@ public partial class GifEditorWindow : Window
 
     // ---- save --------------------------------------------------------------------
 
-    private void OnCloseEditor(object sender, RoutedEventArgs e)
+    private void OnCloseEditor(object sender, RoutedEventArgs e) => Dismiss();
+
+    /// <summary>Cancel and Escape reverse the entrance; the title-bar X stays instant, the way
+    /// every other window on Windows closes. Never during an encode — see OnClosing.</summary>
+    private void Dismiss()
     {
-        if (!_saving)
-            Close();
+        if (_saving || _dismissing)
+            return;
+        _dismissing = true;
+        WindowMotion.PlayExit(ShellRoot, ShellScale, Close);
     }
 
     /// <summary>
@@ -399,7 +421,7 @@ public partial class GifEditorWindow : Window
 
     private async void OnSave(object sender, RoutedEventArgs e)
     {
-        if (_saving || !_info.IsUsable)
+        if (_saving || _savedCurrentRange || !_info.IsUsable)
             return;
 
         _saving = true;
@@ -408,6 +430,9 @@ public partial class GifEditorWindow : Window
         BtnPlay.Content = "Play";
         SetSavingUi(true);
         StatusText.Text = "Saving…";
+        // The encode runs on a Task with nothing on screen moving; the two sibling surfaces
+        // both animate the same wait (the control bar's arc, the video editor's percentage).
+        WindowMotion.StartWaitingPulse(StatusText);
 
         string source = _gifPath;
         int first = _first;
@@ -423,13 +448,14 @@ public partial class GifEditorWindow : Window
             return;
 
         _saving = false;
+        WindowMotion.StopWaitingPulse(StatusText);
         SetSavingUi(false);
         if (written <= 0)
         {
             StatusText.Text = "The GIF could not be saved. Nothing was changed.";
             ThemedMessageDialog.Show(
                 this,
-                "Could not save the GIF",
+                "Save failed",
                 "WinShot could not write the trimmed GIF. The original is untouched.");
             return;
         }
@@ -437,6 +463,12 @@ public partial class GifEditorWindow : Window
         try { _history.AddFile(destination); }
         catch (Exception ex) { Log.Error("Failed to add the trimmed GIF to history", ex); }
 
+        // This range is on disk now. The completion card appears bottom-right, away from the
+        // window, so a user who does not spot it clicks Save again — and used to get
+        // "foo (edited) (2).gif" and a duplicate history entry for the identical trim.
+        _savedCurrentRange = true;
+        BtnSave.IsEnabled = false;
+        ButtonFlash.Show(BtnSave, "Saved", "Save trimmed");
         StatusText.Text = $"Saved {Path.GetFileName(destination)} — {written} frames";
         Log.Info($"Trimmed GIF written to {destination} ({written} frames)");
         try
@@ -454,7 +486,7 @@ public partial class GifEditorWindow : Window
 
     private void SetSavingUi(bool saving)
     {
-        BtnSave.IsEnabled = !saving;
+        BtnSave.IsEnabled = !saving && !_savedCurrentRange;
         BtnClose.IsEnabled = !saving;
         BtnPlay.IsEnabled = !saving;
         TimelineTrack.IsEnabled = !saving;

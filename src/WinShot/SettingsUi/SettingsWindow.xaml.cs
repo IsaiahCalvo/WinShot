@@ -164,27 +164,7 @@ public partial class SettingsWindow : Window
 
     /// <summary>The window scales up from 92% and fades in — the entrance every other piece
     /// of arriving chrome in the app now uses. Runs on Show(), not on re-activation.</summary>
-    private void PlayEntrance()
-    {
-        if (ShellRoot is null || ShellScale is null)
-            return;
-        if (AnimationsOff)
-        {
-            ShellRoot.Opacity = 1;
-            ShellScale.ScaleX = ShellScale.ScaleY = 1;
-            return;
-        }
-
-        var duration = (Duration)FindResource("MotionEnter");
-        var ease = (IEasingFunction)FindResource("EaseOutCubic");
-
-        ShellRoot.Opacity = 0;
-        ShellScale.ScaleX = ShellScale.ScaleY = 0.92;
-        ShellRoot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, duration) { EasingFunction = ease });
-        var grow = new DoubleAnimation(1, duration) { EasingFunction = ease };
-        ShellScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
-        ShellScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
-    }
+    private void PlayEntrance() => WindowMotion.PlayEntrance(ShellRoot, ShellScale);
 
     /// <summary>The title names the pane you are on, the way the tab bar already does, so
     /// Alt-Tab and the taskbar preview carry the same answer the window does.</summary>
@@ -779,28 +759,9 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>A slow breath on the control's own opacity: the one thing on screen that
-    /// says work is still happening, without inventing a spinner the app has nowhere else.</summary>
-    private static void StartWaitingPulse(UIElement element)
-    {
-        if (!Motion.AnimationsEnabled())
-            return;
-        var host = element as FrameworkElement;
-        element.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.55,
-            host?.TryFindResource("MotionPulse") as Duration? ?? new Duration(TimeSpan.FromMilliseconds(650)))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = host?.TryFindResource("EaseInOutSine") as IEasingFunction
-                             ?? new SineEase { EasingMode = EasingMode.EaseInOut },
-        });
-    }
+    private static void StartWaitingPulse(UIElement element) => WindowMotion.StartWaitingPulse(element);
 
-    private static void StopWaitingPulse(UIElement element)
-    {
-        element.BeginAnimation(OpacityProperty, null);
-        element.Opacity = 1;
-    }
+    private static void StopWaitingPulse(UIElement element) => WindowMotion.StopWaitingPulse(element);
 
     private void OnAboutOpenRepo(object sender, RoutedEventArgs e) => OpenExternal(AppInfo.RepositoryUrl);
 
@@ -1370,15 +1331,25 @@ public partial class SettingsWindow : Window
     private static bool FieldDiffers(TextBox box, int stored) =>
         !int.TryParse(box.Text.Trim(), out int value) || value != stored;
 
+    private bool _dismissing;
+
     /// <summary>
     /// The footer's left-hand exit, and Escape. It is labelled "Close", not "Cancel": with
     /// live-apply there is nothing left for a cancel to undo — every checkbox, combo and
     /// slider is already on disk 250 ms after it changed. Only typed fields still wait for
     /// Done, so this is the one thing that can lose work and it asks first. Both doors ask
     /// the same question; the button used to close silently while Escape prompted.
+    ///
+    /// Both also reverse the entrance instead of leaving in one frame. Same shape and same
+    /// reasoning as HistoryWindow.Dismiss: only this path animates, because doing it from
+    /// OnClosing means cancelling the close and finishing it from a callback, and a Close()
+    /// whose message loop never runs again strands the window. The title-bar X stays instant,
+    /// the way every other window on Windows closes.
     /// </summary>
     private void CloseWithDiscardGuard()
     {
+        if (_dismissing)
+            return;
         if (HasUncommittedFieldEdits() &&
             !ThemedMessageDialog.Confirm(
                 this,
@@ -1388,7 +1359,8 @@ public partial class SettingsWindow : Window
         {
             return;
         }
-        Close();
+        _dismissing = true;
+        WindowMotion.PlayExit(ShellRoot, ShellScale, Close);
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => CloseWithDiscardGuard();

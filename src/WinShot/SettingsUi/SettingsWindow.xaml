@@ -1144,7 +1144,7 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Tools"/>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="Editor"/>
                                 <DockPanel Style="{StaticResource Row}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Arrow tool"/>
                                     <CheckBox x:Name="InverseArrowCheck" Content="Inverse arrow direction"/>
@@ -1163,13 +1163,12 @@
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource SubHint}"
                                            Text="Ensures all annotations fit by dynamically resizing canvas."/>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Editor behavior"/>
-                                <DockPanel Style="{StaticResource Row}">
+                                <!-- "Editor behavior" was its own bordered card for this one row:
+                                     a header, 14,8,14,10 of padding and a 10 px margin around a
+                                     single checkbox, which reads as a pane that lost something.
+                                     It is a group inside this card, separated the same way the
+                                     three rows above it are. -->
+                                <DockPanel Style="{StaticResource Row}" Margin="{StaticResource GroupLabelMargin}">
                                     <TextBlock Style="{StaticResource RowLabel}" Text="Window"/>
                                     <CheckBox x:Name="AlwaysOnTopCheck" Content="Always on top"/>
                                 </DockPanel>

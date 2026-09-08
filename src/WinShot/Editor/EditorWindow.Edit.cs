@@ -791,7 +791,7 @@ public partial class EditorWindow : Window
             // editor first, and ThemedMessageDialog assigns Owner unconditionally — WPF
             // throws on a closed one, out of an async void handler with nobody to catch it.
             if (!_closed)
-                ThemedMessageDialog.Show(this, "Could not copy", FriendlyError.For(ex));
+                ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
         }
     }
 
@@ -918,7 +918,7 @@ public partial class EditorWindow : Window
             // The encode can outlive the window; ThemedMessageDialog assigns Owner
             // unconditionally and WPF throws on a closed one, out of an async void handler.
             if (!_closed)
-                ThemedMessageDialog.Show(this, "Could not save the GIF", FriendlyError.For(ex));
+                ThemedMessageDialog.Show(this, "Save failed", FriendlyError.For(ex));
         }
         finally
         {
