@@ -691,10 +691,7 @@ public partial class EditorWindow : Window
             await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
             if (!IsVisible) return;
             // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
-            BtnCopy.Content = "";
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
-            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = ""; };
-            timer.Start();
+            ButtonFlash.Show(BtnCopy, "", "");
         }
         catch (Exception ex)
         {

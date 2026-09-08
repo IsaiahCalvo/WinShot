@@ -1237,13 +1237,8 @@ public partial class BackgroundComposerWindow : Window
         }
     }
 
-    private static void FlashButton(Button button, string flash, string normal)
-    {
-        button.Content = flash;
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
-        timer.Tick += (_, _) => { timer.Stop(); button.Content = normal; };
-        timer.Start();
-    }
+    private static void FlashButton(Button button, string flash, string normal) =>
+        ButtonFlash.Show(button, flash, normal);
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {

@@ -274,10 +274,69 @@ public class EditorEdgeCaseTests
         Assert.Equal("na,me;=%", back[0].Name);
         Assert.Equal("a,b;c=d%e", back[0].State.Backdrop);
     }
+
+    // ------------------------------------------------------------- P12 button flash
+
+    /// <summary>
+    /// The confirmation beat on a Copy/Save button. Both of the hand-rolled copies this
+    /// replaced could be made to misbehave the same two ways: click twice quickly and the
+    /// second timer's tick cut the first flash short, so the "Copied" you asked for twice
+    /// showed for less time than the one you asked for once; close the window inside the
+    /// beat and the timer kept ticking against a dead button, holding the window with it.
+    /// </summary>
+    [Fact]
+    public void P12_FlashSurvivesRepeatClicksAndAWindowClosingUnderIt()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var button = new System.Windows.Controls.Button { Content = "Copy" };
+
+                ButtonFlash.Show(button, "Copied", "Copy");
+                Assert.Equal("Copied", button.Content);
+                Assert.True(ButtonFlash.IsFlashing(button));
+
+                // A second click inside the beat REPLACES the first flash. If it merely
+                // added another timer, the first one's tick would restore "Copy" while the
+                // second flash was still meant to be up.
+                ButtonFlash.Show(button, "Copied", "Copy");
+                Assert.Equal("Copied", button.Content);
+                Assert.True(ButtonFlash.IsFlashing(button));
+
+                // Unloaded is what a closing window raises. The beat ends there, the label
+                // goes back to the truth, and nothing is left running.
+                button.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+                Assert.Equal("Copy", button.Content);
+                Assert.False(ButtonFlash.IsFlashing(button));
+
+                // And a flash on a button that already went through all that still works,
+                // rather than tripping over the handler the last round detached.
+                ButtonFlash.Show(button, "Copied", "Copy");
+                Assert.True(ButtonFlash.IsFlashing(button));
+                button.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+                Assert.Equal("Copy", button.Content);
+                Assert.False(ButtonFlash.IsFlashing(button));
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
 }
 
-// THROWAWAY: window-level probes for the grow tween. Called from ThemedWindowTests'
-// single STA thread (a second System.Windows.Application would break the assembly).
+/// <summary>
+/// Window-level checks for the grow tween, which needs a real Window and therefore a real
+/// Application. They run on ThemedWindowTests' single STA thread rather than owning one: a
+/// second System.Windows.Application breaks every windowed test in the assembly.
+/// </summary>
 public static class BreakerGrowProbes
 {
     public static void Run(SettingsService settings, HistoryService history)
