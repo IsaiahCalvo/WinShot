@@ -53,6 +53,14 @@ public class Settings
     public string LastCaptureRegion { get; set; } = "";        // "x,y,w,h" physical screen px
     public bool HideDesktopIconsDuringCapture { get; set; } = false;
     public string HotkeyCapturePrevious { get; set; } = "Ctrl+Shift+6";
+
+    /// <summary>Editor eraser mode. Survey persists this ('eraserMode') and defaults to partial.</summary>
+    public bool EraserPartial { get; set; } = true;
+
+    // Editor view: Survey persists the zoom MODE and the manual scale and restores them on
+    // load (zoomController.js:9, :18-21, :36-71; PDFViewer.jsx:916-937, :7856-7863).
+    public string EditorZoomMode { get; set; } = "Fit";   // Fit | FitWidth | FitHeight | Free
+    public double EditorManualZoom { get; set; } = 1.0;
     public string HotkeyAllInOne { get; set; } = "Ctrl+Shift+7";
     // Unbound by default: Ctrl+Shift+1..8 are taken and there is no obvious ninth. The
     // self-timer was reachable only from a tray row with an empty shortcut column.

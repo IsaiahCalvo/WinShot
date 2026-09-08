@@ -1,4 +1,4 @@
-﻿namespace WinShot.Editor;
+namespace WinShot.Editor;
 
 [Flags]
 internal enum EditorContextControls
@@ -9,6 +9,7 @@ internal enum EditorContextControls
     Fill = 1 << 2,
     Opacity = 1 << 3,
     ArrowStyle = 1 << 4,
+
     /// <summary>Which of the four ways a redaction hides what is under it.</summary>
     RedactStyle = 1 << 5,
     TextStyle = 1 << 6,
@@ -28,11 +29,21 @@ internal enum EditorContextControls
     Magnification = 1 << 11,
 
     /// <summary>
-    /// The outline's own two choices: the dash pattern, and the hand-drawn line quality.
-    /// Every mark that owns an outline gets them — the shapes AND the arrows, which is the
-    /// whole point: a sketchy rectangle next to a ruled arrow is not a hand-drawn diagram.
+    /// Survey's LINE STYLE dropdown: solid / dashed / dotted / cloud, plus WinShot's
+    /// hand-drawn render toggle. Every mark that owns an outline gets it — the shapes AND
+    /// the arrows, which is the whole point: a sketchy rectangle next to a ruled arrow is
+    /// not a hand-drawn diagram.
     /// </summary>
-    Style = 1 << 12,
+    LineStyle = 1 << 12,
+
+    /// <summary>Survey's Stroke / Fill tab pair inside the colour picker.</summary>
+    FillStrokeTabs = 1 << 13,
+
+    /// <summary>Survey's partial / full eraser choice, carried in the tool button's caret.</summary>
+    EraserMode = 1 << 14,
+
+    /// <summary>Survey's Bump field, live only for a cloud-bordered rectangle.</summary>
+    CloudBump = 1 << 15,
 }
 
 /// <summary>The five tool families the toolbar's category buttons switch between.</summary>
@@ -41,6 +52,11 @@ internal enum EditorToolCategory
     Draw,
     Shapes,
     Text,
+
+    /// <summary>
+    /// Survey calls this group Effects. It holds the marks that act on the picture rather
+    /// than on top of it: the re-editable redaction, the spotlight and the magnifier.
+    /// </summary>
     Redact,
     Image,
 }
@@ -50,9 +66,10 @@ internal enum EditorToolCategory
 /// contextual visibility and the category sub-row, and gives tests a stable
 /// order/layout contract without coupling to glyphs.
 ///
-/// The toolbar is ONE row: undo/redo, the two pointer tools, five category buttons,
-/// then the active tool's own controls, with Save as… / Done docked right. A
-/// category's tools live in a 34 DIP sub-row that floats over the canvas, so
+/// The toolbar is Survey's: undo/redo and the image utilities on the left, the two
+/// pointer tools and the category buttons in a row that is anchored and never moves as
+/// the armed tool changes, then the active tool's own controls hanging off its right.
+/// A category's tools live in a 34 DIP strip of their own above the viewport, so
 /// switching category never moves the image. Nothing is behind an overflow popup.
 /// </summary>
 internal static class EditorShellContract
@@ -60,8 +77,8 @@ internal static class EditorShellContract
     /// <summary>The two tools that are always visible, left of the categories.</summary>
     public static readonly string[] PointerToolOrder =
     {
-        "Select",
         "Pan",
+        "Select",
     };
 
     public static readonly EditorToolCategory[] CategoryOrder =
@@ -74,22 +91,41 @@ internal static class EditorShellContract
     };
 
     /// <summary>
+    /// Survey's bar in one array: the two navigation tools, then one button per group.
+    /// The eyedropper is not here — it lives inside the colour picker, where it is used.
+    /// </summary>
+    public static readonly string[] PrimaryToolOrder =
+    {
+        "Pan", "Select", "Draw", "Shapes", "Text", "Effects", "Image",
+    };
+
+    /// <summary>
     /// The tools in each category's sub-row, in the order they appear. Survey's own
-    /// groupings: draw = pen / highlighter (plus the eyedropper, which samples for
-    /// them), shapes = rectangle / ellipse / line / arrow / counter.
+    /// groupings, with WinShot's two additions folded in where they belong: the eraser
+    /// joins Draw, and Effects carries the one re-editable redaction mark (whose
+    /// Pixelate / Blur styles replace Survey's two separate effect tools) plus the
+    /// spotlight and the magnifier.
     /// </summary>
     public static string[] ToolsIn(EditorToolCategory category) => category switch
     {
-        EditorToolCategory.Draw => new[] { "Freehand", "Highlighter", "Eyedropper" },
+        EditorToolCategory.Draw => new[] { "Freehand", "Highlighter", "Eraser" },
         EditorToolCategory.Shapes => new[]
         {
-            "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step",
+            "Rectangle", "Ellipse", "Line", "Arrow", "Step",
         },
-        EditorToolCategory.Text => new[] { "Text" },
+        EditorToolCategory.Text => new[] { "Text", "Callout" },
         EditorToolCategory.Redact => new[] { "Redact", "Spotlight", "Magnifier" },
         EditorToolCategory.Image => new[] { "Crop" },
         _ => Array.Empty<string>(),
     };
+
+    public static readonly string[] DrawGroupTools = ToolsIn(EditorToolCategory.Draw);
+    public static readonly string[] ShapeGroupTools = ToolsIn(EditorToolCategory.Shapes);
+    public static readonly string[] TextGroupTools = ToolsIn(EditorToolCategory.Text);
+    public static readonly string[] EffectsGroupTools = ToolsIn(EditorToolCategory.Redact);
+
+    /// <summary>Nothing hides behind an overflow menu any more.</summary>
+    public static readonly string[] MoreToolOrder = Array.Empty<string>();
 
     /// <summary>
     /// The category a tool belongs to, or null for the pointer tools and for
@@ -98,14 +134,26 @@ internal static class EditorShellContract
     /// </summary>
     public static EditorToolCategory? CategoryOf(EditorTool tool) => tool switch
     {
-        EditorTool.Freehand or EditorTool.Highlighter or EditorTool.Eyedropper => EditorToolCategory.Draw,
+        EditorTool.Freehand or EditorTool.Highlighter or EditorTool.Eraser => EditorToolCategory.Draw,
         EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
             or EditorTool.CurvedArrow or EditorTool.Step => EditorToolCategory.Shapes,
-        EditorTool.Text => EditorToolCategory.Text,
+        EditorTool.Text or EditorTool.Callout => EditorToolCategory.Text,
         EditorTool.Redact or EditorTool.Spotlight or EditorTool.Magnifier => EditorToolCategory.Redact,
         EditorTool.Crop => EditorToolCategory.Image,
         _ => null,
     };
+
+    /// <summary>Survey's group name for a tool, empty for the ones that belong to no group.</summary>
+    public static string GroupFor(EditorTool tool, bool filledRectangle = false) =>
+        CategoryOf(tool) switch
+        {
+            EditorToolCategory.Draw => "Draw",
+            EditorToolCategory.Shapes => "Shapes",
+            EditorToolCategory.Text => "Text",
+            EditorToolCategory.Redact => "Effects",
+            EditorToolCategory.Image => "Image",
+            _ => "",
+        };
 
     /// <summary>
     /// The tool a category button arms when it is clicked. Image arms nothing: its row
@@ -119,6 +167,29 @@ internal static class EditorShellContract
         EditorToolCategory.Redact => EditorTool.Redact,
         _ => null,
     };
+
+    /// <summary>Maps a committed annotation to the tool whose format chrome it should show.</summary>
+    public static EditorTool? ToolForAnnotation(string? type) => type switch
+    {
+        AnnotationData.TypeArrow => EditorTool.Arrow,
+        AnnotationData.TypeCurvedArrow => EditorTool.CurvedArrow,
+        AnnotationData.TypeLine => EditorTool.Line,
+        AnnotationData.TypeRectangle => EditorTool.Rectangle,
+        AnnotationData.TypeEllipse => EditorTool.Ellipse,
+        AnnotationData.TypeFreehand => EditorTool.Freehand,
+        AnnotationData.TypeHighlighter => EditorTool.Highlighter,
+        AnnotationData.TypeText => EditorTool.Text,
+        AnnotationData.TypeCallout => EditorTool.Callout,
+        AnnotationData.TypeStep => EditorTool.Step,
+        AnnotationData.TypeSpotlight => EditorTool.Spotlight,
+        AnnotationData.TypeRedact => EditorTool.Redact,
+        AnnotationData.TypeMagnifier => EditorTool.Magnifier,
+        _ => null,
+    };
+
+    public static bool IsFilledRectangle(AnnotationData meta) =>
+        meta.Type == AnnotationData.TypeRectangle &&
+        (meta.Fill == nameof(ShapeFillMode.Solid) || meta.Fill == nameof(ShapeFillMode.Quarter));
 
     /// <summary>
     /// The widest the one row ever gets, in DIP: undo/redo + the two pointer tools + the
@@ -187,24 +258,37 @@ internal static class EditorShellContract
 
     public static EditorContextControls ContextFor(EditorTool tool, bool filledRectangle) => tool switch
     {
-        EditorTool.Rectangle when filledRectangle =>
-            EditorContextControls.Color | EditorContextControls.Fill |
-            EditorContextControls.Style | EditorContextControls.Opacity,
-        EditorTool.Rectangle or EditorTool.Ellipse =>
+        EditorTool.Rectangle =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.Fill | EditorContextControls.Style | EditorContextControls.Opacity,
-        EditorTool.Line or EditorTool.Freehand or EditorTool.Highlighter =>
+            EditorContextControls.Fill | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
+            EditorContextControls.CloudBump,
+        EditorTool.Ellipse =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.Fill | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
+        EditorTool.Line or EditorTool.CurvedArrow =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.Opacity | EditorContextControls.LineStyle,
+        EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
-        EditorTool.Arrow or EditorTool.CurvedArrow =>
+        EditorTool.Arrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.ArrowStyle | EditorContextControls.Style |
-            EditorContextControls.Opacity,
+            EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
+            EditorContextControls.LineStyle,
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
-            EditorContextControls.TextStyle | EditorContextControls.Opacity,
+            EditorContextControls.TextStyle | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs,
+        EditorTool.Callout =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
+            EditorContextControls.TextStyle,
         EditorTool.Step =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
+        EditorTool.Eraser => EditorContextControls.Thickness | EditorContextControls.EraserMode,
         EditorTool.Redact => EditorContextControls.RedactStyle | EditorContextControls.RedactStrength,
         EditorTool.Magnifier =>
             EditorContextControls.Color | EditorContextControls.Thickness |

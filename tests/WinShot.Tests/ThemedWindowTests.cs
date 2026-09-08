@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using WinShot.Capture;
 using WinShot.Core;
 using WinShot.Editor;
@@ -97,6 +98,8 @@ public class ThemedWindowTests
                 EyedropperPickerLatchSmoke(editor);
                 AnnotationClipboardSmoke(editor);
                 TextAndCounterSmoke(editor);
+                ToolRowStabilitySmoke(editor);
+                RotationGripSmoke(editor);
                 ZOrderReorderSmoke(editor);
                 SaveProjectSmoke(editor, settings, history);
                 PinSmoke(editor);
@@ -109,6 +112,7 @@ public class ThemedWindowTests
 
                 EditorFitsTallImageSmoke(settings, history);
                 EditorGrowLandsOnItsTargetSmoke(settings, history);
+                EditorFitsSmallImageSmoke(settings, history);
 
                 app.Shutdown();
             }
@@ -1013,6 +1017,125 @@ public class ThemedWindowTests
     /// asserting AnnotationCanvas.Children ends in the right order each time. The Insert-after-Remove
     /// index math is the easy place to get an off-by-one, so it gets a real check.
     /// </summary>
+    /// <summary>
+    /// The tool row must not move when the active tool changes. Format controls appear and
+    /// collapse per tool on the right of the same row; if the tool row's position depends on
+    /// that cluster's width, every switch slides the buttons out from under the cursor.
+    /// </summary>
+    private static void ToolRowStabilitySmoke(EditorWindow editor)
+    {
+        var toolPanel = (FrameworkElement)editor.FindName("ToolPanel")!;
+
+        double Left()
+        {
+            editor.UpdateLayout();
+            return toolPanel.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
+        }
+
+        double baseline = Left();
+
+        // Tools whose format cluster differs the most: shapes carry fill and stroke, the
+        // redaction carries style + strength and no colour, the magnifier carries a zoom,
+        // pan carries nothing at all. (Survey's separate Pixelate/Blur tools are gone —
+        // they are two of the four styles of the one re-editable redaction mark.)
+        foreach (string name in new[]
+        {
+            "SelectToolBtn", "PanToolBtn", "RectangleToolBtn", "RedactToolBtn",
+            "SpotlightToolBtn", "MagnifierToolBtn", "CropToolBtn", "EyedropperToolBtn",
+        })
+        {
+            if (editor.FindName(name) is not RadioButton rb) continue;
+            rb.IsChecked = true;
+            double now = Left();
+            Assert.True(Math.Abs(now - baseline) < 0.5,
+                $"tool row moved {now - baseline:0.##}px when selecting {name}");
+        }
+
+        // The group buttons swap the sub-strip, the other thing that shoved the row over.
+        // Five chips now, not Survey's four: Image joined them.
+        foreach (string name in new[]
+        {
+            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn", "EffectsGroupBtn", "ImageGroupBtn",
+        })
+        {
+            if (editor.FindName(name) is not Button b) continue;
+            b.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            double now = Left();
+            Assert.True(Math.Abs(now - baseline) < 0.5,
+                $"tool row moved {now - baseline:0.##}px when opening {name}");
+        }
+
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+    }
+
+    /// <summary>
+    /// Every annotation that can be selected can be rotated — including the counter, which
+    /// carried no handles at all, and the callout, whose own knee handles must not displace
+    /// the grip. The grip is the Ellipse in the handle layer.
+    /// </summary>
+    private static void RotationGripSmoke(EditorWindow editor)
+    {
+        const System.Reflection.BindingFlags NP =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(EditorWindow);
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var handleLayer = (Canvas)editor.FindName("HandleLayer")!;
+        var selField = type.GetField("_selected", NP)!;
+        var updateVisual = type.GetMethod("UpdateSelectionVisual", NP)!;
+
+        bool GripVisible() => handleLayer.Children.OfType<System.Windows.Shapes.Ellipse>()
+            .Any(e => e.Visibility == Visibility.Visible);
+
+        void SelectAndLayout(FrameworkElement el)
+        {
+            selField.SetValue(editor, el);
+            updateVisual.Invoke(editor, null);
+            editor.UpdateLayout();
+        }
+
+        canvas.Children.Clear();
+
+        // A plain box annotation — the baseline that always had handles.
+        var rect = new System.Windows.Shapes.Rectangle
+        {
+            Width = 90,
+            Height = 60,
+            Tag = new AnnotationData { Type = AnnotationData.TypeRectangle },
+        };
+        Canvas.SetLeft(rect, 20);
+        Canvas.SetTop(rect, 20);
+        canvas.Children.Add(rect);
+        rect.Measure(new Size(90, 60));
+        rect.Arrange(new Rect(0, 0, 90, 60));
+        SelectAndLayout(rect);
+        Assert.True(GripVisible(), "rectangle should carry a rotation grip");
+
+        // The counter: previously fell through to HideHandles, so it could not be rotated.
+        var badge = AnnotationFactory.CreateStepBadge(1, Colors.Red, 4, letters: false);
+        badge.Tag = new AnnotationData { Type = AnnotationData.TypeStep };
+        Canvas.SetLeft(badge, 140);
+        Canvas.SetTop(badge, 40);
+        canvas.Children.Add(badge);
+        badge.Measure(new Size(200, 200));
+        badge.Arrange(new Rect(0, 0, badge.DesiredSize.Width, badge.DesiredSize.Height));
+        SelectAndLayout(badge);
+        Assert.True(GripVisible(), "counter should carry a rotation grip");
+
+        // Rotating it must actually take, and survive a round-trip through the model.
+        AnnotationTransform.SetAngle(badge, 37);
+        Assert.Equal(37, AnnotationTransform.AngleOf(badge), 3);
+        Assert.Equal(new Vector(0, 0), AnnotationTransform.OffsetOf(badge));
+
+        // Moving a rotated mark must not straighten it.
+        AnnotationTransform.SetOffset(badge, new Vector(12, 8));
+        Assert.Equal(37, AnnotationTransform.AngleOf(badge), 3);
+        Assert.Equal(new Vector(12, 8), AnnotationTransform.OffsetOf(badge));
+
+        canvas.Children.Clear();
+        selField.SetValue(editor, null);
+        updateVisual.Invoke(editor, null);
+    }
+
     private static void ZOrderReorderSmoke(EditorWindow editor)
     {
         const System.Reflection.BindingFlags NP =
@@ -1055,42 +1178,70 @@ public class ThemedWindowTests
 
     private static void EditorShellContractSmoke(EditorWindow editor)
     {
-        // The toolbar is one row now: undo/redo, the pointer pair, five categories, then
-        // the active tool's own controls. Nothing behind a "More" popup.
+        // Nothing hides behind an overflow popup: the sweep retired its own "More tools"
+        // flyout and the merge retired Survey's "more chrome" one. Everything they held has
+        // a visible home — rotate / flip / image size on the crop bar, and add image, add
+        // capture, add background, extract text and export GIF in the Image group's strip.
         Assert.Null(editor.FindName("MoreToolsButton"));
         Assert.Null(editor.FindName("MoreToolsPopup"));
         Assert.Null(editor.FindName("MoreToolPanel"));
-        Assert.Null(editor.FindName("CurvedArrowToolBtn"));
+        Assert.Null(editor.FindName("MoreChromeBtn"));
+        Assert.Null(editor.FindName("MoreChromePopup"));
         Assert.Null(editor.FindName("EmojiToolBtn"));
         Assert.Null(editor.FindName("DragMeHandle"));
+        Assert.Empty(EditorShellContract.MoreToolOrder);
 
-        var categories = (StackPanel)editor.FindName("CategoryPanel")!;
-        Assert.Equal(
-            EditorShellContract.CategoryOrder.Select(c => c.ToString()).ToArray(),
-            categories.Children.OfType<RadioButton>().Select(rb => (string)rb.Tag).ToArray());
+        // Survey's two separate effect tools are gone: Pixelate and Blur are two of the
+        // four STYLES of the one re-editable redaction mark, so there is one strength
+        // control on the strip instead of an S/M/L combo per tool.
+        Assert.Null(editor.FindName("PixelateToolBtn"));
+        Assert.Null(editor.FindName("BlurToolBtn"));
+        Assert.Null(editor.FindName("EffectStrengthPanel"));
+        Assert.Null(editor.FindName("EffectStrengthBox"));
+        Assert.Null(editor.FindName("EffectStrengthLabel"));
+        // Rectangle + Fill covers what the second rectangle button used to.
+        Assert.Null(editor.FindName("FilledRectangleToolBtn"));
 
+        // Pan/Select hang off the centred cluster in their own panel (Survey's
+        // `position:absolute; right:100%` block, AppShell.jsx:1468-1477); the primary order
+        // is the two panels read left to right. WinShot adds a FIFTH chip, Image, for the
+        // one-shot things that act on the picture rather than adding a mark.
+        var panSelect = (StackPanel)editor.FindName("PanSelectPanel")!;
+        var primary = (StackPanel)editor.FindName("ToolPanel")!;
+        string[] primaryOrder = panSelect.Children.OfType<FrameworkElement>()
+            .Concat(primary.Children.OfType<FrameworkElement>())
+            .Where(el => el.Visibility == Visibility.Visible)
+            .Select(el => el.Tag as string)
+            .Where(tag => !string.IsNullOrEmpty(tag))
+            .Select(tag => tag!)
+            .ToArray();
+        Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
+
+        // Each category's 34px strip holds exactly the tools the contract lists, in order.
         foreach (EditorToolCategory category in EditorShellContract.CategoryOrder)
         {
-            var row = (StackPanel)editor.FindName($"{category}ToolRow")!;
-            Assert.Equal(
-                EditorShellContract.ToolsIn(category),
-                row.Children.OfType<RadioButton>().Select(rb => (string)rb.Tag).ToArray());
+            var row = (StackPanel)editor.FindName(GroupPanelName(category))!;
+            Assert.Equal(EditorShellContract.ToolsIn(category), GroupToolTags(row));
         }
 
         string[] namedControls =
         {
-            "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
-            "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
-            "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
-            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
+            "BtnUndo", "BtnRedo", "SelectToolBtn", "PanToolBtn",
+            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn", "EffectsGroupBtn", "ImageGroupBtn",
+            "RectangleToolBtn", "EllipseToolBtn", "LineToolBtn", "ArrowToolBtn",
+            "TextToolBtn", "CalloutToolBtn",
+            "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
+            "EyedropperToolBtn",
+            "CropUtilityBtn", "CropToolBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
+            "OcrRegionBtn", "ExportGifBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
-            "SnapToEdgesCheck", "RedactTextOnlyCheck", "StrokeStyleButton", "SketchCheck", "MagnifySlider",
-            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
-            "BorderTabBtn", "FillTabBtn", "SaveColorBtn", "PickerEyedropperBtn", "HueSlider", "AlphaSlider",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck", "SketchCheck", "MagnifySlider",
+            "ColorWellBtn", "ArrowStyleBox", "LineStyleBox", "CropRatioBox", "RedactStyleBox",
+            "StepModeBox", "SaveColorBtn",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
+            "BtnZoomIn", "BtnZoomOut", "FitMenuBtn", "FitPageItem", "FitWidthItem", "FitHeightItem",
         };
         foreach (string name in namedControls)
         {
@@ -1101,19 +1252,21 @@ public class ThemedWindowTests
         // Every control that shows only a glyph has to say what it does out loud.
         string[] iconOnlyControls =
         {
-            "BtnUndo", "BtnRedo", "SelectToolBtn", "SelectModeButton", "PanToolBtn",
-            "CategoryDrawBtn", "CategoryShapesBtn", "CategoryTextBtn", "CategoryRedactBtn", "CategoryImageBtn",
-            "RectangleToolBtn", "FilledRectangleToolBtn", "EllipseToolBtn", "LineToolBtn",
-            "ArrowToolBtn", "TextToolBtn", "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
-            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EyedropperToolBtn",
-            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "OcrRegionBtn",
-            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn",
-            "SnapToEdgesCheck", "RedactTextOnlyCheck", "StrokeStyleButton",
-            "CurrentColorIndicator", "ArrowStyleButton", "TextStyleButton", "CropRatioButton", "RedactStyleButton",
-            "SaveColorBtn", "PickerEyedropperBtn",
+            "BtnUndo", "BtnRedo", "SelectToolBtn", "PanToolBtn",
+            "DrawGroupBtn", "ShapeGroupBtn", "TextGroupBtn", "EffectsGroupBtn", "ImageGroupBtn",
+            "RectangleToolBtn", "EllipseToolBtn", "LineToolBtn", "ArrowToolBtn",
+            "TextToolBtn", "CalloutToolBtn",
+            "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
+            "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
+            "EyedropperToolBtn",
+            "CropUtilityBtn", "CropToolBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
+            "OcrRegionBtn", "ExportGifBtn",
+            "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
+            "SnapToEdgesCheck", "RedactTextOnlyCheck", "SketchCheck",
+            "ColorWellBtn", "RedactStyleBox", "StepModeBox", "SaveColorBtn",
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
-            "StepNumberBtn", "StepLetterBtn",
-            "BtnPin", "BtnCopy", "BtnCenter",
+            "BtnPin", "BtnCopy", "BtnCenter", "BtnSave",
+            "AlignMenuBtn", "FormatOverflowBtn", "BtnZoomIn", "BtnZoomOut", "FitMenuBtn",
         };
         foreach (string name in iconOnlyControls)
         {
@@ -1121,29 +1274,11 @@ public class ThemedWindowTests
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(element)), name);
         }
 
-        // Every popover animates in from its anchor edge, which needs its own (unfrozen)
-        // ScaleTransform on the surface — a Style-set one would be shared and frozen, and
-        // animating a frozen Freezable throws the first time a popup opens.
-        // Driven off ToolbarPopups(), not a literal list: FillPopup was missing from the
-        // literal one, so the single popover that could regress into a first-open crash was
-        // the one nothing watched. A new popover joins that list to work at all.
-        var popups = (Array)typeof(EditorWindow)
-            .GetMethod("ToolbarPopups", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .Invoke(editor, null)!;
-        Assert.True(popups.Length >= 8, $"only {popups.Length} toolbar popovers were enumerated.");
-        foreach (object entry in popups)
-        {
-            var popup = (Popup)entry.GetType().GetField("Item1")!.GetValue(entry)!;
-            var owner = (Control)entry.GetType().GetField("Item2")!.GetValue(entry)!;
-            var surface = Assert.IsType<Border>(popup.Child);
-            Assert.IsType<ScaleTransform>(surface.RenderTransform);
-            Assert.False(surface.RenderTransform.IsFrozen, owner.Name);
-        }
-
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
+        var pan = (RadioButton)editor.FindName("PanToolBtn")!;
         var undo = (Button)editor.FindName("BtnUndo")!;
         var copy = (Button)editor.FindName("BtnCopy")!;
-        foreach (Control control in new Control[] { select, undo, copy })
+        foreach (Control control in new Control[] { select, pan, undo, copy })
         {
             control.ApplyTemplate();
             Assert.NotNull(control.Template.FindName("FocusRing", control));
@@ -1151,115 +1286,390 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
-        var context = (StackPanel)editor.FindName("ContextPanel")!;
-        var subRow = (Border)editor.FindName("CategoryToolRow")!;
+        Assert.Null(editor.FindName("EditorStyleBar"));
+        var groupBar = (Border)editor.FindName("EditorGroupBar")!;
+        // Survey PORTALS the 34px sub-row in only while a category is open
+        // (PDFViewer.jsx:32015) and OVERLAYS it on the canvas (AppShell.jsx:2727-2740).
+        var groupHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
+        var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
+        var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
+        var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
         var color = (StackPanel)editor.FindName("ColorPanel")!;
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
         var fill = (StackPanel)editor.FindName("FillPanel")!;
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
-        var zoomButton = (Button)editor.FindName("ZoomMenuButton")!;
-        var zoomLabel = (TextBlock)editor.FindName("ZoomLabel")!;
-        Assert.Null(editor.FindName("ZoomBox"));
         var redactStyle = (StackPanel)editor.FindName("RedactStylePanel")!;
         var redactStrength = (StackPanel)editor.FindName("RedactStrengthPanel")!;
+        var magnify = (StackPanel)editor.FindName("MagnifyPanel")!;
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
         var cropTools = (StackPanel)editor.FindName("CropToolsPanel")!;
-        var sizeBox = (TextBox)editor.FindName("SizeBox")!;
-        var sizeField = (Border)editor.FindName("SizeFieldBorder")!;
-        var sizeHeading = (TextBlock)editor.FindName("SizePresetHeading")!;
+        // Survey's size control is an editable field plus a preset popover, not a combo
+        // (components/AnnotationSizeControl.jsx); it replaced the sweep's SizeBox pair.
+        var sizeInput = (TextBox)editor.FindName("SizeInput")!;
+        var sizeField = (Border)editor.FindName("SizeField")!;
+        var sizeHeading = (TextBlock)editor.FindName("SizePresetsHeading")!;
         var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
-        var shapesRow = (StackPanel)editor.FindName("ShapesToolRow")!;
-        var drawRow = (StackPanel)editor.FindName("DrawToolRow")!;
+        var viewport = (Grid)editor.FindName("Viewport")!;
+        var topToolbar = (Border)editor.FindName("TopToolbar")!;
+        var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
+        // Survey's zoom rail replaced the sweep's label + menu-button pair, and Survey's
+        // size field replaced the sweep's combo.
+        var zoomBox = (TextBox)editor.FindName("ZoomBox")!;
+        Assert.Null(editor.FindName("ZoomMenuButton"));
+        Assert.Null(editor.FindName("ZoomLabel"));
+        Assert.Null(editor.FindName("SizeBox"));
+        Assert.Null(editor.FindName("SizeFieldBorder"));
 
-        // The pointer tool has no controls of its own, so the row disappears entirely.
+        // Survey centres the tool cluster and hangs undo/redo and the props off it as
+        // absolute side blocks. Equal star side columns give the same geometry, so the
+        // tools stay put on every tool switch. ToolRowStabilitySmoke pins this.
+        Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
+        Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
+        Assert.True(groupHost.MinWidth < 40,
+            "Group tools must size to the visible chips, not a reserved blank slot.");
+        Assert.Equal(HorizontalAlignment.Stretch, groupBar.HorizontalAlignment);
+        // Survey's two chrome tokens have fixed roles: #181c24 for every band that SPANS the
+        // viewer width (top bar AppShell.jsx:1343, sub-row PDFViewer.jsx:32021) and #12151c
+        // for the vertical rail/panel surface only (AppShell.jsx:2697/:2847,
+        // SurveySpacesRail.jsx:1229). The bottom band spans the width, so it shares the top
+        // bar's material — that is what makes the chrome read as one system.
+        var bottomBar = (Border)editor.FindName("EditorBottomBar")!;
+        var rail = (Border)editor.FindName("ZoomRail")!;
+        Assert.Equal(topToolbar.Background, bottomBar.Background);
+        Assert.Equal(groupBar.Background, bottomBar.Background);
+        Assert.NotEqual(rail.Background, bottomBar.Background);
+        // Survey's Pan/Select block (AppShell.jsx:1468-1477/:1631): Select edge -> divider =
+        // gap 6 + divider margin 4 = 10px; divider -> first chip = divider margin 4 +
+        // block paddingRight 8 = 12px.
+        var divider = panSelect.Children.OfType<System.Windows.Shapes.Rectangle>().Last();
+        Assert.Equal(10d, divider.Margin.Left + select.Margin.Right);
+        Assert.Equal(12d, divider.Margin.Right + panSelect.Margin.Right
+            + ((Button)editor.FindName("DrawGroupBtn")!).Margin.Left);
+        Assert.True(IsLogicalDescendant(topToolbar, formatBar),
+            "Format chrome must sit on the primary row next to color and size, like Survey.");
+        Assert.False(IsLogicalDescendant(topToolbar, groupBar),
+            "Group tools sit in a chrome strip over the canvas so they do not shrink the image.");
+        Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
+        Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
+            "Rotate must live next to Crop, not over the image.");
+        Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
+            el => el.Name is "EditorStyleBar");
+
+        // The pointer tool has no controls of its own, so the sub-row disappears entirely.
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
-        Assert.Equal(Visibility.Collapsed, context.Visibility);
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, groupHost.Visibility);
+        // No category open -> no band and no hairline at all: the top bar butts straight
+        // onto the canvas, which is why both are #181c24 in Survey.
+        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        Assert.Equal(34d, groupBar.Height);
+        Assert.Equal(VerticalAlignment.Top, groupBar.VerticalAlignment);
+        Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
+            el => el.Tag as string == "Step");
+        Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
+            rb => rb.Tag as string == "Step");
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        ((RadioButton)editor.FindName("PanToolBtn")!).IsChecked = true;
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        double viewportHSelect = viewport.ActualHeight;
+        Assert.Equal(Visibility.Collapsed, color.Visibility);
+        Assert.Equal(Visibility.Collapsed, thickness.Visibility);
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal(Visibility.Visible, context.Visibility);
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        Assert.Equal(Visibility.Visible, groupHost.Visibility);
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        // AppShell.jsx:1637-1641: the chip is a TOGGLE — clicking the ACTIVE category
+        // closes the sub-row and leaves the tool alone; the derive-from-tool effect
+        // (PDFViewer.jsx:4535-4555) does not re-open it because the tool never changed.
+        var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
+        shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            "Opening or closing the sub-row must not resize the canvas — it overlays it.");
+        shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        // Survey's sub-row centres on the WINDOW, not on the canvas column: the strip is
+        // justifyContent:'center' (PDFViewer.jsx:32026) inside a centre column that is
+        // symmetric because BOTH rails are 48px (AppShell.jsx:2692/:2841), so it lands on
+        // the same x as the top bar's centred cluster (AppShell.jsx:1344) and the sub-row
+        // tools sit under the chip that opened them. WinShot has only the right rail, so
+        // the sub-row host carries a 48px left margin to restore that symmetry — which
+        // means the strip is NOT centred in its own bar; it is centred on the chips.
+        double arrowToolsW = groupTools.ActualWidth;
+        double arrowToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X
+            + arrowToolsW / 2;
+        double chipsCentre = primary.TranslatePoint(new Point(0, 0), editor).X
+            + primary.ActualWidth / 2;
+        Assert.True(Math.Abs(arrowToolsCentre - chipsCentre) < 1,
+            $"Shape sub-row is not under the chips that opened it: sub-row={arrowToolsCentre:0.##} chips={chipsCentre:0.##}");
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Visible, colorBar.Visibility);
+        Assert.Equal(Visibility.Visible, formatBar.Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
-        Assert.Equal("Width", sizeHeading.Text);
+        // Arming a tool lights its group chip and swaps the 34px strip to that group's row.
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("DrawGroupPanel")!).Visibility);
+        Assert.Equal("WIDTH", sizeHeading.Text);
 
-        // Arming a tool lights its category and swaps the floating sub-row to that row.
-        Assert.True(((RadioButton)editor.FindName("CategoryShapesBtn")!).IsChecked);
-        Assert.Equal(Visibility.Visible, subRow.Visibility);
-        Assert.Equal(Visibility.Visible, shapesRow.Visibility);
-        Assert.Equal(Visibility.Collapsed, drawRow.Visibility);
+        Assert.Null(editor.FindName("EraserPartialBtn"));
+        // Survey keeps eraser mode in the tool's OWN split menu inside the Draw sub-row
+        // (PDFViewer.jsx:32095-32135), not in a top-row combo.
+        Assert.Null(editor.FindName("EraserModeBox"));
+        Assert.NotNull(editor.FindName("EraserModePopup"));
+        Assert.NotNull(editor.FindName("EraserCaretBtn"));
+        typeof(EditorWindow).GetMethod("FitEditorCombos",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, null);
+        var lineBox = (ComboBox)editor.FindName("LineStyleBox")!;
+        var arrowBox = (ComboBox)editor.FindName("ArrowStyleBox")!;
+        Assert.True(lineBox.Width > 40, $"Line style combo was not sized to content: {lineBox.Width}");
+        double lineWidth = lineBox.Width;
+        foreach (ComboBoxItem item in lineBox.Items.OfType<ComboBoxItem>())
+            if (item.Tag as string == "dashed") { lineBox.SelectedItem = item; break; }
+        editor.UpdateLayout();
+        Assert.Equal(lineWidth, lineBox.Width);
+        double arrowWidth = arrowBox.Width;
+        foreach (ComboBoxItem item in arrowBox.Items.OfType<ComboBoxItem>())
+            if (item.Tag as string == "none") { arrowBox.SelectedItem = item; break; }
+        editor.UpdateLayout();
+        Assert.Equal(arrowWidth, arrowBox.Width);
 
-        // The size field takes any whole number, not just the old 2 / 4 / 6.
-        sizeBox.Text = "17";
-        Assert.Equal("17", sizeBox.Text);
+        // The size field takes any whole number, not just the old 2 / 4 / 6, and the preset
+        // popover offers Survey's twelve widths, each row carrying its value.
+        sizeInput.Text = "17";
+        Assert.Equal("17", sizeInput.Text);
+        Assert.Equal(
+            AnnotationSize.Presets,
+            sizePresets.Children.OfType<Button>().Select(b => (int)(double)b.Tag!).ToArray());
 
         // Out-of-range input is clamped to the stored value rather than rejected. The box
         // keeps the raw text while the user is mid-type and normalises on commit, so the
         // clamp shows up the next time the field is re-synced.
-        sizeBox.Text = "999";
+        sizeInput.Text = "999";
         ((RadioButton)editor.FindName("LineToolBtn")!).IsChecked = true;
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal("50", sizeBox.Text);
-        sizeBox.Text = "7";
-
-        // The preset menu offers Survey's twelve widths, each row carrying its value.
-        Assert.Equal(
-            AnnotationSize.Presets,
-            sizePresets.Children.OfType<RadioButton>().Select(r => (int)r.Tag!).ToArray());
+        Assert.Equal("50", sizeInput.Text);
+        sizeInput.Text = "7";
 
         // Each tool keeps its own size: Text is independent of Arrow. The word "Width" /
-        // "Size" left the toolbar with the other labels and lives on the field instead.
+        // "Size" left the toolbar with the other labels and lives on the preset popover.
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
-        Assert.Equal("Size", sizeHeading.Text);
-        Assert.Equal("Size", sizeField.ToolTip);
-        Assert.Equal("4", sizeBox.Text);
-        Assert.True(((RadioButton)editor.FindName("CategoryTextBtn")!).IsChecked);
+        editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        Assert.Equal("4", sizeInput.Text);
+        var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
+        Assert.True(primaryRow.ActualHeight <= 48,
+            $"Primary row grew instead of staying one line: {primaryRow.ActualHeight}");
+        Assert.True(topToolbar.ActualHeight <= 56,
+            $"Top chrome grew extra rows with Text selected: {topToolbar.ActualHeight}");
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((TextBlock)editor.FindName("ThicknessLabel")!).Visibility);
+        // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), so the
+        // shared size box keeps the stroke presets; the font size lives in FontSizeBox, which
+        // — like Survey's rich-text row — is only up while an editor is mounted.
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 16);
+        Assert.DoesNotContain(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 72);
+        Assert.False(string.IsNullOrEmpty(sizeInput.Text));
+        var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
+        Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
+        Assert.Equal(Visibility.Visible, thickness.Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
+        // Same rule as the Shape sub-row above: centred on the top bar's chips, not on the bar.
+        double textToolsW = groupTools.ActualWidth;
+        double textToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X + textToolsW / 2;
+        Assert.True(Math.Abs(textToolsCentre - chipsCentre) < 1,
+            $"Text sub-row is not under the chips that opened it: sub-row={textToolsCentre:0.##} chips={chipsCentre:0.##}");
+        Assert.True(textToolsW < arrowToolsW - 8,
+            $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
+        var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
+        Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
+        Point sizeOrigin = sizeField.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 16,
+            $"Color well and size field have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            $"Viewport shrank Text vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
+        var overflowBtn = (Button)editor.FindName("FormatOverflowBtn")!;
+        var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
+        var bold = (Button)editor.FindName("BoldBtn")!;
+        var textButtons = (FrameworkElement)editor.FindName("TextFormatButtons")!;
+        // Survey's rich-text row is only portalled in while an editor is mounted, so with the
+        // Text tool merely armed there is nothing on the strip left to overflow.
+        Assert.Equal(Visibility.Collapsed, overflowBtn.Visibility);
+        Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
+            el => el.Name is "TextFormatButtons" or "BoldBtn" or "ItalicBtn");
+        Assert.True(IsLogicalDescendant(formatBar, textButtons),
+            "B/I/U/S must stay on the primary strip, not the overflow flyout.");
+        Assert.True(IsLogicalDescendant(formatBar, bold));
+        Point textSave = BarRightEdge(editor);
+        Point textSec = secondary.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(textSec.X + secondary.ActualWidth <= textSave.X + 0.5,
+            $"Text secondary runs off the top bar: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
 
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal("Width", sizeHeading.Text);
-        Assert.Equal("7", sizeBox.Text);
+        Assert.Equal("7", sizeInput.Text);
 
-        ((RadioButton)editor.FindName("FilledRectangleToolBtn")!).IsChecked = true;
+        ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 1);
+        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 50);
+        Assert.DoesNotContain(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 72);
+        // Same rule for callouts: Survey's font-size dropdown belongs to the rich-text row,
+        // which only exists while an editor is mounted (TextEditOverlay.jsx:278-318).
+        Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
+        Assert.Equal(Visibility.Visible, thickness.Visibility);
+        Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
+        Point saveOrigin = BarRightEdge(editor);
+        Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
+            $"Callout size runs off the top bar: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
+        Point formatOrigin = formatBar.TranslatePoint(new Point(0, 0), editor);
+        saveOrigin = BarRightEdge(editor);
+        Assert.True(formatOrigin.X + formatBar.ActualWidth <= saveOrigin.X + 0.5,
+            $"Format extras sit on Save as…: format={formatOrigin.X}+{formatBar.ActualWidth} save={saveOrigin.X}");
+        Point calloutSec = secondary.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(calloutSec.X + secondary.ActualWidth <= saveOrigin.X + 0.5,
+            $"Callout secondary runs off the top bar: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
+        var done = (Button)editor.FindName("BtnDone")!;
+        Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
+        Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
+            $"Done overflows the window: done={doneOrigin.X}+{done.ActualWidth} win={editor.ActualWidth}");
+        Assert.Equal(Visibility.Visible, overflowBtn.Visibility);
+        Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
+            el => el.Name is "TextFormatButtons" or "BoldBtn");
+        Assert.True(IsLogicalDescendant(formatBar, textButtons));
+        Assert.NotNull(editor.FindName("BoldBtn"));
+        Assert.NotNull(editor.FindName("FontFamilyBox"));
+        Assert.NotNull(editor.FindName("AlignMenuBtn"));
+        Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName((Button)editor.FindName("BoldBtn")!)));
+        var italicGlyph = Assert.IsType<TextBlock>(((Button)editor.FindName("ItalicBtn")!).Content);
+        Assert.Equal(FontStyles.Italic, italicGlyph.FontStyle);
+        Assert.False(italicGlyph.RenderTransform is SkewTransform);
+
+        ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        var label = AnnotationFactory.CreateStyledTextLabel("Hello", Brushes.White, 16, TextStyle.Plain);
+        label.Tag = AnnotationData.ForText(new Point(10, 10), "Hello", TextStyle.Plain, 16, Colors.White);
+        canvas.Children.Add(label);
+        typeof(EditorWindow).GetMethod("Select",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { label });
+        editor.UpdateLayout();
+        // Survey shows the rich-text row solely while an editor is mounted, NOT when a text
+        // annotation is merely selected (AppShell.jsx:1756 gates on bottomToolbarApi.richTextEditor).
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
-        Assert.Equal(Visibility.Collapsed, thickness.Visibility);
-        Assert.Equal(Visibility.Visible, fill.Visibility);
+        // The 34px category strip follows the ARMED tool only: `activeCategoryDropdown` starts
+        // null and is force-cleared whenever activeTool becomes pan/select/text-select
+        // (PDFViewer.jsx:4340, :4558-4568) — selecting a committed mark never re-opens it. The
+        // format chrome above still follows the selection (contextTool), hence color stays up.
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        // No category chip is gold under Select either (AppShell.jsx:1647/1666/1685/1719).
+        Assert.Equal(
+            ((SolidColorBrush)editor.FindResource("ChromeTextBrush")).Color,
+            ((SolidColorBrush)((Button)editor.FindName("TextGroupBtn")!).Foreground).Color);
+        canvas.Children.Clear();
+        typeof(EditorWindow).GetMethod("Select",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object?[] { null });
 
         // One redaction tool with a style menu and a continuous strength — no S/M/L radios,
         // and no colour well, because a redaction has no colour to pick.
         ((RadioButton)editor.FindName("RedactToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, redactStyle.Visibility);
         Assert.Equal(Visibility.Visible, redactStrength.Visibility);
         Assert.Equal(Visibility.Collapsed, color.Visibility);
-        Assert.True(((RadioButton)editor.FindName("CategoryRedactBtn")!).IsChecked);
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("EffectsGroupPanel")!).Visibility);
+        var redactBox = (ComboBox)editor.FindName("RedactStyleBox")!;
+        Point redactOrigin = redactBox.TranslatePoint(new Point(0, 0), editor);
+        Point redactSave = BarRightEdge(editor);
+        Assert.True(redactOrigin.X + redactBox.ActualWidth <= redactSave.X + 0.5,
+            $"Redact style runs off the top bar: style={redactOrigin.X}+{redactBox.ActualWidth} save={redactSave.X}");
 
         // "Text only" belongs to the STYLE group, not the strength group. Inside the
-        // strength group it vanished for Black Out - the one style whose text-only form
-        // Shottr's row exists for - while the flag stayed live and every drag silently
+        // strength group it vanished for Black Out — the one style whose text-only form
+        // Shottr's row exists for — while the flag stayed live and every drag silently
         // produced one mark per word with no control on screen to say so.
         var textOnly = (CheckBox)editor.FindName("RedactTextOnlyCheck")!;
         Assert.Same(redactStyle, textOnly.Parent);
-        var applyRedactStyle = editor.GetType().GetMethod("ApplyRedactStyle",
+        var applyRedactStyle = typeof(EditorWindow).GetMethod("ApplyRedactStyle",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         applyRedactStyle.Invoke(editor, new object[] { RedactStyle.BlackOut });
+        editor.UpdateLayout();
         Assert.Equal(Visibility.Collapsed, redactStrength.Visibility);
         Assert.Equal(Visibility.Visible, redactStyle.Visibility);
         Assert.Equal(Visibility.Visible, textOnly.Visibility);
         applyRedactStyle.Invoke(editor, new object[] { RedactStyle.Pixelate });
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Visible, redactStrength.Visibility);
 
-        ((RadioButton)editor.FindName("CropUtilityBtn")!).IsChecked = true;
+        // The magnifier is the third Effects mark and carries its own zoom, not a strength.
+        ((RadioButton)editor.FindName("MagnifierToolBtn")!).IsChecked = true;
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Visible, magnify.Visibility);
+        Assert.Equal(Visibility.Collapsed, redactStrength.Visibility);
+
+        typeof(EditorWindow).GetMethod("OnCropClick",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { editor, new RoutedEventArgs() });
+        editor.UpdateLayout();
+        PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
+        // Rotate / flip / image size / snap came out of Survey's "more" popup and live on
+        // the crop bar now.
         Assert.Equal(Visibility.Visible, cropTools.Visibility);
-        // The crop bar says how big the picture is, so "Image size" is an answer as well
-        // as a button.
-        Assert.Contains("×", ((TextBlock)editor.FindName("ImageSizeLabel")!).Text);
-        Assert.True(((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked);
+        Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("RotateCcwBtn")!));
+        Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("FlipHorizontalBtn")!));
+        Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("FlipVerticalBtn")!));
+        Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("ResizeImageBtn")!));
+        Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("SnapToEdgesCheck")!));
+        Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("ImageSizeLabel")!));
+        var cropPanel = (FrameworkElement)editor.FindName("CropPanel")!;
+        cropPanel.Visibility = Visibility.Visible;
+        PackEditorFormat(editor);
+        Button applyCrop = LogicalTreeHelper.GetChildren(cropPanel).OfType<Button>()
+            .First(b => AutomationProperties.GetName(b) == "Apply crop");
+        Assert.True(applyCrop.IsVisible && applyCrop.Parent == cropPanel,
+            "Apply crop must stay on the strip; overflow Don't crop / ratio first.");
+        Point applyOrigin = applyCrop.TranslatePoint(new Point(0, 0), editor);
+        Point cropSave = BarRightEdge(editor);
+        Assert.True(applyOrigin.X + applyCrop.ActualWidth <= cropSave.X + 0.5,
+            $"Apply crop runs off the top bar: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
+        Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
+            el => el.Name == "CropCancelBtn");
+        Point toolsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor);
+        Assert.True(applyOrigin.X + 0.5 >= toolsRight.X - 8,
+            $"Apply crop covers tools: apply={applyOrigin.X:0} toolsRight={toolsRight.X:0}");
 
-        // A category button opens its own row and arms that row's first tool; Image is the
+        // A group chip opens its own strip and arms that strip's first tool; Image is the
         // one that arms nothing, so clicking it cannot drop the user into a crop.
-        ((RadioButton)editor.FindName("CategoryDrawBtn")!).IsChecked = true;
-        Assert.Equal(Visibility.Visible, drawRow.Visibility);
+        ((Button)editor.FindName("DrawGroupBtn")!).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        editor.UpdateLayout();
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("DrawGroupPanel")!).Visibility);
         Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
-        ((RadioButton)editor.FindName("CategoryImageBtn")!).IsChecked = true;
+        ((Button)editor.FindName("ImageGroupBtn")!).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        editor.UpdateLayout();
         Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
 
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
@@ -1271,13 +1681,14 @@ public class ThemedWindowTests
         Motion.AnimationsEnabled = () => false;
         try
         {
-            typeof(EditorWindow).GetMethod("ZoomToPercent",
+            typeof(EditorWindow).GetMethod("ZoomAt",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-                .Invoke(editor, new object[] { 2.0 });
-            Assert.Equal("200%", zoomLabel.Text);
+                .Invoke(editor, new object[] { new Point(0, 0), 2.0 });
+            Assert.Equal("200%", zoomBox.Text);
         }
         finally { Motion.AnimationsEnabled = animations; }
-        Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(zoomButton)));
+        Assert.False(string.IsNullOrWhiteSpace(
+            AutomationProperties.GetHelpText((FrameworkElement)editor.FindName("FitMenuBtn")!)));
 
         // The one-row toolbar's 1152 DIP floor is not a promise a screen can keep — a
         // 1536x1024 laptop at 150 % is 1024 DIP of work area — and WM_GETMINMAXINFO would
@@ -1293,20 +1704,117 @@ public class ThemedWindowTests
 
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
-        var toolbar = (Border)editor.FindName("TopToolbar")!;
-        Assert.True(toolbar.ActualWidth <= editor.ActualWidth);
+        Assert.True(topToolbar.ActualWidth <= editor.ActualWidth);
+        Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
         ToolbarFitsAtMinimumWidth(editor);
         ContextRowNeverCoversTheFinishPair(editor);
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+
+        MarqueeSelectsEveryIntersectingAnnotation(editor);
+    }
+
+    /// <summary>The 34px strip panel that carries a category's tools.</summary>
+    private static string GroupPanelName(EditorToolCategory category) => category switch
+    {
+        EditorToolCategory.Draw => "DrawGroupPanel",
+        EditorToolCategory.Shapes => "ShapeGroupPanel",
+        EditorToolCategory.Text => "TextGroupPanel",
+        EditorToolCategory.Redact => "EffectsGroupPanel",
+        _ => "ImageGroupPanel",
+    };
+
+    /// <summary>
+    /// The tool tags in a group's strip, in order. Walks the sub-tree rather than the
+    /// panel's direct children because the eraser lives inside a Grid that also carries its
+    /// mode caret — reading Children only would have silently dropped it from the contract.
+    /// </summary>
+    private static string[] GroupToolTags(DependencyObject root)
+    {
+        var tags = new List<string>();
+        void Walk(DependencyObject node)
+        {
+            foreach (object child in LogicalTreeHelper.GetChildren(node))
+            {
+                if (child is RadioButton rb)
+                {
+                    if (rb.Tag is string tag && tag.Length > 0) tags.Add(tag);
+                }
+                else if (child is DependencyObject dep)
+                {
+                    Walk(dep);
+                }
+            }
+        }
+        Walk(root);
+        return tags.ToArray();
+    }
+
+    private static void PackEditorFormat(EditorWindow editor)
+    {
+        var pack = typeof(EditorWindow).GetMethod("PackFormatOverflow",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var frame = new DispatcherFrame();
+        editor.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            pack.Invoke(editor, null);
+            frame.Continue = false;
+        });
+        Dispatcher.PushFrame(frame);
+        editor.UpdateLayout();
+    }
+
+    private static bool IsLogicalDescendant(DependencyObject root, DependencyObject child)
+    {
+        for (DependencyObject? d = child; d is not null; d = LogicalTreeHelper.GetParent(d))
+            if (ReferenceEquals(d, root)) return true;
+        return false;
+    }
+
+    private static void MarqueeSelectsEveryIntersectingAnnotation(EditorWindow editor)
+    {
+        var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        canvas.Children.Clear();
+        // Both marks stay inside the 80x50 source: Survey clamps the marquee to the page
+        // viewBox, so a band dragged past the image edge stops at the edge.
+        var a = new System.Windows.Shapes.Rectangle { Width = 30, Height = 30, Fill = Brushes.Red };
+        var b = new System.Windows.Shapes.Rectangle { Width = 20, Height = 20, Fill = Brushes.Blue };
+        Canvas.SetLeft(a, 5); Canvas.SetTop(a, 5);
+        Canvas.SetLeft(b, 50); Canvas.SetTop(b, 10);
+        a.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
+        b.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
+        canvas.Children.Add(a);
+        canvas.Children.Add(b);
+        editor.UpdateLayout();
+
+        typeof(EditorWindow).GetField("_marqueeStart",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(editor, new Point(0, 0));
+        // Survey latches the band armed once the drag clears MIN_DRAG_PX; EndMarquee reads
+        // that latch rather than re-measuring at release.
+        typeof(EditorWindow).GetField("_marqueeArmed",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(editor, true);
+        typeof(EditorWindow).GetMethod("EndMarquee",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { new Point(140, 60) });
+
+        var selection = (System.Collections.IList)typeof(EditorWindow).GetField("_selection",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(editor)!;
+        Assert.Equal(2, selection.Count);
+        canvas.Children.Clear();
+        typeof(EditorWindow).GetMethod("Select",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { null! });
     }
 
     /// <summary>
     /// The one row has to hold every tool's controls at the narrowest the window goes.
-    /// Measuring the row's HEIGHT proves nothing — it is a DockPanel, which does not wrap;
-    /// it clips its fill child's right-hand end away in silence, which is how a whole crop
-    /// group (Snap, then Image size) went missing without a red test. So this measures what
-    /// the row WANTS, unconstrained, against the declared budget — and, when the display can
-    /// actually hold a window that wide, against what the row is really given.
+    /// Measuring the row's HEIGHT proves nothing — a control that does not fit is clipped in
+    /// silence, which is how a whole crop group (Snap, then Image size) went missing without
+    /// a red test. So this measures what the row WANTS, unconstrained, against the declared
+    /// budget — and, when the display can actually hold a window that wide, against what the
+    /// row is really given.
     ///
     /// The display check is not decoration: the minimum is 1152 DIP and a 1024 DIP screen
     /// cannot produce a 1152 DIP window, which is the whole reason the editor now clamps its
@@ -1315,15 +1823,16 @@ public class ThemedWindowTests
     /// </summary>
     /// <summary>
     /// Below 1152 DIP the window's minimum is lowered to whatever the display holds, so the
-    /// primary row is given less than it needs — and a DockPanel does not clip its fill child,
-    /// so the context row's buttons used to be arranged from x=0 outward straight across the
-    /// Save as… / Done pair docked to its right. Two facts hold instead: the overflow is
-    /// scrollable rather than gone, and the finish pair is never painted over.
+    /// props block is given less than it needs, and its controls used to be arranged from
+    /// x=0 outward straight across the Save as… / Done pair to its right. Two facts hold
+    /// instead: the overflow is packed into the flyout rather than gone, and the finish pair
+    /// is never painted over. (Survey's format packer replaced the sweep's ContextScroll, so
+    /// the "is it scrollable" half of this is now "did anything actually get packed".)
     /// </summary>
     private static void ContextRowNeverCoversTheFinishPair(EditorWindow editor)
     {
-        var scroll = (ScrollViewer)editor.FindName("ContextScroll")!;
-        var context = (StackPanel)editor.FindName("ContextPanel")!;
+        var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
+        var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
         var save = (Button)editor.FindName("BtnSave")!;
         var check = typeof(EditorWindow).GetMethod("CheckToolButton",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
@@ -1339,21 +1848,20 @@ public class ThemedWindowTests
             {
                 check.Invoke(editor, new object[] { tool });
                 editor.UpdateLayout();
-                if (context.Visibility != Visibility.Visible) continue;
+                PackEditorFormat(editor);
+                if (secondary.Visibility != Visibility.Visible) continue;
 
-                Assert.True(scroll.ViewportWidth <= scroll.ExtentWidth + 0.5,
-                    $"{tool}: the context row reports more viewport than content.");
-                // The row's own painted extent stops at the scroller; the docked pair starts
-                // after it. A fill child that overran would put these the other way round.
-                Point rowRight = scroll.TranslatePoint(new Point(scroll.ActualWidth, 0), editor);
+                // The props block's painted extent stops before the finish pair. A block
+                // that overran would put these the other way round.
+                Point rowRight = secondary.TranslatePoint(new Point(secondary.ActualWidth, 0), editor);
                 Point saveLeft = save.TranslatePoint(new Point(0, 0), editor);
                 Assert.True(rowRight.X <= saveLeft.X + 0.5,
-                    $"{tool}: the context row reaches {rowRight.X:0} DIP, past Save as… at {saveLeft.X:0}.");
-                if (scroll.ExtentWidth > scroll.ViewportWidth + 0.5) overflowed++;
+                    $"{tool}: the props block reaches {rowRight.X:0} DIP, past Save as… at {saveLeft.X:0}.");
+                if (overflowPanel.Children.Count > 0) overflowed++;
             }
 
-            // Otherwise the two assertions above are true of a row that always fits, and the
-            // case this method exists for was never reached.
+            // Otherwise the assertion above is true of a row that always fits, and the case
+            // this method exists for was never reached.
             Assert.True(overflowed > 0, "no tool overflowed a 700 DIP row, so nothing was tested.");
         }
         finally
@@ -1361,12 +1869,13 @@ public class ThemedWindowTests
             editor.MinWidth = EditorShellContract.MinimumEditorLogicalWidth;
             editor.Width = width;
             editor.UpdateLayout();
+            PackEditorFormat(editor);
         }
     }
 
     private static void ToolbarFitsAtMinimumWidth(EditorWindow editor)
     {
-        var primaryRow = (DockPanel)editor.FindName("ToolbarPrimaryRow")!;
+        var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
         var check = typeof(EditorWindow).GetMethod("CheckToolButton",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
@@ -1753,6 +2262,55 @@ public class ThemedWindowTests
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
+
+    /// <summary>
+    /// A tiny capture must scale UP on Fit so the paper is the work, not a postage
+    /// stamp in an empty viewport. 100% is a zoom preset, not what Fit means.
+    /// </summary>
+    private static void EditorFitsSmallImageSmoke(SettingsService settings, HistoryService history)
+    {
+        const int imgW = 80, imgH = 50;
+        var small = new SD.Bitmap(imgW, imgH);
+        using (var g = SD.Graphics.FromImage(small)) g.Clear(SD.Color.CornflowerBlue);
+
+        var editor = EditorWindow.CreateForCapture(small, settings, history);
+        editor.Show();
+        for (int i = 0; i < 6; i++) PumpDispatcherOnce();
+
+        var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
+        double vw = viewport.ActualWidth, vh = viewport.ActualHeight;
+        double zoom = (double)typeof(EditorWindow)
+            .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(editor)!;
+        var fitMenuBtn = (Button)editor.FindName("FitMenuBtn")!;
+        var zoomBox = (TextBox)editor.FindName("ZoomBox")!;
+
+        editor.Close();
+
+        Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
+        Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
+        Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
+            $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
+        // Survey's fit insets: PAD=20 subtracted per side horizontally, GAP=16 folded into
+        // the height DIVISOR (PdfjsViewerContainer.jsx:51-52, :137-140, :1891-1895).
+        double surveyFit = Math.Min((vw - 40) / imgW, vh / (imgH + 32));
+        Assert.True(Math.Abs(zoom - surveyFit) < 0.001,
+            $"fit does not match Survey: zoom={zoom} expected={surveyFit} viewport={vw}x{vh}");
+        // Survey's fit trigger tooltip is `Page fit: ${label}` in every state (AppShell.jsx:3072).
+        Assert.Equal("Page fit: Fit page", fitMenuBtn.ToolTip);
+        Assert.Equal(Visibility.Visible, zoomBox.Visibility);
+        Assert.EndsWith("%", zoomBox.Text);
+    }
+
+    /// <summary>
+    /// The props block must end inside the floating top bar. The zoom cluster moved to the
+    /// right rail below the bar, so the bar's own right edge is the boundary now.
+    /// </summary>
+    private static Point BarRightEdge(EditorWindow editor)
+    {
+        var bar = (FrameworkElement)editor.FindName("TopToolbar")!;
+        return bar.TranslatePoint(new Point(bar.ActualWidth - 6, 0), editor);
+    }
 
     private static void PinSmoke(EditorWindow editor)
     {

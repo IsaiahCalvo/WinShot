@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using WinShot.Editor;
 using Xunit;
 
@@ -31,35 +31,36 @@ public class AnnotationRotationTests
     [Theory]
     [InlineData(44, 45)]        // inside the threshold: latches on
     [InlineData(46, 45)]
-    [InlineData(43, 45)]        // exactly 2 off
+    [InlineData(14, 15)]        // the finer 15° stops snap too
+    [InlineData(31, 30)]
     [InlineData(2, 0)]
     [InlineData(-2, 0)]
     [InlineData(89, 90)]
-    public void SnapToNearest45_LatchesInsideTheThreshold(double input, double expected)
+    public void SnapToNearest_LatchesInsideTheThreshold(double input, double expected)
     {
-        Assert.Equal(expected, AnnotationRotation.SnapToNearest45(input), 6);
+        Assert.Equal(expected, AnnotationRotation.SnapToNearest(input), 6);
     }
 
     [Theory]
-    [InlineData(30)]
-    [InlineData(-12)]
-    [InlineData(60)]
+    [InlineData(22)]
+    [InlineData(-8)]
+    [InlineData(37)]
     [InlineData(100)]
-    public void SnapToNearest45_LeavesFreeAnglesAlone(double input)
+    public void SnapToNearest_LeavesFreeAnglesAlone(double input)
     {
         // The soft snap must not fight a deliberate off-angle.
-        Assert.Equal(input, AnnotationRotation.SnapToNearest45(input), 6);
+        Assert.Equal(input, AnnotationRotation.SnapToNearest(input), 6);
     }
 
     [Theory]
-    [InlineData(30, 45)]
-    [InlineData(20, 0)]      // below the 22.5 midpoint, so it steps down
-    [InlineData(10, 0)]
-    [InlineData(-30, -45)]
-    [InlineData(100, 90)]
-    public void QuantizeTo45_AlwaysStepsForShiftDrag(double input, double expected)
+    [InlineData(30, 30)]
+    [InlineData(22, 15)]     // below the 22.5 midpoint, so it steps down
+    [InlineData(23, 30)]
+    [InlineData(-38, -45)]
+    [InlineData(100, 105)]
+    public void Quantize_AlwaysStepsToAnIncrement(double input, double expected)
     {
-        Assert.Equal(expected, AnnotationRotation.QuantizeTo45(input), 6);
+        Assert.Equal(expected, AnnotationRotation.Quantize(input), 6);
     }
 
     [Theory]
@@ -83,40 +84,62 @@ public class AnnotationRotationTests
     }
 
     [Fact]
-    public void ResolveDrag_KeepsTheGrabOffsetSoTheMarkDoesNotJump()
+    public void ResolveDrag_TakesTheAbsoluteBearingWithNoGrabOffset()
     {
-        // Grabbed the handle at a bearing of 10° while the shape sat at 0°.
-        // Moving the pointer to 40° should advance the shape by 30°, not to 40°.
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 10, pointerAngle: 40, shift: false);
-        Assert.Equal(30, result, 6);
+        // Survey rotates to the bearing from the shape centre to the pointer with no grab
+        // offset (useSVGInteraction.js:2350-2352): the top faces the cursor immediately.
+        double result = AnnotationRotation.ResolveDrag(pointerAngle: 40, shift: false);
+        Assert.Equal(40, result, 6);
     }
 
     [Fact]
-    public void ResolveDrag_SoftSnapsNearAMultipleOf45()
+    public void ResolveDrag_WithoutShiftIsCompletelyFree()
     {
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 44, shift: false);
-        Assert.Equal(45, result, 6);
+        // Survey only calls snapAngleToNearest45 inside `if (e.shiftKey)`
+        // (useSVGInteraction.js:2357-2360), so an unmodified drag never latches. A deliberate
+        // 14 or 44 degree tilt has to survive being one degree off an increment.
+        Assert.Equal(44, AnnotationRotation.ResolveDrag(pointerAngle: 44, shift: false), 6);
+        Assert.Equal(16, AnnotationRotation.ResolveDrag(pointerAngle: 16, shift: false), 6);
+        Assert.Equal(14, AnnotationRotation.ResolveDrag(pointerAngle: 14, shift: false), 6);
     }
 
     [Fact]
-    public void ResolveDrag_WithShiftAlwaysLandsOnAMultipleOf45()
+    public void ResolveDrag_WithShiftSoftSnaps()
     {
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 30, shift: true);
-        Assert.Equal(45, result, 6);
+        // Survey's Shift snap is SOFT: inside the 3 degree threshold it latches, outside it
+        // the angle passes through untouched (svgTransformMath.js:152-158).
+        Assert.Equal(45, AnnotationRotation.ResolveDrag(pointerAngle: 44, shift: true), 6);
+        Assert.Equal(38, AnnotationRotation.ResolveDrag(pointerAngle: 38, shift: true), 6);
+        Assert.Equal(0, AnnotationRotation.ResolveDrag(pointerAngle: 2, shift: true), 6);
+    }
 
-        double back = AnnotationRotation.ResolveDrag(
-            startAngle: 0, grabOffset: 0, pointerAngle: 10, shift: true);
-        Assert.Equal(0, back, 6);
+    [Theory]
+    // Survey counters: pointer angle is the bearing from the badge centre, 0 = east.
+    [InlineData(10, 0, 0)]
+    [InlineData(0, 10, 90)]
+    [InlineData(-10, 0, 180)]
+    [InlineData(0, -10, -90)]
+    public void PointerAngleFromCursor_IsEastBasedLikeSurveysCounter(double dx, double dy, double expected)
+    {
+        var c = new Point(100, 100);
+        Assert.Equal(expected, AnnotationRotation.PointerAngleFromCursor(c, new Point(100 + dx, 100 + dy)), 6);
+    }
+
+    [Fact]
+    public void PointerAngleFromCursor_NeverSnaps()
+    {
+        // Survey's counter tip handle applies no snapping and reads no modifier
+        // (SVGAnnotationLayer.jsx:5183): the nub follows the cursor continuously.
+        var c = new Point(100, 100);
+        double rad = 16 * Math.PI / 180;
+        var cursor = new Point(100 + Math.Cos(rad) * 50, 100 + Math.Sin(rad) * 50);
+        Assert.Equal(16, AnnotationRotation.PointerAngleFromCursor(c, cursor), 6);
     }
 
     [Fact]
     public void ResolveDrag_WrapsPastHalfATurn()
     {
-        double result = AnnotationRotation.ResolveDrag(
-            startAngle: 170, grabOffset: 0, pointerAngle: 30, shift: false);
+        double result = AnnotationRotation.ResolveDrag(pointerAngle: 200, shift: false);
         Assert.Equal(-160, result, 6);
     }
 }

@@ -174,6 +174,10 @@ internal static class SettingsTruthCatalog
             "SelectorHintSessions",
             "LastRecordingRegion",
             "ShortcutBindings",
+            "EraserPartial",
+            // Editor view state, remembered the way Survey remembers its zoom preference.
+            "EditorZoomMode",
+            "EditorManualZoom",
             "BackgroundPresets",
             "BackgroundLastUsed",
             "SavedColors",

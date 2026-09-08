@@ -1,4 +1,4 @@
-using System.Windows.Input;
+﻿using System.Windows.Input;
 using WinShot.Editor;
 using Xunit;
 
@@ -12,8 +12,17 @@ public class EditorShortcutTests
     [InlineData(Key.D, ModifierKeys.Control, "Duplicate")]
     [InlineData(Key.S, ModifierKeys.Control | ModifierKeys.Shift, "SaveAs")]
     [InlineData(Key.Z, ModifierKeys.Control, "Undo")]
+    // Survey mandates all four undo/redo bindings (undoRedoHotkeys.js:4-6, 33-39).
+    [InlineData(Key.Z, ModifierKeys.Control | ModifierKeys.Shift, "Redo")]
     [InlineData(Key.Y, ModifierKeys.Control, "Redo")]
+    // Ctrl+0 is 100 % and Ctrl+1 is fit, the way every other Windows image app has it;
+    // Survey's own two extra fit modes move down one rather than being lost.
+    [InlineData(Key.D0, ModifierKeys.Control, "ActualSize")]
+    [InlineData(Key.D1, ModifierKeys.Control, "FitAndCenter")]
+    [InlineData(Key.D2, ModifierKeys.Control, "FitWidth")]
+    [InlineData(Key.NumPad3, ModifierKeys.Control, "FitHeight")]
     [InlineData(Key.OemPlus, ModifierKeys.Control, "ZoomIn")]
+    [InlineData(Key.OemPlus, ModifierKeys.Control | ModifierKeys.Shift, "ZoomIn")]
     [InlineData(Key.Add, ModifierKeys.Control, "ZoomIn")]
     [InlineData(Key.OemMinus, ModifierKeys.Control, "ZoomOut")]
     [InlineData(Key.Subtract, ModifierKeys.Control, "ZoomOut")]
