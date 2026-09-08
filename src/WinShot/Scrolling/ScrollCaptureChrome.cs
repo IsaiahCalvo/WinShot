@@ -79,6 +79,12 @@ internal static class ScrollChromeFade
     /// Fades out and completes when it is gone. The cancel handle comes back too: the caller
     /// closes its form on a timeout race, and a discarded handle left an uncancellable tween
     /// holding Motion.Acquire() with its form already destroyed.
+    ///
+    /// The task completes only when the fade RUNS OUT. Disposing the handle cancels the tween,
+    /// which by Motion's contract skips the completion -- so the task never completes, and the
+    /// deliberate behaviour a test in BreakerProbes pins ("a cancelled tween must not report
+    /// that it finished"). Never simply await this: race it against a timeout the way
+    /// ScrollingStatusWindow does, or the cancel path waits for the rest of the session.
     /// </summary>
     public static Task Out(Action<byte> apply, out IDisposable handle)
     {

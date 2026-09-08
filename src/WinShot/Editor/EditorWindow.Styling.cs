@@ -585,14 +585,19 @@ public partial class EditorWindow : Window
         // Placed against the swatch, not the mouse: ContextMenu defaults to MousePoint, so
         // Enter or Space on the focused swatch dropped the format list wherever the pointer
         // happened to be sitting -- possibly off the popup entirely.
+        // Both styles applied by hand: DarkContextMenu and DarkMenuItem are keyed, not
+        // implicit, so a menu built in code and left unstyled falls back to Aero2 -- a white
+        // popup with black text hanging off a swatch inside the dark picker.
         var menu = new ContextMenu
         {
+            Style = (Style)FindResource("DarkContextMenu"),
             PlacementTarget = ColorPickerPreviewButton,
             Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
         };
+        var itemStyle = (Style)FindResource("DarkMenuItem");
         foreach ((string label, WinShot.Core.ColorFormat format) in CopyFormats)
         {
-            var item = new MenuItem { Header = $"Copy as {label}", Tag = format };
+            var item = new MenuItem { Header = $"Copy as {label}", Tag = format, Style = itemStyle };
             // The automation name is the visible label, so voice control can say it.
             AutomationProperties.SetName(item, $"Copy as {label}");
             item.Click += OnCopyColorAs;

@@ -306,36 +306,77 @@ public class PinRenderHarness
 
         Assert.Null(failure);
         Assert.True(File.Exists(output));
-        AssertToolbarBandIsPresent(output);
+        AssertToolbarBandIsPresent(output, GlyphsRasterise());
+    }
+
+    /// <summary>
+    /// Whether SVG glyphs rasterise at all in this environment. Under the hidden-desktop
+    /// runner WPF's RenderTargetBitmap hands back a correctly sized but entirely transparent
+    /// icon -- SvgIcons.Get returns a bitmap, so nothing throws and nothing draws -- which is
+    /// why every render artifact in .claudehelper/renders shows empty chips and empty card
+    /// buttons. It is a harness limitation, not a product one, and this is what tells the two
+    /// apart instead of leaving the band assertion to pass on a glyphless render.
+    /// </summary>
+    private static bool GlyphsRasterise()
+    {
+        SD.Bitmap? icon = SvgIcons.Get("quick-access-close.svg", 16, ThemePalette.TextSecondary);
+        if (icon is null)
+            return false;
+        for (int y = 0; y < icon.Height; y++)
+            for (int x = 0; x < icon.Width; x++)
+                if (icon.GetPixel(x, y).A > 40)
+                    return true;
+        return false;
     }
 
     /// <summary>
     /// The artifact is only evidence if the chrome it is meant to show is actually in it.
     /// A missing <c>_chromeAlpha</c> once produced a bare capture that looked perfectly
     /// fine to a human -- HANDOFF's "never eyeball this" case -- so the band is counted.
+    ///
+    /// The band alone is not enough where glyphs can be rendered: an empty capsule with five
+    /// blank circles in it passes a row count and is not the chrome this artifact exists to
+    /// show, so the glyph pixels inside the band are counted too.
     /// </summary>
-    private static void AssertToolbarBandIsPresent(string path)
+    private static void AssertToolbarBandIsPresent(string path, bool glyphsRasterise)
     {
         using var png = new SD.Bitmap(path);
         int bandRows = 0;
+        int glyphPixels = 0;
         for (int y = 0; y < png.Height; y++)
         {
             int neutral = 0;
+            int light = 0;
             for (int x = 0; x < png.Width; x++)
             {
                 SD.Color c = png.GetPixel(x, y);
+                bool grey = c.A > 200 && Math.Abs(c.R - c.G) < 8 && Math.Abs(c.G - c.B) < 8;
                 // The bar is 235/255 of ToolbarBg over the capture: dark and near-neutral,
                 // which nothing in the synthetic gradient capture is.
-                if (c.A > 200 && Math.Abs(c.R - c.G) < 8 && Math.Abs(c.G - c.B) < 8 &&
-                    c.R > 25 && c.R < 90)
+                if (grey && c.R > 25 && c.R < 90)
                     neutral++;
+                // The chip glyphs are TextSecondary (0xBE) and TextPrimary (0xF2) strokes on
+                // that same near-neutral bar; the gradient capture has nothing this pale.
+                else if (grey && c.R > 150)
+                    light++;
             }
             if (neutral > 30)
                 bandRows++;
+            // Only the wide rows: the toolbar capsule is ~168 px of chrome across, while the
+            // zoom chip below it is ~40, and counting the chip's own text would let the bar's
+            // chips be empty and still pass.
+            if (neutral > 100)
+                glyphPixels += light;
         }
         Assert.True(bandRows > 8,
             $"{path} carries no toolbar band ({bandRows} rows of near-neutral chrome) - " +
             "the render painted a bare capture.");
+        if (glyphsRasterise)
+        {
+            Assert.True(glyphPixels > 40,
+                $"{path} has a toolbar band with only {glyphPixels} glyph pixels in it - " +
+                "the chips rendered empty.");
+        }
     }
 
     [Fact]

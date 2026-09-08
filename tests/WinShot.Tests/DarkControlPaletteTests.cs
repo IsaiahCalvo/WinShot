@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -12,6 +13,60 @@ namespace WinShot.Tests;
 
 public class DarkControlPaletteTests
 {
+    /// <summary>
+    /// DarkContextMenu and DarkMenuItem are KEYED, not implicit, so a WPF menu built in code
+    /// and left unstyled falls back to Aero2: a white popup with black text and the system
+    /// highlight, hanging inside a dark window. The "Copy as" format list shipped that way and
+    /// nothing caught it, because every other code-built menu happened to apply both by hand.
+    /// </summary>
+    [Fact]
+    public void EveryCodeBuiltMenu_CarriesTheKeyedDarkStyles()
+    {
+        string root = FindRepoDirectory("src", "WinShot");
+        var unstyled = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
+                file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+                continue;
+
+            string[] lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].Contains("new ContextMenu", StringComparison.Ordinal) &&
+                    !lines[i].Contains("new MenuItem", StringComparison.Ordinal))
+                    continue;
+
+                // The style is set in the object initializer, which is this line or the few
+                // that close it.
+                string block = string.Join(' ', lines.Skip(i).Take(8));
+                int close = block.IndexOf("};", StringComparison.Ordinal);
+                if (close >= 0)
+                    block = block[..close];
+                if (!block.Contains("Style", StringComparison.Ordinal))
+                    unstyled.Add($"{Path.GetFileName(file)}:{i + 1} {lines[i].Trim()}");
+            }
+        }
+
+        Assert.True(unstyled.Count == 0,
+            "code-built menus with no Style, so they render in stock Aero2 chrome: " +
+            string.Join("; ", unstyled));
+    }
+
+    private static string FindRepoDirectory(params string[] parts)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            string candidate = Path.Combine(new[] { directory.FullName }.Concat(parts).ToArray());
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        throw new DirectoryNotFoundException($"Could not find repository directory: {Path.Combine(parts)}");
+    }
+
     // Regression: Accent's red channel is 0x0A; the pressed state darkens by 12,
     // which used to produce red = -2 and crash inside OnPaint — WinForms then
     // replaces the control with a permanent red-X placeholder (Isaiah's Start button).

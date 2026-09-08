@@ -499,7 +499,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(pt.X - CrosshairBandHalf, mon.Top, CrosshairBandHalf * 2, mon.Height));
         InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - CrosshairBandHalf, mon.Width, CrosshairBandHalf * 2));
         InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
-        if (InstructionRectAt(pt) is SD.Rectangle instruction)
+        if (_instructionAlpha > 0d && InstructionRectAt(pt) is SD.Rectangle instruction)
             InvalidateScreenRect(instruction);
     }
 
@@ -739,39 +739,49 @@ public sealed class FastRegionSelectorDialog : WF.Form
     }
 
     /// <summary>
-    /// Retires the instruction pill when the drag it was asking for begins. The follow tick
-    /// is already repainting around the cursor at ~66 fps while a selection is open, so the
-    /// ramp only has to move the value and ask for the pill's own rect back.
+    /// Retires the instruction pill when the drag it was asking for begins.
     /// </summary>
-    private void FadeInstructionOut()
-    {
-        if (_options.Instruction is null || _instructionAlpha <= 0d || _instructionFade is not null)
-            return;
-
-        _instructionFade = Core.Motion.Run(Core.Motion.QuickMs, Core.Motion.EaseInCubic,
-            p =>
-            {
-                _instructionAlpha = 1d - p;
-                InvalidateInstructionRegion();
-            },
-            () => { _instructionFade?.Dispose(); _instructionFade = null; });
-    }
+    private void FadeInstructionOut() => RampInstruction(0d);
 
     /// <summary>Brings the instruction pill up as the selector opens, mirroring
     /// <see cref="FadeInstructionOut"/>.</summary>
-    private void FadeInstructionIn()
+    private void FadeInstructionIn() => RampInstruction(1d);
+
+    /// <summary>
+    /// Ramps the instruction pill's alpha from wherever it currently is to
+    /// <paramref name="target"/>. Always ramps from the live value and always cancels
+    /// whatever was in flight: a drag begun inside the entrance tween reverses it instead of
+    /// being ignored, and with animations off Motion.Run settles inline. A live handle is
+    /// never used as a "a ramp is running" test — with animations off Motion.Run invokes the
+    /// completion inline, before the assignment, so such a handle is never null again.
+    /// The follow tick is already repainting around the cursor at ~66 fps while a selection
+    /// is open, so a frame only has to move the value and ask for the pill's own rect back.
+    /// </summary>
+    private void RampInstruction(double target)
     {
         _instructionFade?.Dispose();
         _instructionFade = null;
-        if (_options.Instruction is null) return;
+        if (_options.Instruction is null)
+        {
+            _instructionAlpha = 0d;
+            return;
+        }
 
-        _instructionFade = Core.Motion.Run(Core.Motion.QuickMs, Core.Motion.EaseOutCubic,
+        double from = _instructionAlpha;
+        if (Math.Abs(target - from) < 0.001d)
+        {
+            _instructionAlpha = target;
+            InvalidateInstructionRegion();
+            return;
+        }
+
+        _instructionFade = Core.Motion.Run(Core.Motion.QuickMs,
+            target > from ? Core.Motion.EaseOutCubic : Core.Motion.EaseInCubic,
             p =>
             {
-                _instructionAlpha = p;
+                _instructionAlpha = from + ((target - from) * p);
                 InvalidateInstructionRegion();
-            },
-            () => { _instructionFade?.Dispose(); _instructionFade = null; });
+            });
     }
 
     /// <summary>Screen rect the instruction pill occupies, so the fade repaints only it.</summary>
@@ -786,7 +796,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
     /// well outside the crosshair band, so without it a moving cursor would smear the pill.</summary>
     private SD.Rectangle? InstructionRectAt(SD.Point pt)
     {
-        if (_options.Instruction is not string instruction || _instructionAlpha <= 0d)
+        if (_options.Instruction is not string instruction)
             return null;
         SD.Size pill = SelectorChrome.MeasureLabel(instruction);
         return new SD.Rectangle(
@@ -1079,7 +1089,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
                     // selection the pill would land on Cancel — so the readout rides the
                     // selection's top-right, flipped just inside when the region touches the
                     // monitor top.
-                    SD.Size pill = SelectorChrome.MeasureLabel(sizeText);
+                    SD.Size pill = SelectorChrome.MeasureLabel(g, sizeText);
                     int pillTop = local.Top - pill.Height - 8;
                     if (pillTop < 0) pillTop = local.Top + 8;
                     at = new SD.Point(Math.Max(0, local.Right - pill.Width), pillTop);
@@ -1124,7 +1134,7 @@ public sealed class FastRegionSelectorDialog : WF.Form
             cursorOnThisSurface && _pendingScreen is null)
         {
             SD.Point cursorLocal = ToLocal(_currentScreen, monitorBounds);
-            SD.Size pill = SelectorChrome.MeasureLabel(instruction);
+            SD.Size pill = SelectorChrome.MeasureLabel(g, instruction);
             SelectorChrome.DrawLabel(g, clientSize, instruction,
                 cursorLocal.X - (pill.Width / 2),
                 cursorLocal.Y - InstructionRise(pill.Height) - pill.Height,

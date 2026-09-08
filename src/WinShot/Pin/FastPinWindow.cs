@@ -111,7 +111,6 @@ public sealed class FastPinWindow : WF.Form
     private IDisposable? _lockFade;
     /// <summary>An extra alpha multiplier for the chips alone, so the ones leaving or arriving
     /// in a lock swap fade without taking the bar they sit in with them.</summary>
-    private double _chipAlpha = 1d;
     /// <summary>The ramp behind Toggle pins visibility. The window's own opacity is what
     /// moves -- a pin can carry a user-chosen opacity from Ctrl+wheel, so the value to come
     /// back to is held rather than assumed.</summary>
@@ -130,6 +129,7 @@ public sealed class FastPinWindow : WF.Form
     /// it. The resample now happens once per size and every frame blits the copy.</summary>
     private SD.Bitmap? _scaled;
     private SD.Size _scaledFor;
+    private SD.Rectangle _scaledBand;
 
     /// <summary>A locked pin answers HTTRANSPARENT, so it gets no WM_MOUSELEAVE. This runs
     /// only while the pointer is over a locked pin and stops as soon as it is not.</summary>
@@ -448,16 +448,17 @@ public sealed class FastPinWindow : WF.Form
         // PinWindowGeometry.DrawBorder's job, and the shadow is what separates a pin from
         // the desktop.
         var imageRect = new SD.Rectangle(0, 0, Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
-        SD.Bitmap surface = ScaledImage(imageRect.Size);
+        SD.Rectangle band = ResampleBand(imageRect, e.ClipRectangle);
+        SD.Bitmap surface = ScaledImage(imageRect.Size, band);
         if (_imageAlpha >= 0.999d)
         {
-            e.Graphics.DrawImageUnscaled(surface, imageRect.Location);
+            e.Graphics.DrawImageUnscaled(surface, band.Location);
         }
         else
         {
             // Alpha matrix, not Form.Opacity: the whole point is that the chips painted over
             // this stay fully opaque, and window opacity would take them down with it.
-            DrawWithAlpha(e.Graphics, surface, imageRect, _imageAlpha);
+            DrawWithAlpha(e.Graphics, surface, band, _imageAlpha);
         }
 
         if (_border)
@@ -541,13 +542,12 @@ public sealed class FastPinWindow : WF.Form
     private static Func<double, double> ExitAware(double from, double target) =>
         target >= from ? Motion.EaseOutCubic : Motion.EaseInCubic;
 
-    /// <summary>Scales a chrome colour by the current fade amount.</summary>
-    private SD.Color Fade(SD.Color color) =>
-        SD.Color.FromArgb((int)Math.Clamp(Math.Round(color.A * ChromeAmount), 0d, 255d), color);
-
-    /// <summary>The alpha everything currently being drawn should be painted at: the hover
-    /// fade, times the chip multiplier while a lock swap is mid-dissolve.</summary>
-    private double ChromeAmount => _chromeAlpha * _chipAlpha;
+    /// <summary>Scales a chrome colour by the hover fade, times <paramref name="chip"/> --
+    /// the per-chip multiplier a lock swap dissolves with. Passed down rather than parked in a
+    /// field for the length of a paint: a throw mid-toolbar used to leave the field stale for
+    /// every later frame.</summary>
+    private SD.Color Fade(SD.Color color, double chip = 1d) =>
+        SD.Color.FromArgb((int)Math.Clamp(Math.Round(color.A * _chromeAlpha * chip), 0d, 255d), color);
 
     private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, DeviceDpi);
 
@@ -574,10 +574,54 @@ public sealed class FastPinWindow : WF.Form
         return fits == offered.Length ? offered : offered[(offered.Length - fits)..];
     }
 
-    private int BarWidth(int count) =>
-        count * Ui(ToolbarButtonSizeLogical) +
-        (count - 1) * Ui(ToolbarButtonGapLogical) +
-        Ui(ToolbarPadLogical) * 2;
+    private int BarWidth(int count)
+    {
+        BarMetrics m = Metrics;
+        return (count * m.Button) + ((count - 1) * m.Gap) + (m.Pad * 2);
+    }
+
+    /// <summary>The chip size, gaps and insets the bar is drawn with right now.</summary>
+    private readonly record struct BarMetrics(int Button, int Gap, int Pad, int Top);
+
+    /// <summary>
+    /// The bar's metrics for the pin's current size. A pin can be smaller than the bar's
+    /// natural footprint -- a pinned status-bar strip is 20 px tall, and the bar is 40 device
+    /// px at 96 dpi, 60 at 150 % -- and the bar used to be laid out at its full size anyway,
+    /// so every chip was painted below the client and clipped away. Unclickable too, because
+    /// HitTestButton reads the same rects, which on a locked pin (HTTRANSPARENT everywhere a
+    /// chip is not) left no way out of the pin at all.
+    ///
+    /// So the bar shrinks the way it trims: the top inset goes first, then the padding, then
+    /// the chip itself, down to whatever square the client can hold. The single chip
+    /// <see cref="FitToWidth"/> always keeps is then guaranteed to fit -- the floor it stops
+    /// at is only meaningful if that chip is reachable.
+    /// </summary>
+    private BarMetrics Metrics
+    {
+        get
+        {
+            int button = Ui(ToolbarButtonSizeLogical);
+            int gap = Ui(ToolbarButtonGapLogical);
+            int pad = Ui(ToolbarPadLogical);
+            int top = Ui(ToolbarTopLogical);
+            int height = Math.Max(1, ClientSize.Height);
+            // One chip plus its padding has to fit both ways: the bar is as tall as it is
+            // deep, so the largest square the client holds is the ceiling for both.
+            int box = Math.Max(1, Math.Min(Math.Max(1, ClientSize.Width), height));
+
+            if (button + (pad * 2) > box)
+                pad = Math.Max(0, (box - button) / 2);
+            if (button + (pad * 2) > box)
+            {
+                pad = 0;
+                button = box;
+            }
+            if (top + button + (pad * 2) > height)
+                top = Math.Max(0, height - button - (pad * 2));
+
+            return new BarMetrics(button, gap, pad, top);
+        }
+    }
 
     // Derived from the button list rather than written out, so inserting an action cannot
     // silently turn "Lock and Close" into something else.
@@ -600,12 +644,13 @@ public sealed class FastPinWindow : WF.Form
 
     private SD.Rectangle BarRect(int width)
     {
-        int height = Ui(ToolbarButtonSizeLogical) + Ui(ToolbarPadLogical) * 2;
-        // Clamped both ways: centred when it fits, and never started so far left that its
-        // right edge leaves the client.
+        BarMetrics m = Metrics;
+        int height = m.Button + (m.Pad * 2);
+        // Clamped both ways, on both axes: centred when it fits, and never started so far
+        // left or so far down that its far edge leaves the client.
         int slack = Math.Max(0, ClientSize.Width - width);
         int x = Math.Clamp((ClientSize.Width - width) / 2, 0, slack);
-        int y = Ui(ToolbarTopLogical);
+        int y = Math.Clamp(m.Top, 0, Math.Max(0, ClientSize.Height - height));
         return new SD.Rectangle(x, y, width, height);
     }
 
@@ -623,12 +668,10 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     private SD.Rectangle ChipBounds(SD.Rectangle bar, int index)
     {
-        int buttonSize = Ui(ToolbarButtonSizeLogical);
-        int gap = Ui(ToolbarButtonGapLogical);
-        int pad = Ui(ToolbarPadLogical);
+        BarMetrics m = Metrics;
         int fromEnd = _toolbarButtons.Count - 1 - index;
-        int x = bar.Right - pad - buttonSize - (fromEnd * (buttonSize + gap));
-        return new SD.Rectangle(x, bar.Top + pad, buttonSize, buttonSize);
+        int x = bar.Right - m.Pad - m.Button - (fromEnd * (m.Button + m.Gap));
+        return new SD.Rectangle(x, bar.Top + m.Pad, m.Button, m.Button);
     }
 
     private void DrawToolbar(SD.Graphics g)
@@ -650,8 +693,8 @@ public sealed class FastPinWindow : WF.Form
         double arriving = _lockSwapFrom is null ? 1d : Math.Max(0d, (_lockSwap * 2d) - 1d);
         foreach (int i in current)
         {
-            _chipAlpha = _lockSwapFrom is null || _lockSwapFrom.Contains(i) ? 1d : arriving;
-            if (_chipAlpha <= 0.004d)
+            double chip = _lockSwapFrom is null || _lockSwapFrom.Contains(i) ? 1d : arriving;
+            if (chip <= 0.004d)
                 continue;
             DrawButton(
                 g,
@@ -659,13 +702,14 @@ public sealed class FastPinWindow : WF.Form
                 IconAssetFor(i),
                 i == _hoverButton,
                 i == _pressedButton,
-                i == _focusButton && ContainsFocus);
+                i == _focusButton && ContainsFocus,
+                chip);
         }
 
         if (_lockSwapFrom is not null)
         {
-            _chipAlpha = 1d - Math.Min(1d, _lockSwap * 2d);
-            if (_chipAlpha > 0.004d)
+            double leavingAlpha = 1d - Math.Min(1d, _lockSwap * 2d);
+            if (leavingAlpha > 0.004d)
             {
                 // Clipped to the bar: the chips on their way out are anchored to an edge that
                 // is moving past them, and without this they would spill onto the image.
@@ -674,13 +718,12 @@ public sealed class FastPinWindow : WF.Form
                 foreach (int i in _lockSwapFrom)
                 {
                     if (!current.Contains(i))
-                        DrawButton(g, ChipBounds(bar, i), IconAssetFor(i), false, false, false);
+                        DrawButton(g, ChipBounds(bar, i), IconAssetFor(i), false, false, false, leavingAlpha);
                 }
                 g.Restore(state);
             }
         }
 
-        _chipAlpha = 1d;
         DrawZoomChip(g, bar);
     }
 
@@ -765,24 +808,28 @@ public sealed class FastPinWindow : WF.Form
         return _toolbarButtons[index].IconAsset;
     }
 
-    private void DrawButton(SD.Graphics g, SD.Rectangle bounds, string iconAsset, bool hot, bool pressed, bool focused)
+    private void DrawButton(SD.Graphics g, SD.Rectangle bounds, string iconAsset, bool hot,
+        bool pressed, bool focused, double chip = 1d)
     {
         // Rest = dim glyph, hover = HoverFill circle, pressed = that same wash with the press
         // shade stacked over it — the order Theme.xaml's Hover/Press layers composite in, so
         // the chips press the same direction as every other control.
         if (hot || pressed)
         {
-            using var hover = new SD.SolidBrush(Fade(ThemePalette.HoverFill));
+            using var hover = new SD.SolidBrush(Fade(ThemePalette.HoverFill, chip));
             g.FillEllipse(hover, bounds);
         }
         if (pressed)
         {
-            using var press = new SD.SolidBrush(Fade(ThemePalette.PressedShade));
+            using var press = new SD.SolidBrush(Fade(ThemePalette.PressedShade, chip));
             g.FillEllipse(press, bounds);
         }
 
         SD.Color glyphColor = hot || pressed ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;
-        SD.Bitmap? icon = SvgIcons.Get(iconAsset, Ui(ToolbarIconSizeLogical), glyphColor);
+        // Never wider than the chip that holds it: on a pin too small for a full-size bar the
+        // chip shrinks, and a fixed 16 px glyph would spill over its own hover circle.
+        int iconSize = Math.Max(1, Math.Min(Ui(ToolbarIconSizeLogical), bounds.Width - Ui(4)));
+        SD.Bitmap? icon = SvgIcons.Get(iconAsset, iconSize, glyphColor);
         if (icon is not null)
         {
             var at = new SD.Rectangle(
@@ -790,13 +837,13 @@ public sealed class FastPinWindow : WF.Form
                 bounds.Top + (bounds.Height - icon.Height) / 2,
                 icon.Width,
                 icon.Height);
-            DrawFaded(g, icon, at);
+            DrawFaded(g, icon, at, chip);
         }
 
         if (focused)
         {
             // Dotted ring following the circular button, like the card's DrawFocus.
-            using var pen = new SD.Pen(Fade(ThemePalette.TextPrimary), 1)
+            using var pen = new SD.Pen(Fade(ThemePalette.TextPrimary, chip), 1)
             {
                 DashStyle = SD.Drawing2D.DashStyle.Dot,
             };
@@ -825,39 +872,76 @@ public sealed class FastPinWindow : WF.Form
 
     /// <summary>Draws a glyph at the chrome's current fade amount. TextureBrush and
     /// DrawImageUnscaled have no alpha knob, so the multiply goes through a colour matrix.</summary>
-    private void DrawFaded(SD.Graphics g, SD.Bitmap icon, SD.Rectangle at)
+    private void DrawFaded(SD.Graphics g, SD.Bitmap icon, SD.Rectangle at, double chip = 1d)
     {
-        if (ChromeAmount >= 0.999d)
+        double amount = _chromeAlpha * chip;
+        if (amount >= 0.999d)
         {
             g.DrawImageUnscaled(icon, at.Left, at.Top);
             return;
         }
 
-        DrawWithAlpha(g, icon, at, ChromeAmount);
+        DrawWithAlpha(g, icon, at, amount);
+    }
+
+    /// <summary>Roughly a 4K screen. A pin never shows more than a monitor's worth of itself
+    /// at once, so this is the most a resample can ever be worth.</summary>
+    private const int ResampleBudgetPx = 8_000_000;
+
+    /// <summary>
+    /// The slice of the client worth resampling for this paint. The client is unbounded --
+    /// PinInteraction.MaxScale over a 32,000 px scrolling capture is a 96,000 px tall window,
+    /// a 1.1 GB copy at 32bpp -- while the part of it on screen is never more than a monitor.
+    /// Windows already clips the update region to the visible part, so the paint's own clip
+    /// rect is that slice; it is snapped out to a 64 px grid so the small chrome repaints
+    /// land inside the band the last full paint built instead of resampling a new one every
+    /// frame of the hover fade.
+    /// </summary>
+    private static SD.Rectangle ResampleBand(SD.Rectangle client, SD.Rectangle clip)
+    {
+        if ((long)client.Width * client.Height <= ResampleBudgetPx)
+            return client;
+
+        static int Down(int v) => Math.Max(0, (v / 64) * 64);
+        static int Up(int v) => ((v + 63) / 64) * 64;
+
+        int left = Down(clip.Left);
+        int top = Down(clip.Top);
+        SD.Rectangle band = SD.Rectangle.Intersect(
+            client, new SD.Rectangle(left, top, Up(clip.Right) - left, Up(clip.Bottom) - top));
+        if (band.Width <= 0 || band.Height <= 0)
+            band = SD.Rectangle.Intersect(client, new SD.Rectangle(0, 0, 64, 64));
+        if ((long)band.Width * band.Height > ResampleBudgetPx)
+            band.Height = Math.Max(1, ResampleBudgetPx / Math.Max(1, band.Width));
+        return band;
     }
 
     /// <summary>
-    /// The pinned image at the client size, resampled at most once per size. Returns _image
-    /// itself at 1:1, so a pin at natural size holds no second copy of its bitmap.
+    /// <paramref name="band"/> of the pinned image drawn at the client size, resampled at most
+    /// once per (size, band). Returns _image itself at 1:1, so a pin at natural size holds no
+    /// second copy of its bitmap. The band is positioned by translating the full-size draw, not
+    /// by scaling a crop, so it samples exactly as a whole-client resample would and moving the
+    /// band cannot leave a seam.
     /// </summary>
-    private SD.Bitmap ScaledImage(SD.Size size)
+    private SD.Bitmap ScaledImage(SD.Size size, SD.Rectangle band)
     {
-        if (size == _image.Size)
+        if (size == _image.Size && band.Location == SD.Point.Empty && band.Size == size)
             return _image;
-        if (_scaled is not null && _scaledFor == size)
+        if (_scaled is not null && _scaledFor == size && _scaledBand == band)
             return _scaled;
 
-        var copy = new SD.Bitmap(size.Width, size.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
+        var copy = new SD.Bitmap(band.Width, band.Height, SD.Imaging.PixelFormat.Format32bppPArgb);
         using (SD.Graphics g = SD.Graphics.FromImage(copy))
         {
             g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.HighQuality;
-            g.DrawImage(_image, new SD.Rectangle(SD.Point.Empty, size));
+            g.DrawImage(_image, new SD.Rectangle(-band.X, -band.Y, size.Width, size.Height));
         }
 
         _scaled?.Dispose();
         _scaled = copy;
         _scaledFor = size;
+        _scaledBand = band;
         return copy;
     }
 
@@ -1219,7 +1303,10 @@ public sealed class FastPinWindow : WF.Form
         {
             // Clicking the pencil and getting nothing, with nothing said, is the one failure
             // mode this chip has; every other new action in the app pairs success with a line.
-            ShowReadout("The editor is not available", PointToClient(WF.Cursor.Position));
+            // Through the toast, not the zoom readout: that pill is neutral chrome held for
+            // 800 ms, which is the confirmation dwell, and an error gets the error colour and
+            // the long one.
+            App.Toast("Pin", "The editor is not available.", severity: ToastSeverity.Error);
             Log.Error("A pin's Edit chip fired with no editor handler registered");
             return;
         }
@@ -1231,7 +1318,8 @@ public sealed class FastPinWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Could not open the pinned screenshot in the editor", ex);
-            ShowReadout("Could not open the editor", PointToClient(WF.Cursor.Position));
+            App.Toast("Pin", "Couldn't open the editor. The pin is unchanged.",
+                severity: ToastSeverity.Error);
         }
     }
 

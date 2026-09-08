@@ -67,12 +67,38 @@ internal static class SelectorChrome
     }
 
     /// <summary>The rendered size of the label pill for <paramref name="text"/>, for callers
-    /// that place the pill by an edge other than its top-left.</summary>
-    public static SD.Size MeasureLabel(string text)
+    /// that place the pill by an edge other than its top-left. Pass the Graphics the pill will
+    /// actually be drawn on wherever there is one: the font is in points, so a measurement
+    /// taken on a different DC can disagree by a whole DPI step and decentre the pill by half
+    /// the difference. Only the invalidation path, which has no paint Graphics of its own,
+    /// falls back to the screen DC — and that rect carries 4 px of slack on every side.</summary>
+    public static SD.Size MeasureLabel(string text) => MeasureLabel(null, text);
+
+    public static SD.Size MeasureLabel(SD.Graphics? g, string text)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+        // The instruction pill is re-measured from the ~66 fps cursor-follow invalidation for
+        // as long as it is up, and its string never changes; one cache entry keyed on the
+        // string and the DC's DPI keeps that tick from building a Graphics and a Font.
+        if (g is not null) return CachedPillSize(g, text);
+
+        if (_screenDpi is float dpi && _pillKey == (text, dpi)) return _pillSize;
         using SD.Graphics measuring = SD.Graphics.FromHwnd(IntPtr.Zero);
-        return PillSize(measuring, font, text);
+        _screenDpi = measuring.DpiY;
+        return CachedPillSize(measuring, text);
+    }
+
+    private static (string Text, float Dpi) _pillKey = (string.Empty, 0f);
+    private static SD.Size _pillSize;
+    private static float? _screenDpi;
+
+    private static SD.Size CachedPillSize(SD.Graphics g, string text)
+    {
+        var key = (text, g.DpiY);
+        if (_pillKey == key) return _pillSize;
+        using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
+        _pillSize = PillSize(g, font, text);
+        _pillKey = key;
+        return _pillSize;
     }
 
     /// <summary>The pill's rect for a string, measured through the renderer that fills it.
@@ -107,7 +133,7 @@ internal static class SelectorChrome
         if (amount <= 0d) return;
 
         using var font = ThemePalette.UiFont(ThemePalette.TextBodyPt, SD.FontStyle.Bold);
-        SD.Size pill = PillSize(g, font, text);
+        SD.Size pill = CachedPillSize(g, text);
         int w = pill.Width;
         int h = pill.Height;
         int left = Math.Clamp(x, 0, Math.Max(0, clientSize.Width - w));

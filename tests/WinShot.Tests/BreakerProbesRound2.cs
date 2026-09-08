@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -318,7 +318,7 @@ public class BreakerProbesRound2
         typeof(SelectorChrome).GetMethod("DrawLabel", BindingFlags.Static | BindingFlags.Public)!
             .Invoke(null, new object?[] { g, new SD.Size(1400, 300), text, 200, 120, 1d });
         var pill = (SD.Size)typeof(SelectorChrome)
-            .GetMethod("MeasureLabel", BindingFlags.Static | BindingFlags.Public)!
+            .GetMethod("MeasureLabel", BindingFlags.Static | BindingFlags.Public, new[] { typeof(string) })!
             .Invoke(null, new object?[] { text })!;
 
         var rows = new List<int>();

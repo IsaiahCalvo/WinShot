@@ -229,7 +229,7 @@
                                                  hex box instead and the whole feature was
                                                  mouse-only. -->
                                             <Button x:Name="ColorPickerPreviewButton" Grid.Column="0"
-                                                    Style="{StaticResource ColorSwatchButton}" Margin="0"
+                                                    Style="{StaticResource ColorSwatchButton}" Margin="2,0,0,0"
                                                     Cursor="Hand" Click="OnColorPickerPreviewClick"
                                                     ToolTip="Copy this color in another format"
                                                     AutomationProperties.Name="Copy as"

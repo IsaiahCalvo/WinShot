@@ -457,8 +457,16 @@ public sealed class FastQuickActionsWindow : WF.Form
         _tallScaled = scaled;
         _tallScaledVersion = version;
         _tallScaledSize = bounds.Size;
-        if (_hovering)
-            ShowTallCapturePreview(bounds);
+        if (!_hovering)
+            return;
+
+        // Re-read the placement: another capture arriving while the pool thread resampled
+        // restacks the cards, and the bounds this started with are the old card's.
+        SD.Rectangle at = TallCapturePreviewWindow.PlaceFor(_image, Bounds, _dpi) is SD.Rectangle now
+            && now.Size == bounds.Size
+            ? now
+            : bounds;
+        ShowTallCapturePreview(at);
     }
 
     private void ShowTallCapturePreview(SD.Rectangle bounds)
@@ -495,7 +503,13 @@ public sealed class FastQuickActionsWindow : WF.Form
         catch (Exception ex)
         {
             Log.Error("Tall-capture preview failed to close (non-fatal)", ex);
-            if (ReferenceEquals(_tallPreview, preview))
+        }
+        finally
+        {
+            // Cleared here, not only from FormClosed: FadeOutAndClose's already-hidden branch
+            // closes and disposes a form that never raised it, which used to leave this field
+            // holding a disposed window until the next hover noticed.
+            if (preview is not null && preview.IsDisposed && ReferenceEquals(_tallPreview, preview))
                 _tallPreview = null;
         }
     }
