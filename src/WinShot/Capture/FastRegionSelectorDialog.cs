@@ -326,8 +326,11 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             NoteFrozenSnapshotFailed();
             if (_mode == SelectorMode.Measure)
             {
-                App.Toast("Measure", "The screen could not be read, so there is nothing to measure.",
-                    severity: ToastSeverity.Error);
+                // Through MeasureToast, so this lands on the monitor being measured like
+                // every other message the mode raises — a failure reported on the primary's
+                // tray corner is a failure reported on a screen the user is not looking at.
+                MeasureToast("The screen could not be read, so there is nothing to measure.",
+                    ToastSeverity.Error);
             }
             return;
         }
@@ -775,7 +778,13 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
 
         if (_mode == SelectorMode.Measure)
         {
-            HandleMeasureMouseMove();
+            // A drop-down does not stop WM_TIMER, so the 8 ms follow tick keeps arriving
+            // while the menu is up. Its rows already act on a snapshot of where the user
+            // right-clicked; the picture holds still with them, or the reticle, the live
+            // pill and the contrast readout keep re-reading pixels BEHIND the menu (which is
+            // not in the frozen snapshot) as the pointer walks down the rows.
+            if (MeasureMenuHandle == IntPtr.Zero)
+                HandleMeasureMouseMove();
             return;
         }
 
@@ -1165,7 +1174,12 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (clip.Width < 1 || clip.Height < 1) return;
 
         var state = g.Save();
-        g.SetClip(clip);
+        // Intersect, never Replace: SetClip(Rectangle) defaults to CombineMode.Replace, which
+        // throws away the update region the paint was asked for and re-blits the whole run at
+        // full brightness. It never reaches the screen (the back buffer is rendered through
+        // BeginPaint's clip), but it corrupts the buffer for every caller — and Area and
+        // Window mode share this helper.
+        g.IntersectClip(clip);
         DrawFrozenSlice(g, monitorBounds);
         g.Restore(state);
     }
@@ -1319,8 +1333,10 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
 
         if (_mode == SelectorMode.Measure)
         {
-            // Functional data never animates: an easing measurement reads as imprecise.
-            // The glide is untouched for Area and Window, where it is exactly right.
+            // A guard rail, not a live path: both callers already return before they reach
+            // here in Measure mode. It stands so that the rule survives the next caller —
+            // functional data never animates, because an easing measurement reads as
+            // imprecise. The glide is untouched for Area and Window, where it is right.
             _hoverTween.Stop();
             InvalidateAllSurfaces();
         }
@@ -1404,11 +1420,24 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     private static int Distance(SD.Point a, SD.Point b) =>
         Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
 
-    /// <summary>Every window handle the selector owns, back to front - the set
-    /// <see cref="SelectorForeground.KeepOnTop"/> re-raises together.</summary>
+    /// <summary>
+    /// Every window handle the selector owns, back to front - the set
+    /// <see cref="SelectorForeground.KeepOnTop"/> re-raises together.
+    ///
+    /// The overlay's own transient chrome goes on the end, above the panes. KeepOnTop treats
+    /// any top-level window under the cursor that is not in this list as an intruder to be
+    /// buried, and Measure mode is the first surface in the app to raise a toast and open a
+    /// drop-down OVER its own live overlay: without them here, parking the pointer on a
+    /// measure toast, or simply opening the right-click menu (which appears under the
+    /// pointer by definition), makes the next 8 ms follow tick re-raise every pane above it.
+    /// The menu goes on stealing input while invisible under an opaque pane, and the mode's
+    /// failure messages - the clipboard is busy, the screen could not be read - are shown for
+    /// one frame and then covered for the rest of their dwell. The All-In-One selector solves
+    /// the same problem for its toolbar the same way.
+    /// </summary>
     private List<IntPtr> SurfaceHandles()
     {
-        var handles = new List<IntPtr>(_panes.Count + 1);
+        var handles = new List<IntPtr>(_panes.Count + 3);
         if (IsHandleCreated)
             handles.Add(Handle);
         foreach (var pane in _panes)
@@ -1416,8 +1445,16 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             if (!pane.IsDisposed && pane.IsHandleCreated)
                 handles.Add(pane.Handle);
         }
+        if (ToastWindow.LiveHandle is IntPtr toast && toast != IntPtr.Zero)
+            handles.Add(toast);
+        if (MeasureMenuHandle is IntPtr menu && menu != IntPtr.Zero)
+            handles.Add(menu);
         return handles;
     }
+
+    /// <summary>Render seam: the set KeepOnTop is asked about, so a test can prove the
+    /// mode's own toast and menu are not in the "cover me" set.</summary>
+    internal IReadOnlyList<IntPtr> SurfaceHandlesForRender() => SurfaceHandles();
 
     private bool IsPaneHandle(IntPtr handle)
     {

@@ -31,6 +31,17 @@ public sealed class ToastWindow : WF.Form
     /// is deliberate, so two different messages never cross-dissolve into each other.
     /// </summary>
     private static ToastWindow? _live;
+
+    /// <summary>
+    /// The window handle of the toast currently on screen, or zero. A full-screen overlay
+    /// that re-raises itself over anything covering it (see
+    /// <c>SelectorForeground.KeepOnTop</c>) has to know its own confirmations are not
+    /// intruders — the toast is TopMost and hit-testable, so the pointer resting on it reads
+    /// as "something covered the overlay" and the overlay buries the message it just raised.
+    /// </summary>
+    internal static IntPtr LiveHandle =>
+        _live is { IsDisposed: false } toast && toast.IsHandleCreated ? toast.Handle : IntPtr.Zero;
+
     private readonly WF.Timer _dismiss = new();
     private readonly SD.Point? _anchor;
 

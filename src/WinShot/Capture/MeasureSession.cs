@@ -44,9 +44,16 @@ internal sealed class MeasureSession
     /// <summary>Horizontal guides, by screen Y.</summary>
     public IReadOnlyList<int> GuidesY => _guidesY;
 
+    /// <summary>What the last Escape emptied, so Backspace can put it back. Escape is exactly
+    /// the slip the Backspace comment argues against — one press and an hour of measuring is
+    /// gone with nothing left in <see cref="_placed"/> to undo.</summary>
+    private (List<MeasureHold> Holds, List<int> X, List<int> Y,
+        List<(bool Guide, bool Vertical, int At)> Placed)? _cleared;
+
     public void Reset()
     {
         Clear();
+        _cleared = null;
         UseApca = false;
     }
 
@@ -193,7 +200,24 @@ internal sealed class MeasureSession
     {
         if (!HasAnything)
             return false;
+        _cleared = (new List<MeasureHold>(_holds), new List<int>(_guidesX),
+            new List<int>(_guidesY), new List<(bool, bool, int)>(_placed));
         Clear();
+        return true;
+    }
+
+    /// <summary>Puts back what the last Escape emptied. False when there is nothing to put
+    /// back, or when the canvas is not empty — a restore is an undo of the clear, not a merge
+    /// on top of whatever has been measured since.</summary>
+    public bool RestoreCleared()
+    {
+        if (_cleared is not (var holds, var x, var y, var placed) || HasAnything)
+            return false;
+        _holds.AddRange(holds);
+        _guidesX.AddRange(x);
+        _guidesY.AddRange(y);
+        _placed.AddRange(placed);
+        _cleared = null;
         return true;
     }
 

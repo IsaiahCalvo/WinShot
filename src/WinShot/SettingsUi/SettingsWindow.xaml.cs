@@ -333,7 +333,10 @@ public partial class SettingsWindow : Window
         // The wheel writes any value in 0-255 and the combo only offers three; remember what
         // was loaded so a session that never touched this row does not snap a tuned 45 back
         // to 30 the next time anything else in Settings is saved.
-        _loadedTolerance = s.MeasureTolerance;
+        // Clamped on the way in: the untouched-row path writes this value straight back, so a
+        // hand-edited or corrupted settings.json holding -5 or 9999 would keep it forever.
+        // Nothing at runtime reads it unclamped, but the stored file should still be valid.
+        _loadedTolerance = Math.Clamp(s.MeasureTolerance, 0, 255);
         SelectByTag(MeasureToleranceCombo, NearestTolerancePreset(s.MeasureTolerance), fallbackIndex: 1);
 
         // Annotate

@@ -110,6 +110,48 @@ public class MeasureSessionTests
     }
 
     [Fact]
+    public void BackspaceAfterAnEscapePutsTheWholeClearedCanvasBack()
+    {
+        // Backspace exists because an hour of measuring should not be one slip away from
+        // gone — and Escape IS that slip: it takes every hold and every guide at once and
+        // leaves nothing in the undo stack to reach them by.
+        var session = new MeasureSession();
+        session.Hold(new Rectangle(10, 10, 100, 40), horizontal: true, new Point(60, 30), 96);
+        session.AddGuideX(400);
+        session.AddGuideY(120);
+
+        Assert.True(session.ClearOnEscape());
+        Assert.False(session.HasAnything);
+        Assert.False(session.RemoveLast(), "there is nothing left to undo one at a time");
+
+        Assert.True(session.RestoreCleared());
+        Assert.Single(session.Holds);
+        Assert.Equal(new[] { 400 }, session.GuidesX);
+        Assert.Equal(new[] { 120 }, session.GuidesY);
+        // The order the two were interleaved in survives, so Backspace keeps working after.
+        Assert.True(session.RemoveLast());
+        Assert.Equal(new[] { 400 }, session.GuidesX);
+        Assert.Empty(session.GuidesY);
+    }
+
+    [Fact]
+    public void ARestoreIsAnUndoOfTheClearRatherThanAMergeOntoWhatCameAfterIt()
+    {
+        var session = new MeasureSession();
+        session.AddGuideX(400);
+        Assert.True(session.ClearOnEscape());
+
+        session.AddGuideX(50);
+        Assert.False(session.RestoreCleared());
+        Assert.Equal(new[] { 50 }, session.GuidesX);
+
+        // And it is a one-shot: a new session never inherits the last one's cleared canvas.
+        session.Reset();
+        Assert.False(session.RestoreCleared());
+        Assert.False(session.HasAnything);
+    }
+
+    [Fact]
     public void GuidesStaySortedAndNeverDoubleUpOnOneCoordinate()
     {
         var session = new MeasureSession();

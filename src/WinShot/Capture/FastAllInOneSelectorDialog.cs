@@ -847,6 +847,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         }
         if (!_toolbar.IsDisposed && _toolbar.IsHandleCreated)
             handles.Add(_toolbar.Handle);
+        // The app's own confirmation HUD is not an intruder either - it is TopMost and
+        // hit-testable, so a pointer resting on it reads as "something covered the overlay".
+        if (ToastWindow.LiveHandle is IntPtr toast && toast != IntPtr.Zero)
+            handles.Add(toast);
         return handles;
     }
 

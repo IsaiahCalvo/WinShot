@@ -739,11 +739,13 @@ public partial class App : Application
             finally
             {
                 FastAllInOneSelectorDialog.Return(selector);
-                if (measureRequested)
+                if (measureRequested && _pendingCaptureCommand is null)
                 {
                     // Park it in the pending slot rather than queueing it: QueueCaptureCommand
                     // would be dropped by the still-set _captureInProgress guard, and this is
                     // the slot FinishCaptureFlow drains the moment it clears that guard.
+                    // Never over a command already parked there — the slot belongs to the
+                    // drain, and QueueCaptureCommand guards it the same way.
                     _pendingCaptureCommand = "measure";
                 }
             }

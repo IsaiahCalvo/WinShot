@@ -46,7 +46,8 @@ internal readonly record struct SelectorOptions(
 
     /// <summary>
     /// Measure mode's four non-negotiables. It READS the frozen bitmap, so freeze is not a
-    /// preference; the reticle IS the tool, so it shows whatever the crosshair setting says;
+    /// preference; the reticle IS the tool, so it is always on whatever the crosshair setting
+    /// says (the setting's own default is left alone everywhere else);
     /// and the loupe is part of the tool too — Alt is rebound to the contrast scale here, so
     /// a user with "Show magnifier" off would otherwise have no loupe and no way to ask for
     /// one. Everything else stays the user's.

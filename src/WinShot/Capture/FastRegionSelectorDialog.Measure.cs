@@ -73,6 +73,15 @@ public sealed partial class FastRegionSelectorDialog
     /// </summary>
     private WF.ContextMenuStrip? _measureMenu;
 
+    /// <summary>The open menu's own top-level window, or zero. <see cref="SurfaceHandles"/>
+    /// needs it: a drop-down opens under the pointer by definition, so without it the very
+    /// next follow tick reads the menu as something covering the overlay and re-raises every
+    /// pane above it — leaving the menu modal, still eating input, and invisible.</summary>
+    private IntPtr MeasureMenuHandle =>
+        _measureMenu is { IsDisposed: false, Visible: true } menu && menu.IsHandleCreated
+            ? menu.Handle
+            : IntPtr.Zero;
+
     /// <summary>How close the cursor must come to a guide to grab it, at 100 %. A hit target
     /// is a human-scale quantity, not a pixel-scale one, so it scales with the monitor even
     /// though everything geometric in this mode is deliberately physical px.</summary>
@@ -157,8 +166,8 @@ public sealed partial class FastRegionSelectorDialog
         HandleMeasureMouseMove();
         // The strip's whole copy and its whole width change in this frame — from one loading
         // line to nine gestures. It is the mode's only teaching surface and it already owns
-        // an entrance, so it re-enters rather than cutting.
-        StartHintEntrance();
+        // an entrance, so it re-enters rather than cutting: out through the floor, then back.
+        RestartHintEntrance(0);
     }
 
     /// <summary>
@@ -178,7 +187,7 @@ public sealed partial class FastRegionSelectorDialog
         // Nothing else on screen moves at this moment — the overlay does not flip, because
         // there is no snapshot to flip to — so a bare copy swap would be an unaccompanied
         // snap on an error. The strip re-enters instead.
-        StartHintEntrance();
+        RestartHintEntrance(0);
     }
 
     /// <summary>Render seam: moves the measuring cursor and re-reads the pixels under it.</summary>
@@ -487,6 +496,13 @@ public sealed partial class FastRegionSelectorDialog
                 {
                     Handled(e);
                 }
+                else if (_measure.RestoreCleared())
+                {
+                    // Escape IS that slip, and it takes everything at once. One press of the
+                    // undo key brings the whole canvas back rather than nothing at all.
+                    MeasureToast("Measurements restored.", ToastSeverity.Success);
+                    Handled(e);
+                }
                 else
                 {
                     MeasureToast("Nothing to undo.");
@@ -539,10 +555,14 @@ public sealed partial class FastRegionSelectorDialog
 
             case WF.Keys.ShiftKey:
                 // Shift locks the readout to one axis; the paint reads ModifierKeys, so all
-                // this has to do is ask for one repaint — not one per key-repeat.
+                // this has to do is ask for one repaint — not one per key-repeat. The pill
+                // changes SHAPE though, from the three-line cross to a one-line span, so the
+                // hot state has to be re-derived or the hand cursor is left lit on ground
+                // that is no longer the pill.
                 if (!_shiftLatched)
                 {
                     _shiftLatched = true;
+                    RefreshPillHot();
                     Handled(e);
                 }
                 return true;
@@ -565,8 +585,10 @@ public sealed partial class FastRegionSelectorDialog
         if (e.KeyCode != WF.Keys.ShiftKey || !_shiftLatched)
             return false;
 
-        // Letting go of Shift puts the second axis back, so the cross has to be redrawn.
+        // Letting go of Shift puts the second axis back, so the cross has to be redrawn —
+        // and the pill it is drawn in changes shape again, so re-derive the hot state too.
         _shiftLatched = false;
+        RefreshPillHot();
         InvalidateAllSurfaces();
         return true;
     }
@@ -643,8 +665,7 @@ public sealed partial class FastRegionSelectorDialog
 
         if ((WF.Control.ModifierKeys & WF.Keys.Alt) == WF.Keys.Alt)
         {
-            _measure.ToggleContrastScale();
-            InvalidateAllSurfaces();
+            ToggleContrastScale();
             return;
         }
 
@@ -699,9 +720,11 @@ public sealed partial class FastRegionSelectorDialog
             // Only when it is not already replaying. A real wheel delivers notches every
             // 20-50 ms and the entrance is 280 ms, so restarting on each one held the strip
             // near zero for as long as the wheel turned — flickering out the very number the
-            // gesture is about.
+            // gesture is about. And it dips to HintPulseFloor rather than out: the copy has
+            // not changed, so there is nothing to cross-fade to, and this is the one replay
+            // a user can trigger a dozen times in a row.
             if (_hintTween is null)
-                StartHintEntrance();
+                RestartHintEntrance(HintPulseFloor);
             return;
         }
 
@@ -716,6 +739,27 @@ public sealed partial class FastRegionSelectorDialog
         RefreshPillHot();
         InvalidateAllSurfaces();
     }
+
+    /// <summary>
+    /// Flips the contrast scale and makes sure the flip is visible. The pill is the usual
+    /// answer, but it is not drawn at all over flat ground (there is no contrast to report),
+    /// and on a narrow monitor the hint strip collapses past the clause that names the
+    /// gesture — so Alt+click and its menu row could both be completely silent. When there is
+    /// no pill on screen the toast says which scale is now showing.
+    /// </summary>
+    private void ToggleContrastScale()
+    {
+        bool apca = _measure.ToggleContrastScale();
+        bool visible = _measured is SD.Rectangle run && ContrastLabelFor(run) is not null;
+        if (!visible)
+            MeasureToast(apca ? "Showing APCA contrast." : "Showing WCAG contrast.");
+        InvalidateAllSurfaces();
+    }
+
+    /// <summary>Render seam: whether the contrast readout has anything to say right now —
+    /// which is what decides whether the scale toggle needs a toast of its own.</summary>
+    internal bool ContrastLabelIsOnScreenForRender =>
+        _measured is SD.Rectangle run && ContrastLabelFor(run) is not null;
 
     private WF.Cursor MeasureCursor()
     {
@@ -858,7 +902,7 @@ public sealed partial class FastRegionSelectorDialog
         Row("Copy measurement", "Ctrl+C", () => CopyMeasurement(measuredAt, anchor), measuring || _measure.Holds.Count > 0);
         Row("Copy pixel color", "Ctrl+Shift+C", () => CopyPixelColor(anchor));
         Row(_measure.UseApca ? "Show WCAG contrast" : "Show APCA contrast", "Alt+click",
-            () => _measure.ToggleContrastScale());
+            ToggleContrastScale);
         menu.Items.Add(new WF.ToolStripSeparator());
         // Three rows rather than one, because "the last thing" and "the last guide" are
         // different requests: a guide placed before a hold can only be reached by name.
@@ -879,16 +923,57 @@ public sealed partial class FastRegionSelectorDialog
 
     // ----------------------------------------------------------- motion (chrome only)
 
-    internal void StartHintEntrance()
+    /// <summary>How far down the strip dips when it replays for a gesture that did not change
+    /// its copy. Never to zero: the wheel at either end of the tolerance knob replays this on
+    /// every notch, and a strip that blinks fully out is the teaching surface flashing at the
+    /// user for a rejected gesture.</summary>
+    private const double HintPulseFloor = 0.45;
+
+    /// <summary>The strip arriving for the first time: up from nothing.</summary>
+    internal void StartHintEntrance() => RunHintEntrance(0);
+
+    /// <summary>
+    /// The strip replaying on a surface that is already painted. It eases OUT before it eases
+    /// back in, because the entrance alone starts by setting the amount to the floor in one
+    /// frame — an un-eased cut on the exit half of the mode's most-repeated animation, on a
+    /// strip that was fully opaque a moment earlier. <see cref="Motion.EaseInCubic"/> is the
+    /// mirror the vocabulary already ships for exactly this.
+    /// </summary>
+    private void RestartHintEntrance(double floor)
+    {
+        double from = _hintAmount;
+        if (from <= floor + 0.01)
+        {
+            RunHintEntrance(floor);
+            return;
+        }
+
+        StopHintEntrance();
+        _hintTween = Motion.Run(
+            Motion.QuickMs,
+            Motion.EaseInCubic,
+            amount =>
+            {
+                _hintAmount = from - ((from - floor) * amount);
+                InvalidateHintStrip();
+            },
+            () =>
+            {
+                _hintTween = null;
+                RunHintEntrance(floor);
+            });
+    }
+
+    private void RunHintEntrance(double from)
     {
         StopHintEntrance();
-        _hintAmount = 0;
+        _hintAmount = from;
         _hintTween = Motion.Run(
             Motion.EnterDurationMs,
             Motion.EaseOutCubic,
             amount =>
             {
-                _hintAmount = amount;
+                _hintAmount = from + ((1 - from) * amount);
                 InvalidateHintStrip();
             },
             () => _hintTween = null);
@@ -1255,13 +1340,17 @@ public sealed partial class FastRegionSelectorDialog
         int dpi = MonitorDpiAt(_currentScreen);
         SD.Point cursor = _currentScreen;
 
+        // The same margin the hint strip keeps off its own edge, scaled the same way: a pair's
+        // pill must not end up flush to the screen. One number, one rule, one place.
+        int inset = HintStripGap(monitorBounds);
+
         // to - from, not the holds' inclusive width, and deliberately: a guide snaps through
         // SnapCoordinate onto _snapEdgesX/Y, which are window Left and Right — and Right is
         // exclusive. So a pair snapped to the two edges of a window reads exactly that
         // window's width, which is the same number the hold over it reads.
         foreach (var (from, to) in MeasureSession.Pairs(_measure.GuidesX))
         {
-            int y = Math.Clamp(cursor.Y, monitorBounds.Top + 24, monitorBounds.Bottom - 24);
+            int y = Math.Clamp(cursor.Y, monitorBounds.Top + inset, monitorBounds.Bottom - inset);
             if (!TouchesClip(g, SD.Rectangle.FromLTRB(from, y, to + 1, y + 1), monitorBounds))
                 continue;
             SelectorChrome.DrawDimension(g, monitorBounds.Size,
@@ -1272,7 +1361,7 @@ public sealed partial class FastRegionSelectorDialog
 
         foreach (var (from, to) in MeasureSession.Pairs(_measure.GuidesY))
         {
-            int x = Math.Clamp(cursor.X, monitorBounds.Left + 24, monitorBounds.Right - 24);
+            int x = Math.Clamp(cursor.X, monitorBounds.Left + inset, monitorBounds.Right - inset);
             if (!TouchesClip(g, SD.Rectangle.FromLTRB(x, from, x + 1, to + 1), monitorBounds))
                 continue;
             SelectorChrome.DrawDimension(g, monitorBounds.Size,

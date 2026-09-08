@@ -1107,6 +1107,96 @@ public class MeasureModeTests
         selector.MeasureMouseDownForRender(WF.MouseButtons.Left);
         Assert.Equal(WF.DialogResult.OK, selector.DialogResult);
     }
+    // ----------------------------------------------------------------- staying on top
+
+    [Fact]
+    public void TheOpenMenuIsNotSomethingTheOverlayReRaisesItselfOver()
+    {
+        // The 8 ms follow tick re-raises every pane over anything covering the overlay, and a
+        // drop-down opens UNDER the pointer by definition. Left out of the surface set, the
+        // menu is buried on the very next tick: still modal, still eating input, invisible.
+        using var selector = Measuring(new Point(80, 60), out _);
+        selector.ShowMeasureMenuForRender(new Point(80, 60));
+        var menu = Assert.IsType<WF.ContextMenuStrip>(selector.MeasureMenuForRender);
+
+        IReadOnlyList<IntPtr> surfaces = selector.SurfaceHandlesForRender();
+
+        Assert.Contains(menu.Handle, surfaces);
+        Assert.False(SelectorForeground.IsCovered(menu.Handle, surfaces),
+            "the mode's own menu reads as a window covering the overlay");
+
+        menu.Close();
+        WF.Application.DoEvents();
+        Assert.DoesNotContain(menu.Handle, selector.SurfaceHandlesForRender());
+    }
+
+    [Fact]
+    public void AToastOnScreenIsNotSomethingTheOverlayReRaisesItselfOver()
+    {
+        // Measure mode is the first surface in the app to raise a toast over its own live
+        // overlay, and the toast lands top-centre of the measured monitor — a band the
+        // pointer is often resting in. Without this, "Could not copy — another app is
+        // holding the clipboard." shows for one frame and is covered for the rest of its
+        // dwell.
+        using var selector = Measuring(new Point(80, 60), out _);
+        using var toast = new ToastWindow(
+            "Measure", "Dimensions copied.", new Point(10, 10), null, ToastSeverity.Success);
+        toast.Show();
+        for (int i = 0; i < 50 && ToastWindow.LiveHandle == IntPtr.Zero; i++)
+            WF.Application.DoEvents();
+
+        IReadOnlyList<IntPtr> surfaces = selector.SurfaceHandlesForRender();
+
+        Assert.Contains(toast.Handle, surfaces);
+        Assert.False(SelectorForeground.IsCovered(toast.Handle, surfaces),
+            "the app's own toast reads as a window covering the overlay");
+    }
+
+    [Fact]
+    public void AWindowThatIsNeitherAPaneNorOurOwnChromeStillCountsAsCoveringTheOverlay()
+    {
+        // The guard above must not turn KeepOnTop off: a crash dialog or an always-on-top
+        // utility that raises itself after the overlay opened is exactly what it exists for.
+        using var selector = Measuring(new Point(80, 60), out _);
+
+        Assert.True(SelectorForeground.IsCovered(new IntPtr(0x1234), selector.SurfaceHandlesForRender()));
+    }
+
+    // ----------------------------------------------------------------- contrast scale
+
+    [Fact]
+    public void FlatGroundHasNoContrastPillToFlip()
+    {
+        // Alt+click's only visible consequence is the contrast pill and a hint-strip clause,
+        // and over a solid-colour surface the pill is not drawn at all — so the toggle has to
+        // know when it is about to be silent. (The strip's own clause is dropped on any panel
+        // too narrow for three lines, which is the other half of the same silence.)
+        // A card with a dark mark in it, off the cursor's own two rays so the run is still
+        // the whole card: two colours in the region, so there is a ratio to report.
+        using var marked = new Bitmap(Screen.Width, Screen.Height);
+        using (var g = Graphics.FromImage(marked))
+        {
+            g.Clear(Color.FromArgb(0x10, 0x30, 0x80));
+            using var card = new SolidBrush(Color.FromArgb(0xF0, 0xF0, 0xF0));
+            g.FillRectangle(card, Card);
+            using var ink = new SolidBrush(Color.FromArgb(0x20, 0x20, 0x20));
+            g.FillRectangle(ink, new Rectangle(120, 80, 20, 12));
+        }
+        using var printed = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        printed.EnterMeasureForRender(marked, Screen, new Point(80, 60));
+        Assert.True(printed.ContrastLabelIsOnScreenForRender);
+
+        using var flat = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        using var uniform = new Bitmap(Screen.Width, Screen.Height);
+        using (var g = Graphics.FromImage(uniform))
+            g.Clear(Color.FromArgb(0x20, 0x20, 0x20));
+        flat.EnterMeasureForRender(uniform, Screen, new Point(200, 150));
+
+        Assert.False(flat.ContrastLabelIsOnScreenForRender);
+    }
+
 }
 
 /// <summary>
@@ -1138,51 +1228,94 @@ public class MeasureMotionTests
     [Theory]
     [InlineData(true)]   // the snapshot lands: loading copy → nine gestures
     [InlineData(false)]  // it fails: loading copy → the error line
-    public void TheStripCrossFadesWhenItsCopyChangesRatherThanCuttingToIt(bool lands)
+    public void TheStripEasesOutBeforeItReEntersRatherThanCuttingToInvisible(bool lands)
     {
         // Three states, one surface, and one of them is an error — on the failure path
         // nothing else on screen moves at that moment, so a bare swap is an unaccompanied
-        // snap. The strip re-enters through the entrance it already owns.
+        // snap. The strip re-enters through the entrance it already owns, and the EXIT half
+        // is eased too: an earlier take set the amount to zero outright, so the most-repeated
+        // animation in the mode faded in and cut out.
         PumpUntil(() => Motion.Holders == 0);
 
-        var screen = new Rectangle(0, 0, 400, 300);
-        using var selector = Selector();
-        using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
-        selector.EnterMeasureForRender(null, screen, new Point(80, 60));
-        selector.StartHintEntrance();
-        PumpUntil(() => selector.HintAmount >= 1.0);
-        Assert.Contains("Preparing", selector.HintStripText());
+        Func<bool> restore = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => true;
+        try
+        {
+            var screen = new Rectangle(0, 0, 400, 300);
+            using var selector = Selector();
+            using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+            selector.EnterMeasureForRender(null, screen, new Point(80, 60));
+            selector.StartHintEntrance();
+            PumpUntil(() => selector.HintAmount >= 1.0);
+            Assert.Contains("Preparing", selector.HintStripText());
 
-        if (lands)
-            selector.LandFrozenSnapshotForRender(frozen);
-        else
-            selector.NoteFrozenSnapshotFailed();
+            if (lands)
+                selector.LandFrozenSnapshotForRender(frozen);
+            else
+                selector.NoteFrozenSnapshotFailed();
 
-        Assert.True(selector.HintAmount < 1.0, "the copy changed without a transition");
-        PumpUntil(() => selector.HintAmount >= 1.0);
-        Assert.DoesNotContain("Preparing", selector.HintStripText());
+            // Still fully painted on the frame the copy changed: nothing cut.
+            Assert.Equal(1.0, selector.HintAmount, 3);
+            // Then it walks down…
+            PumpUntil(() => selector.HintAmount < 0.9);
+            // …and comes back up on its own.
+            PumpUntil(() => selector.HintAmount >= 1.0);
+            Assert.DoesNotContain("Preparing", selector.HintStripText());
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = restore;
+        }
+
         PumpUntil(() => Motion.Holders == 0);
     }
 
     [Fact]
-    public void TheWheelAtTheEndOfItsRangeStillAnswers()
+    public void TheWheelAtTheEndOfItsRangeAnswersWithADipRatherThanABlink()
     {
         // Everything else in this mode answers every gesture. A clamped notch used to return
-        // in silence: no repaint, no toast, not even a flash on the number it governs.
+        // in silence: no repaint, no toast, not even a flash on the number it governs. But
+        // the answer must not be the teaching surface disappearing either — this is the one
+        // replay a user triggers a dozen times in a row, by holding the wheel against the
+        // end of the knob.
         PumpUntil(() => Motion.Holders == 0);
 
-        var screen = new Rectangle(0, 0, 400, 300);
-        using var selector = Selector();
-        using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
-        selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
-        selector.MeasureState.SetTolerance(255);
-        selector.StartHintEntrance();
-        PumpUntil(() => selector.HintAmount >= 1.0);
+        Func<bool> restore = Motion.AnimationsEnabled;
+        Motion.AnimationsEnabled = () => true;
+        try
+        {
+            var screen = new Rectangle(0, 0, 400, 300);
+            using var selector = Selector();
+            using Bitmap frozen = SolidCardOnBlue(screen, new Rectangle(50, 40, 100, 60));
+            selector.EnterMeasureForRender(frozen, screen, new Point(80, 60));
+            selector.MeasureState.SetTolerance(255);
+            selector.StartHintEntrance();
+            PumpUntil(() => selector.HintAmount >= 1.0);
 
-        selector.HandleMouseWheel(new WF.MouseEventArgs(WF.MouseButtons.None, 0, 80, 60, 120));
+            selector.HandleMouseWheel(new WF.MouseEventArgs(WF.MouseButtons.None, 0, 80, 60, 120));
 
-        Assert.Equal(255, selector.MeasureState.Tolerance);
-        Assert.True(selector.HintAmount < 1.0, "the end of the range was silent");
+            Assert.Equal(255, selector.MeasureState.Tolerance);
+            Assert.Equal(1.0, selector.HintAmount, 3);   // no cut on the way out
+
+            double lowest = 1.0;
+            var clock = Stopwatch.StartNew();
+            while (clock.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                WF.Application.DoEvents();
+                Thread.Sleep(1);
+                lowest = Math.Min(lowest, selector.HintAmount);
+                if (lowest < 1.0 && selector.HintAmount >= 1.0)
+                    break;
+            }
+
+            Assert.True(lowest < 0.99, "the end of the range was silent");
+            Assert.True(lowest > 0.2, $"the strip blinked out to {lowest:0.00} for a rejected gesture");
+        }
+        finally
+        {
+            Motion.AnimationsEnabled = restore;
+        }
+
         PumpUntil(() => Motion.Holders == 0);
     }
 
