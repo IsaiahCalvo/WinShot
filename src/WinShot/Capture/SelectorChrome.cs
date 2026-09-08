@@ -70,11 +70,18 @@ internal static class SelectorChrome
             return;
         // Typographic metrics: no GDI+ overhang padding, so the string stays inside a pill
         // whose width came from TextRenderer.MeasureText.
+        //
+        // FormatFlags is OR-ed onto what GenericTypographic already carries, never assigned
+        // over it. GenericTypographic ships FitBlackBox | LineLimit | NoClip, and the bare
+        // assignment threw all three away — including the NoClip that is the only thing making
+        // the mixed-toolkit measurement safe. MeasureText is GDI and DrawString is GDI+, so
+        // nothing guarantees the GDI+ black box fits the GDI-measured rect; without NoClip a
+        // glyph that overhangs is cut instead of drawn. Same mechanism as the camera cursor.
         using var format = new SD.StringFormat(SD.StringFormat.GenericTypographic)
         {
             Alignment = SD.StringAlignment.Center,
             LineAlignment = SD.StringAlignment.Center,
-            FormatFlags = SD.StringFormatFlags.NoWrap,
+            FormatFlags = SD.StringFormat.GenericTypographic.FormatFlags | SD.StringFormatFlags.NoWrap,
         };
         var prevHint = g.TextRenderingHint;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
@@ -135,7 +142,14 @@ internal static class SelectorChrome
         // With crosshair mode defaulting to "always" these are the most-seen chrome in the
         // app, and at 150 % a 1 px white line is two-thirds of a logical pixel -- a hairline
         // that half-disappears into the dim.
-        float weight = (float)Math.Max(1d, Clean(scale));
+        //
+        // ROUNDED to whole pixels, because the surface paints with SmoothingMode.None and an
+        // aliased pen covers floor(width) rows: a 1.5 pen laid down ONE row, exactly what a
+        // 100 % monitor gets, so the growth was a no-op at both 125 % and 150 % and only
+        // started working at 175 %. Measured coverage: 1.0 -> 1, 1.5 -> 1, 2.0 -> 2, 2.5 -> 3.
+        // The shadow (3x) was unaffected, so at 150 % the guide was a 5 px black band around a
+        // 1 px white core.
+        float weight = Math.Max(1, (int)Math.Round(Clean(scale)));
         using var shadow = new SD.Pen(
             SD.Color.FromArgb(color is null ? 120 : HairlineShadowAlpha, 0, 0, 0), 3f * weight);
         using var pen = new SD.Pen(color ?? SD.Color.FromArgb(210, 255, 255, 255), weight);
@@ -263,10 +277,20 @@ internal static class SelectorChrome
     /// because the pixel is the unit being reported.</summary>
     private const int SerifHalf = 2;
 
-    /// <summary>Perpendicular gap between a dimension line and its pill. Internal because
-    /// Measure mode places its own live pill by the same rule, and one constant in two files
-    /// is one constant that drifts.</summary>
-    internal const int DimensionPillGap = 6;
+    /// <summary>Perpendicular gap between a dimension line and its pill, in LOGICAL px.
+    /// Callers want <see cref="DimensionPillGapPx"/>.</summary>
+    private const int DimensionPillGapLogical = 6;
+
+    /// <summary>
+    /// That gap on a monitor at <paramref name="scale"/>. A method, not the bare constant it
+    /// used to be: every sibling spacing token (PillGap, PillPadX/Y, PillRadius, the crosshair
+    /// gap) goes through Px, and this one did not — so at 150 % the size pill stood 12 device
+    /// px off its rect while the measurement pill stood 6 off its line, half the intended
+    /// distance, and the pill's own hit corridor (Measure mode) was 4 logical px tall.
+    /// Internal because Measure mode places its live pill by the same rule, and one spacing
+    /// rule in two files is one rule that drifts.
+    /// </summary>
+    internal static int DimensionPillGapPx(double scale) => Px(DimensionPillGapLogical, scale);
 
     /// <summary>
     /// A measured distance: an aliased 1 px hairline between two INCLUSIVE endpoints, a
@@ -325,26 +349,27 @@ internal static class SelectorChrome
             return;
 
         SD.Size pill = MeasureLabel(label, scale);
+        int pillGap = DimensionPillGapPx(scale);
         SD.Point at;
         if (horizontal)
         {
             // Above the line, flipped below when the line is near the top of the surface —
             // the same flip the live pill does. Clamping instead would park the pill on top
             // of the very span it labels.
-            int above = a.Y - pill.Height - DimensionPillGap;
+            int above = a.Y - pill.Height - pillGap;
             at = new SD.Point(((a.X + b.X) / 2) - (pill.Width / 2),
-                above >= 0 ? above : a.Y + DimensionPillGap);
+                above >= 0 ? above : a.Y + pillGap);
         }
         else
         {
             // Right of the line, flipped left when there is no room — the mirror of the
             // horizontal flip above. Letting DrawLabel clamp instead would slide the pill
             // back across the very hairline it labels and hide it under its own ground.
-            int right = a.X + DimensionPillGap;
+            int right = a.X + pillGap;
             int midY = ((a.Y + b.Y) / 2) - (pill.Height / 2);
             at = right + pill.Width <= clientSize.Width
                 ? new SD.Point(right, midY)
-                : new SD.Point(a.X - DimensionPillGap - pill.Width, midY);
+                : new SD.Point(a.X - pillGap - pill.Width, midY);
         }
         // The pill wears its own line's colour as a 1 px outline. Crimson and blue are only
         // 1.27:1 apart in luminance and the number inside is always TextPrimary on WindowBg,

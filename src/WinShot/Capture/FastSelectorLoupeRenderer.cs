@@ -4,11 +4,27 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Capture;
 
+/// <summary>
+/// The magnifier loupe. EVERY constant in here is LOGICAL px and goes through <see cref="Px"/>
+/// before it is drawn - the whole file used to consume them raw, which made the loupe the one
+/// selector surface that did not grow with the monitor: 120 device px on a 150 % display is
+/// 80 logical, two thirds of the 120 every sibling produces, with 5.3-logical-px zoom cells and
+/// a pointer offset of 16 instead of 24. Its labels were Point fonts on top of that, so the text
+/// scaled with the primary monitor while the box holding it scaled with nothing.
+/// </summary>
 internal static class FastSelectorLoupeRenderer
 {
     private const int LoupeSize = 120;
     private const int LoupeZoom = 8;
     private static bool _failureLogged;
+
+    private static int Px(int logical, double scale) =>
+        WinShot.Recording.RecordingMonitorDpi.Px(logical, scale is > 0d and < 100d ? scale : 1d);
+
+    /// <summary>Stroke width for the loupe's hairlines, rounded to whole pixels: these are drawn
+    /// with AntiAlias, but a sub-pixel pen on a 150 % display reads as a blur, not a line.</summary>
+    private static float Stroke(double logical, double scale) =>
+        (float)Math.Max(1d, Math.Round(logical * (scale is > 0d and < 100d ? scale : 1d)));
 
     public static void Draw(
         SD.Graphics g,
@@ -17,16 +33,18 @@ internal static class FastSelectorLoupeRenderer
         SD.Point cursorClient,
         SD.Point cursorScreen,
         SD.Bitmap? frozen = null,
-        SD.Size dragSize = default)
+        SD.Size dragSize = default,
+        double scale = 1d)
     {
         var loupe = FastSelectorLoupeLayout.Calculate(
             clientSize,
             virtualScreen,
             cursorClient,
             cursorScreen,
-            LoupeSize,
-            LoupeZoom,
-            dragSize);
+            Px(LoupeSize, scale),
+            Px(LoupeZoom, scale),
+            dragSize,
+            scale);
         if (!loupe.IsVisible)
             return;
 
@@ -39,10 +57,10 @@ internal static class FastSelectorLoupeRenderer
                 : CaptureService.CaptureScreenRegionWithoutLayeredWindows(loupe.SourceScreen);
             SD.Color pixel = ReadTargetPixel(sample, loupe.TargetSample);
             string hex = $"#{pixel.R:X2}{pixel.G:X2}{pixel.B:X2}";
-            DrawShadow(g, loupe);
-            DrawSample(g, sample, loupe);
-            DrawFrame(g, loupe);
-            DrawLabel(g, clientSize, loupe, hex, pixel);
+            DrawShadow(g, loupe, scale);
+            DrawSample(g, sample, loupe, scale);
+            DrawFrame(g, loupe, scale);
+            DrawLabel(g, clientSize, loupe, hex, pixel, scale);
         }
         catch (Exception ex)
         {
@@ -61,15 +79,18 @@ internal static class FastSelectorLoupeRenderer
     /// pair at caption size is well under 120 px), so only its height has to be worked out.
     /// </summary>
     public static SD.Rectangle OccupiedRect(
-        SD.Size clientSize, SD.Rectangle virtualScreen, SD.Point cursorClient, SD.Point cursorScreen)
+        SD.Size clientSize, SD.Rectangle virtualScreen, SD.Point cursorClient, SD.Point cursorScreen,
+        double scale = 1d)
     {
         var loupe = FastSelectorLoupeLayout.Calculate(
-            clientSize, virtualScreen, cursorClient, cursorScreen, LoupeSize, LoupeZoom);
+            clientSize, virtualScreen, cursorClient, cursorScreen,
+            Px(LoupeSize, scale), Px(LoupeZoom, scale), default, scale);
         if (!loupe.IsVisible)
             return SD.Rectangle.Empty;
 
-        int pillH = LabelHeight();
-        int pillTop = Math.Clamp(loupe.Bounds.Bottom + 6, 0, Math.Max(0, clientSize.Height - pillH));
+        int pillH = LabelHeight(scale);
+        int pillTop = Math.Clamp(
+            loupe.Bounds.Bottom + Px(PillGap, scale), 0, Math.Max(0, clientSize.Height - pillH));
         return SD.Rectangle.FromLTRB(
             loupe.Bounds.Left, loupe.Bounds.Top, loupe.Bounds.Right, pillTop + pillH);
     }
@@ -101,24 +122,26 @@ internal static class FastSelectorLoupeRenderer
 
     /// <summary>Soft drop shadow under the loupe, drawn as a few concentric rounded
     /// rectangles with increasing transparency to fake a blur.</summary>
-    private static void DrawShadow(SD.Graphics g, FastSelectorLoupe loupe)
+    private static void DrawShadow(SD.Graphics g, FastSelectorLoupe loupe, double scale)
     {
         var prevSmoothing = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
         for (int i = 5; i >= 1; i--)
         {
+            int ring = Px(i, scale);
             var rect = loupe.Bounds;
-            rect.Inflate(i, i);
-            rect.Offset(0, 1);
+            rect.Inflate(ring, ring);
+            rect.Offset(0, Px(1, scale));
             int alpha = 14 - i * 2; // ~4..12, fades outward
-            using var pen = new SD.Pen(SD.Color.FromArgb(Math.Max(2, alpha), 0, 0, 0), 2f);
-            using var path = GdiPaths.RoundedRect(rect, loupe.CornerRadius + i);
+            using var pen = new SD.Pen(SD.Color.FromArgb(Math.Max(2, alpha), 0, 0, 0), Stroke(2, scale));
+            using var path = GdiPaths.RoundedRect(rect, loupe.CornerRadius + ring);
             g.DrawPath(pen, path);
         }
         g.SmoothingMode = prevSmoothing;
     }
 
-    private static void DrawSample(SD.Graphics g, SD.Bitmap sample, FastSelectorLoupe loupe)
+    private static void DrawSample(
+        SD.Graphics g, SD.Bitmap sample, FastSelectorLoupe loupe, double scale)
     {
         var state = g.Save();
         using var clip = GdiPaths.RoundedRect(loupe.Bounds, loupe.CornerRadius);
@@ -127,7 +150,7 @@ internal static class FastSelectorLoupeRenderer
         g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.Half;
         g.DrawImage(sample, loupe.Bounds);
         DrawPixelGrid(g, loupe);
-        DrawTargetCell(g, loupe);
+        DrawTargetCell(g, loupe, scale);
         DrawCrosshair(g, loupe);
         g.Restore(state);
     }
@@ -150,14 +173,14 @@ internal static class FastSelectorLoupeRenderer
 
     /// <summary>Accent outline around the exact target pixel cell (WinShot precision cue,
     /// kept subtle so it reads inside CleanShot's gray crosshair).</summary>
-    private static void DrawTargetCell(SD.Graphics g, FastSelectorLoupe loupe)
+    private static void DrawTargetCell(SD.Graphics g, FastSelectorLoupe loupe, double scale)
     {
         int zoom = loupe.Zoom;
         var bounds = loupe.Bounds;
         int cellLeft = bounds.Left + loupe.TargetSample.X * zoom;
         int cellTop = bounds.Top + loupe.TargetSample.Y * zoom;
         var cell = new SD.Rectangle(cellLeft, cellTop, zoom, zoom);
-        using var accent = new SD.Pen(SD.Color.FromArgb(235, ThemePalette.Accent), 1.5f);
+        using var accent = new SD.Pen(SD.Color.FromArgb(235, ThemePalette.Accent), Stroke(1.5, scale));
         g.DrawRectangle(accent, cell);
     }
 
@@ -173,7 +196,9 @@ internal static class FastSelectorLoupeRenderer
         float thickness = Math.Max(2f, zoom * 0.5f);
         int gap = zoom; // keep the center pixel clear
 
-        using var bar = new SD.Pen(SD.Color.FromArgb(150, 90, 90, 92), thickness);
+        // SurfaceHover at 150 alpha. #5A5A5C matched no token at all; the crosshair inside a
+        // loupe is a raised neutral like every other raised neutral in the app.
+        using var bar = new SD.Pen(SD.Color.FromArgb(150, ThemePalette.SurfaceHover), thickness);
         // Vertical bar (split around the center cell).
         g.DrawLine(bar, cx, bounds.Top, cx, cy - gap);
         g.DrawLine(bar, cx, cy + gap, cx, bounds.Bottom);
@@ -182,21 +207,24 @@ internal static class FastSelectorLoupeRenderer
         g.DrawLine(bar, cx + gap, cy, bounds.Right, cy);
     }
 
-    private static void DrawFrame(SD.Graphics g, FastSelectorLoupe loupe)
+    private static void DrawFrame(SD.Graphics g, FastSelectorLoupe loupe, double scale)
     {
         var prevSmoothing = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
 
         // Subtle dark outer border + a faint inner light hairline so the loupe reads
         // crisply against both light and dark desktop content (CleanShot style).
-        using var border = new SD.Pen(SD.Color.FromArgb(190, 28, 28, 30), 1.5f);
+        // WindowBg written as a token, not as the same three bytes in decimal — this file
+        // already spells it that way 46 lines down.
+        using var border = new SD.Pen(SD.Color.FromArgb(190, ThemePalette.WindowBg), Stroke(1.5, scale));
         using (var path = GdiPaths.RoundedRect(loupe.Bounds, loupe.CornerRadius))
             g.DrawPath(border, path);
 
         var inner = loupe.Bounds;
-        inner.Inflate(-1, -1);
-        using var innerLine = new SD.Pen(SD.Color.FromArgb(60, 255, 255, 255), 1f);
-        using (var innerPath = GdiPaths.RoundedRect(inner, Math.Max(2, loupe.CornerRadius - 1)))
+        int hairline = Px(1, scale);
+        inner.Inflate(-hairline, -hairline);
+        using var innerLine = new SD.Pen(SD.Color.FromArgb(60, 255, 255, 255), Stroke(1, scale));
+        using (var innerPath = GdiPaths.RoundedRect(inner, Math.Max(2, loupe.CornerRadius - hairline)))
             g.DrawPath(innerLine, innerPath);
 
         g.SmoothingMode = prevSmoothing;
@@ -209,49 +237,67 @@ internal static class FastSelectorLoupeRenderer
     private const int SwatchGap = 6;
     private const int LineGap = 3;
     private const int Pad = 6;
+    private const int PillRadius = 6;
+    /// <summary>Gap between the loupe box and its label pill, and the pill's left nudge.</summary>
+    private const int PillGap = 6;
+    private const int PillNudgeX = 2;
+
+    /// <summary>The caption font in PIXELS for this monitor. A Point font resolves against the
+    /// primary display's DPI, so the label grew while the box around it did not.</summary>
+    private static SD.Font CaptionFont(double scale) =>
+        ThemePalette.UiFontPx(ThemePalette.PxForPt(ThemePalette.TextCaptionPt, scale));
 
     /// <summary>The label pill's height, which is two caption lines whatever they say.</summary>
-    private static int LabelHeight()
+    private static int LabelHeight(double scale)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
-        int lineHeight = Math.Max(WF.TextRenderer.MeasureText("0", font).Height, SwatchSize);
-        return (lineHeight * 2) + LineGap + (Pad * 2);
+        using var font = CaptionFont(scale);
+        int lineHeight = Math.Max(WF.TextRenderer.MeasureText("0", font).Height, Px(SwatchSize, scale));
+        return (lineHeight * 2) + Px(LineGap, scale) + (Px(Pad, scale) * 2);
     }
 
-    private static void DrawLabel(SD.Graphics g, SD.Size clientSize, FastSelectorLoupe loupe, string hex, SD.Color pixel)
+    private static void DrawLabel(
+        SD.Graphics g, SD.Size clientSize, FastSelectorLoupe loupe, string hex, SD.Color pixel, double scale)
     {
-        using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+        using var font = CaptionFont(scale);
+        int swatchSize = Px(SwatchSize, scale);
+        int swatchGap = Px(SwatchGap, scale);
+        int lineGap = Px(LineGap, scale);
+        int pad = Px(Pad, scale);
         SD.Size coordSize = WF.TextRenderer.MeasureText(loupe.Coordinates, font);
         SD.Size hexSize = WF.TextRenderer.MeasureText(hex, font);
 
-        int lineHeight = Math.Max(coordSize.Height, Math.Max(hexSize.Height, SwatchSize));
-        int blockW = Math.Max(coordSize.Width, SwatchSize + SwatchGap + hexSize.Width);
-        int pillW = blockW + Pad * 2;
-        int pillH = lineHeight * 2 + LineGap + Pad * 2;
+        int lineHeight = Math.Max(coordSize.Height, Math.Max(hexSize.Height, swatchSize));
+        int blockW = Math.Max(coordSize.Width, swatchSize + swatchGap + hexSize.Width);
+        int pillW = blockW + pad * 2;
+        int pillH = lineHeight * 2 + lineGap + pad * 2;
 
-        int pillLeft = Math.Clamp(loupe.Bounds.Left + 2, 0, Math.Max(0, clientSize.Width - pillW));
-        int pillTop = Math.Clamp(loupe.Bounds.Bottom + 6, 0, Math.Max(0, clientSize.Height - pillH));
+        int pillLeft = Math.Clamp(
+            loupe.Bounds.Left + Px(PillNudgeX, scale), 0, Math.Max(0, clientSize.Width - pillW));
+        int pillTop = Math.Clamp(
+            loupe.Bounds.Bottom + Px(PillGap, scale), 0, Math.Max(0, clientSize.Height - pillH));
 
         var prevSmoothing = g.SmoothingMode;
         g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(new SD.Rectangle(pillLeft, pillTop, pillW, pillH), 6))
+        using (var path = GdiPaths.RoundedRect(
+            new SD.Rectangle(pillLeft, pillTop, pillW, pillH), Px(PillRadius, scale)))
         using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.WindowBg)))
             g.FillPath(bgBrush, path);
         g.SmoothingMode = prevSmoothing;
 
-        int left = pillLeft + Pad;
-        int top = pillTop + Pad;
+        int left = pillLeft + pad;
+        int top = pillTop + pad;
 
         // Line 1: coordinates.
         WF.TextRenderer.DrawText(g, loupe.Coordinates, font, new SD.Point(left, top), ThemePalette.TextPrimary);
 
         // Line 2: hex swatch + value.
-        int line2Top = top + lineHeight + LineGap;
-        var swatch = new SD.Rectangle(left, line2Top + (lineHeight - SwatchSize) / 2, SwatchSize, SwatchSize);
+        int line2Top = top + lineHeight + lineGap;
+        var swatch = new SD.Rectangle(left, line2Top + (lineHeight - swatchSize) / 2, swatchSize, swatchSize);
         using (var swatchBrush = new SD.SolidBrush(SD.Color.FromArgb(255, pixel.R, pixel.G, pixel.B)))
             g.FillRectangle(swatchBrush, swatch);
-        using (var swatchBorder = new SD.Pen(SD.Color.FromArgb(200, 0, 0, 0), 1))
+        using (var swatchBorder = new SD.Pen(SD.Color.FromArgb(200, 0, 0, 0), Stroke(1, scale)))
             g.DrawRectangle(swatchBorder, swatch);
-        WF.TextRenderer.DrawText(g, hex, font, new SD.Point(left + SwatchSize + SwatchGap, line2Top), ThemePalette.TextPrimary);
+        WF.TextRenderer.DrawText(
+            g, hex, font, new SD.Point(left + swatchSize + swatchGap, line2Top), ThemePalette.TextPrimary);
     }
 }

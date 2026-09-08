@@ -190,6 +190,20 @@ public sealed partial class FastRegionSelectorDialog
     }
 
     /// <summary>
+    /// The snapshot was already in hand when the mode opened — the warm-duplication entry, so
+    /// there was never a moment without one. Only the first reading needs seeding: the hint
+    /// strip has not entered yet and latches the right copy on its own entrance, so unlike
+    /// <see cref="NoteFrozenSnapshotLanded"/> this must NOT restart it.
+    /// </summary>
+    internal void NoteFrozenSnapshotAtOpen()
+    {
+        if (_mode != SelectorMode.Measure)
+            return;
+
+        HandleMeasureMouseMove();
+    }
+
+    /// <summary>
     /// The freeze snapshot was attempted and did not arrive. There is exactly one attempt per
     /// session, so this is terminal: the mode has no input and will not get one. Latching it
     /// is what lets the hint strip and every gesture's answer stop saying "not yet" — the
@@ -382,7 +396,7 @@ public sealed partial class FastRegionSelectorDialog
         // pointer approaches can never be reached: every step toward it would re-read the
         // pixels under the pointer and move the pill again. So inside the pill — and inside
         // the short corridor between the pill and the edge of the run it labels — the
-        // reading holds still. The corridor is only DimensionPillGap px tall and only as
+        // reading holds still. The corridor is only DimensionPillGapPx tall and only as
         // wide as the pill, so entering it is a deliberate move OUT of the object towards
         // its number, never an incidental drift across it.
         if (MeasurePillReach() is SD.Rectangle reach && reach.Contains(_currentScreen))
@@ -1178,7 +1192,7 @@ public sealed partial class FastRegionSelectorDialog
             MeasureLiveLabel(run), WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitor));
         int centre = (run.Left + run.Right - 1) / 2;
         int left = Math.Clamp(centre - (pill.Width / 2), monitor.Left, Math.Max(monitor.Left, monitor.Right - pill.Width));
-        int gap = SelectorChrome.DimensionPillGap;
+        int gap = SelectorChrome.DimensionPillGapPx(WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitor));
 
         int aboveRun = run.Top - pill.Height - gap;
         if (aboveRun >= monitor.Top)
@@ -1282,7 +1296,8 @@ public sealed partial class FastRegionSelectorDialog
             if (_magnifierOn)
             {
                 FastSelectorLoupeRenderer.Draw(
-                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen);
+                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen,
+                    scale: WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
             }
 
             PaintHintStrip(g, monitorBounds);
@@ -1369,7 +1384,8 @@ public sealed partial class FastRegionSelectorDialog
 
         SD.Size pill = SelectorChrome.MeasureLabel(
             label, WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
-        int gap = SelectorChrome.DimensionPillGap;
+        int gap = SelectorChrome.DimensionPillGapPx(
+            WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
         SD.Rectangle? live = MeasurePillScreenRect();
 
         int above = run.Top - pill.Height - gap;
@@ -1638,9 +1654,11 @@ public sealed partial class FastRegionSelectorDialog
         if (_magnifierOn && monitorBounds.Contains(cursor))
         {
             SD.Rectangle loupe = FastSelectorLoupeRenderer.OccupiedRect(
-                monitorBounds.Size, _vs, ToLocal(cursor, monitorBounds), cursor);
+                monitorBounds.Size, _vs, ToLocal(cursor, monitorBounds), cursor,
+                WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
             if (!loupe.IsEmpty && loupe.IntersectsWith(new SD.Rectangle(left, top, pill.Width, pill.Height)))
-                top = loupe.Top - SelectorChrome.DimensionPillGap - pill.Height;
+                top = loupe.Top - SelectorChrome.DimensionPillGapPx(
+                    WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds)) - pill.Height;
         }
 
         return new SD.Rectangle(left, Math.Max(0, top), pill.Width, pill.Height);
@@ -1678,5 +1696,6 @@ public sealed partial class FastRegionSelectorDialog
     /// <summary>Render seam: the ground the loupe covers on this pane.</summary>
     internal SD.Rectangle LoupeRectForRender(SD.Rectangle monitorBounds) =>
         FastSelectorLoupeRenderer.OccupiedRect(
-            monitorBounds.Size, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen);
+            monitorBounds.Size, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen,
+            WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
 }

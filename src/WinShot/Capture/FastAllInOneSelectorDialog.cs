@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -58,6 +58,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         ? (_pendingGlide.IsActive ? _pendingGlide.Current : p)
         : null;
     private SD.Bitmap? _frozen;          // frozen virtual-desktop snapshot shown under the overlay
+    private IDisposable? _freezeFade;    // live -> frozen ramp on the deferred entry
     // Per-monitor frozen-slice-with-dim baked once, so each follow-frame is a single opaque
     // blit instead of re-cropping the snapshot AND alpha-blending a full-screen dim every
     // tick. Same fix the region selector already carries; keyed by monitor.
@@ -145,6 +146,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// </summary>
     internal void Park()
     {
+        // The dialog is pooled, so an in-flight ramp would otherwise outlive the session that
+        // started it and keep the process-wide timer resolution raised.
+        _freezeFade?.Dispose();
+        _freezeFade = null;
         SelectorSurfaces.Park(this);
         foreach (var pane in _panes)
         {
@@ -192,15 +197,15 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _monitorBounds = PrimaryBounds();
         Bounds = _monitorBounds;
         _options = SelectorOptions.ForAllInOne(_settings?.Current);
-        // Open instantly over the live desktop; the freeze snapshot bakes in when it
-        // lands — see FastRegionSelectorDialog.ShowAsync.
-        SelectorChrome.ConfigurePresentation(this, freezeScreen: false);
+        // Grab the freeze BEFORE any surface is shown so the overlay opens already frozen —
+        // see SelectorFreeze for the root cause of the entry flicker this replaces.
         DisposeFrozen();
+        _frozen = SelectorFreeze.TryGrabBeforeShow(_options.FreezeScreen);
+        SelectorEntry entry = SelectorFreeze.ChooseEntry(_options.FreezeScreen, _frozen is not null);
         CreatePanes();
-        // Warm (pooled) surfaces may still be opaque from a previous frozen swap.
-        SelectorSurfaces.Unpark(this, SelectorChrome.LiveAlpha);
-        foreach (var pane in _panes)
-            SelectorSurfaces.Unpark(pane, SelectorChrome.LiveAlpha);
+        if (entry == SelectorEntry.OpaqueFrozen)
+            PrewarmDimmedSlices();
+        SelectorFreeze.Unpark(this, _panes, entry);
 
         Show();
         foreach (var pane in _panes)
@@ -233,7 +238,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         _altLatched = false;
         if (_options.NeedsCursorFollow)
             StartFollowMotion();
-        if (_options.FreezeScreen)
+        if (entry == SelectorEntry.TransparentUntilFrozen)
             _ = FreezeWhileShownAsync(_completion);
         return await _completion.Task;
     }
@@ -246,7 +251,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SD.Bitmap? snapshot = null;
         try
         {
-            snapshot = await Task.Run(CaptureService.CaptureVirtualDesktop);
+            snapshot = await Task.Run(CaptureService.CaptureFreezeFrame);
         }
         catch (Exception ex)
         {
@@ -261,29 +266,44 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
         DisposeFrozen();
         _frozen = snapshot;
+        _freezeFade?.Dispose();
         if (_frozen is null)
+        {
+            // Surfaces are at alpha 0 waiting for a frame that never came; an invisible
+            // overlay is an unusable one, so ramp up to the translucent wash instead.
+            _freezeFade = Core.Motion.Run(
+                SelectorFreeze.FadeDurationMs,
+                Core.Motion.EaseOutCubic,
+                progress => SetAllSurfaceAlpha((byte)Math.Round(progress * SelectorChrome.LiveAlpha)));
             return;
+        }
 
-        // Bake the dimmed slices BEFORE the first frozen paint so no surface is opaque
-        // over a half-swapped state — see FastRegionSelectorDialog.FreezeWhileShownAsync.
+        // Bake the dimmed slices BEFORE anything moves — see
+        // FastRegionSelectorDialog.FreezeWhileShownAsync.
+        PrewarmDimmedSlices();
+        _freezeFade = SelectorFreeze.FadeToFrozen(this, _panes);
+    }
+
+    /// <summary>Bakes every surface's dimmed frozen slice — see the region selector's copy.</summary>
+    private void PrewarmDimmedSlices()
+    {
         GetDimmedBackground(_monitorBounds);
         foreach (var pane in _panes)
         {
             if (!pane.IsDisposed)
                 GetDimmedBackground(pane.MonitorBounds);
         }
+    }
 
-        // Paint each surface before going opaque — see
-        // FastRegionSelectorDialog.FreezeWhileShownAsync for why this ordering matters.
-        Invalidate();
-        Update();
-        WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, 255);
+    /// <summary>Sets the layered alpha of the coordinator and every live pane together.</summary>
+    private void SetAllSurfaceAlpha(byte alpha)
+    {
+        if (!IsDisposed && IsHandleCreated)
+            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(Handle, alpha);
         foreach (var pane in _panes)
         {
-            if (pane.IsDisposed || !pane.IsHandleCreated) continue;
-            pane.Invalidate();
-            pane.Update();
-            WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, 255);
+            if (!pane.IsDisposed && pane.IsHandleCreated)
+                WinShot.Scrolling.CaptureExclusion.SetLayeredAlpha(pane.Handle, alpha);
         }
     }
 
@@ -1105,7 +1125,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (cursorOnThisSurface && _magnifierOn)
         {
             FastSelectorLoupeRenderer.Draw(
-                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize);
+                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize,
+                WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
         }
         else if (cursorOnThisSurface && dragSize.IsEmpty && _pendingPx is null && _hoverWindow is null)
         {
@@ -1506,7 +1527,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private static readonly SD.Color SelectedFill = ThemePalette.AccentPressed;
         private static readonly SD.Color GlyphColor = ThemePalette.TextPrimary;
         private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
-        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x3A, 0x3A, 0x3A);
+        /// <summary>The size fields' ground. Was a bare 0x3A3A3A — two counts off SurfaceAlt
+        /// on red and green and one on blue, and the only line in this block that did not
+        /// alias a token, in a block whose whole point is that the bar cannot drift.</summary>
+        private static readonly SD.Color FieldFill = ThemePalette.SurfaceAlt;
 
         // Design units (96-DPI logical px). Point-based fonts render at the monitor's
         // DPI, so the pixel layout must scale with them via U() or the bar renders
@@ -1517,10 +1541,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private const int ButtonGap = 2;
         private const int BarPadX = 6;
         private const int BarGap = 12;       // transparent gap between the two bars
-        private const int GlyphTop = 12;
+        // Glyph 11..35, a 2 px breath, label 37..53: a 42-tall block centred in the 64 bar
+        // with 11 above and 11 below. It used to start at 12 and end at 54, which is 12 above
+        // and 10 below - the content sat a pixel low in its own bar.
+        private const int GlyphTop = 11;
         private const int GlyphHeight = 24;
-        private const int LabelTop = 38;
+        private const int LabelTop = 37;
         private const int LabelHeight = 16;
+
+        /// <summary>The ratio badge's band at the bottom of its cell, and the breathing room
+        /// left above the glyph and below the badge.</summary>
+        private const int RatioBadgeHeight = 11;
+        private const int RatioBadgeMargin = 1;
 
         private readonly double _u = WinShot.Recording.RecordingMonitorDpi.ScaleFor(PrimaryBounds());
 
@@ -1601,7 +1633,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 new SD.Size(12, 8));
             _toolTip.Draw += (_, e) =>
             {
-                using var bg = new SD.SolidBrush(SD.Color.FromArgb(0x2B, 0x2B, 0x2B));
+                // ToolbarBg, not a hand-picked 0x2B2B2B: a tooltip is chrome raised off the
+                // same bar, so it wears the bar's own token.
+                using var bg = new SD.SolidBrush(ThemePalette.ToolbarBg);
                 e.Graphics.FillRectangle(bg, e.Bounds);
                 using var edge = new SD.Pen(BarBorder, 1);
                 e.Graphics.DrawRectangle(edge,
@@ -2023,9 +2057,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                     SD.Color.FromArgb((int)Math.Round(SelectedFill.A * badgeFade), SelectedFill));
                 g.FillPath(brush, path);
             }
+            // The glyph gets everything above the badge's band - exactly above it. The two
+            // boxes used to OVERLAP by U(2): the glyph rect ended at Bottom-U(11) while the
+            // badge started at Bottom-U(13). The pair also sat flush against the cell's top
+            // with U(2) spare underneath, so a vertically centred glyph was centred inside a
+            // box that was itself off-centre.
+            int badgeTop = _ratioRect.Bottom - U(RatioBadgeHeight + RatioBadgeMargin);
             var ratioGlyphRect = _ratioRect;
             if (ratioChosen)
-                ratioGlyphRect.Height -= U(11); // make room for the badge under the glyph
+            {
+                ratioGlyphRect.Y += U(RatioBadgeMargin);
+                ratioGlyphRect.Height = badgeTop - ratioGlyphRect.Y;
+            }
             // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
             // showing two identical accent-filled crop icons a few cells apart.
             SelectorChrome.DrawCenteredText(g, "", _glyphFont, ratioGlyphRect,
@@ -2037,7 +2080,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 int badgeAlpha = (int)Math.Round(255 * badgeFade);
                 var badgeRect = new SD.Rectangle(
-                    _ratioRect.X, _ratioRect.Bottom - U(13), _ratioRect.Width, U(11));
+                    _ratioRect.X, badgeTop, _ratioRect.Width, U(RatioBadgeHeight));
                 // GDI+ DrawString, not TextRenderer: GDI drops the alpha byte, so the ramp
                 // this fade exists for was popping the badge in at full strength.
                 SelectorChrome.DrawCenteredText(g, preset.Badge, _labelFont, badgeRect,

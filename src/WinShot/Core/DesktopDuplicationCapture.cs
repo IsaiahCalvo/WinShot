@@ -21,7 +21,15 @@ internal static class DesktopDuplicationCapture
     private const int AccessDeniedCooldownMs = 10 * 60 * 1000;
     private const uint DxgiErrorWaitTimeout = 0x887A0027;
     private const uint HResultAccessDenied = 0x80070005;
-    private const int IdleEvictMs = 30_000;
+    // Ten minutes, not the thirty seconds this started at. The selector's freeze frame is
+    // taken from a WARM duplication device now (TryCaptureWarm), and warm-vs-cold is the
+    // whole difference between the overlay opening already frozen and it opening blank and
+    // fading: 13 ms against 155 ms, measured on a 3847x2291 three-monitor desktop by
+    // tools/bench-capture. At thirty seconds practically every capture found a cold device,
+    // so the fast path never ran. The memory this holds (one D3D device plus a
+    // full-monitor staging texture per display, ~35 MB here) still goes back when the
+    // machine is actually idle — which is what the eviction was added for.
+    private const int IdleEvictMs = 10 * 60 * 1000;
     private static readonly object Gate = new();
     private static readonly Dictionary<string, DisplayCapture> Displays = new(StringComparer.OrdinalIgnoreCase);
     private static long _disabledUntilTick;
@@ -48,6 +56,81 @@ internal static class DesktopDuplicationCapture
         }
 
         return TryCaptureBounded(screenRect, CaptureAttemptTimeoutMs, out bitmap);
+    }
+
+    /// <summary>
+    /// Captures ONLY if the duplication devices for this screen set are already built, and
+    /// returns false instantly otherwise — it never creates a device and never blocks.
+    ///
+    /// This is what lets the selector open already frozen. The overlay's freeze frame used to
+    /// be fetched after the surfaces were on screen, because every source cost hundreds of
+    /// milliseconds; a warm duplication device answers in 13 ms, which is inside the budget
+    /// for grabbing the frame BEFORE the first paint. The caller is on the UI thread with an
+    /// overlay to open, so a cold device must cost it nothing at all: it takes the deferred
+    /// path instead, and that capture leaves the device warm for next time.
+    /// </summary>
+    public static bool TryCaptureWarm(Rectangle screenRect, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        if (IsTemporarilyDisabled() || Volatile.Read(ref _lastAttemptFailed) != 0)
+            return false;
+
+        // TryEnter with no wait: a background probe or a recording start can hold the gate
+        // inside a native call for a long time, and blocking here would stall the hotkey.
+        if (!Monitor.TryEnter(Gate))
+            return false;
+        try
+        {
+            if (!HasWarmDisplaysFor(screenRect))
+                return false;
+
+            bitmap = CaptureRegionCore(screenRect);
+            Interlocked.Exchange(ref _lastUseTick, Environment.TickCount64);
+            ScheduleIdleEviction();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (!IsWaitTimeout(ex))
+                Log.Error("Warm desktop duplication capture failed; deferring the freeze", ex);
+            DisableTemporarily(ex);
+            Volatile.Write(ref _lastAttemptFailed, 1);
+            Reset();
+            bitmap = null;
+            return false;
+        }
+        finally
+        {
+            Monitor.Exit(Gate);
+        }
+    }
+
+    /// <summary>
+    /// Builds the duplication devices off the user path so the first freeze frame is a warm
+    /// 13 ms grab rather than a 155 ms cold device creation. Called at app idle; the probe
+    /// self-throttles, so repeat calls are free.
+    /// </summary>
+    public static void Prewarm(Rectangle screenRect) => StartBackgroundProbe(screenRect);
+
+    /// <summary>True when every display overlapping <paramref name="screenRect"/> already has
+    /// a cached duplication whose bounds still match. Caller holds <see cref="Gate"/>.</summary>
+    private static bool HasWarmDisplaysFor(Rectangle screenRect)
+    {
+        bool any = false;
+        foreach (var screen in WF.Screen.AllScreens)
+        {
+            Rectangle overlap = Rectangle.Intersect(screen.Bounds, screenRect);
+            if (overlap.Width < 1 || overlap.Height < 1)
+                continue;
+            any = true;
+            if (!Displays.TryGetValue(screen.DeviceName, out var display) ||
+                display.ScreenBounds != screen.Bounds)
+            {
+                return false;
+            }
+        }
+
+        return any;
     }
 
     private static bool TryCaptureBounded(Rectangle screenRect, int timeoutMs, out Bitmap? bitmap)

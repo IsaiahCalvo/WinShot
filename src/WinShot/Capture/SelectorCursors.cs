@@ -78,29 +78,47 @@ internal static class SelectorCursors
             using var g = SD.Graphics.FromImage(bmp);
             g.Clear(SD.Color.Transparent);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-            // The glyph font is in POINTS, which resolve against the bitmap's own 96 DPI
-            // and not the target monitor's, so the point size carries the scale too.
-            using var font = ThemePalette.IconFont((float)(ThemePalette.GlyphActionPt * scale));
+            // PIXELS, not points. A point-unit font resolves against the surface's DPI, and a
+            // new Bitmap inherits the PROCESS's — WinShot declares PerMonitorV2, so on a 150%
+            // primary that is 144, not the 96 this code used to claim. The glyph therefore came
+            // out 15*scale*144/72 = 30*scale px wide instead of 20*scale, and ran off the right
+            // and bottom of its own bitmap at every scale: measured ink reached the last column
+            // at 100/125/150/200%, cutting 3-5 px off the camera's right side. That is the
+            // "right side of the icon is a little cut off" report. ThemePalette documents this
+            // exact trap; this was the last selector surface still building a Point font.
+            int em = ThemePalette.PxForPt(ThemePalette.GlyphActionPt, scale);
+            using var font = ThemePalette.IconFontPx(em);
             using var format = new SD.StringFormat(SD.StringFormat.GenericTypographic)
             {
-                Alignment = SD.StringAlignment.Near,
-                LineAlignment = SD.StringAlignment.Near,
-                FormatFlags = SD.StringFormatFlags.NoWrap,
+                Alignment = SD.StringAlignment.Center,
+                LineAlignment = SD.StringAlignment.Center,
+                // NoClip kept, not overwritten: GenericTypographic carries it, and without it
+                // GDI+ hard-clips the string to the layout rect instead of letting a glyph whose
+                // black box overhangs its advance width finish drawing.
+                FormatFlags = SD.StringFormatFlags.NoWrap | SD.StringFormatFlags.NoClip,
             };
-            // The glyph sits down-and-right of the image origin because a cursor built
-            // from GetHicon carries a (0,0) hotspot -- so the pointed-at pixel is the
-            // top-left corner, and the camera trails it the way a drag ghost would.
+            // Centred in the box, not anchored at its top-left. Anchoring is how the clipping
+            // survived: the box is inset equally on all four sides, but a glyph pinned to the
+            // corner only ever consumes the LEFT inset and spends whatever the font asks for on
+            // the right. The inset is the halo's room now, on all four sides.
             var box = GlyphBox(size, inset);
+            // Centring the LAYOUT box is not centring the glyph: the box is the font's line
+            // box (ascent plus descent) and the camera's ink sits above the baseline, so
+            // layout-centred ink measured 6 px from the top and 8 from the bottom at 125%.
+            // Two px of droop is exactly the kind of thing that reads as "off" without being
+            // nameable, so the ink is measured and the box moved to put it in the middle.
+            var (dx0, dy0) = CentringOffset(size, box, font, format);
+            box.Offset(dx0, dy0);
             // A symmetric halo, not one offset copy: a single dark pass down-and-right left
             // the top-left edge of a white camera with no contrast at all over light screen
             // content, and the cursor has to read on any wallpaper.
             using (var halo = new SD.SolidBrush(SD.Color.Black))
             {
                 foreach (var (dx, dy) in Halo)
-                    g.DrawString(CameraGlyph, font, halo, box.X + dx, box.Y + dy, format);
+                    g.DrawString(CameraGlyph, font, halo, Offset(box, dx, dy), format);
             }
             using (var brush = new SD.SolidBrush(SD.Color.White))
-                g.DrawString(CameraGlyph, font, brush, box.X, box.Y, format);
+                g.DrawString(CameraGlyph, font, brush, box, format);
             return bmp;
         }
         catch
@@ -117,6 +135,49 @@ internal static class SelectorCursors
     /// in it.</summary>
     internal static SD.Rectangle GlyphBox(int size, int inset) =>
         new(inset, inset, Math.Max(1, size - inset * 2), Math.Max(1, size - inset * 2));
+
+    private static SD.RectangleF Offset(SD.Rectangle box, int dx, int dy) =>
+        new(box.X + dx, box.Y + dy, box.Width, box.Height);
+
+    /// <summary>
+    /// How far to move <paramref name="box"/> so the glyph's INK lands in the middle of a
+    /// <paramref name="size"/>-px cursor. Draws once into a throwaway surface and reads the
+    /// alpha bounds, because the offset between a font's line box and its ink is a property of
+    /// the font that nothing else here can be told. Cheap: one draw per distinct monitor scale
+    /// for the life of the process, and the cursors are cached.
+    /// </summary>
+    private static (int Dx, int Dy) CentringOffset(
+        int size, SD.Rectangle box, SD.Font font, SD.StringFormat format)
+    {
+        using var probe = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(probe))
+        {
+            g.Clear(SD.Color.Transparent);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+            using var white = new SD.SolidBrush(SD.Color.White);
+            g.DrawString(CameraGlyph, font, white, box, format);
+        }
+
+        int minX = size, minY = size, maxX = -1, maxY = -1;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                // Same antialiasing floor the harness scans with, so the two agree on what
+                // counts as ink.
+                if (probe.GetPixel(x, y).A <= 8) continue;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+
+        if (maxX < 0)
+            return (0, 0); // no glyph (missing font): leave the box where it is
+
+        return ((size - 1 - maxX - minX) / 2, (size - 1 - maxY - minY) / 2);
+    }
 
     /// <summary>Segoe Fluent Icons "Camera" (U+E722), the same family every other glyph uses.</summary>
     private const string CameraGlyph = "";
