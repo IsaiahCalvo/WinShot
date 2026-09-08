@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using WinShot.Capture;
 using WinShot.Core;
@@ -114,6 +114,105 @@ public class SelectorRenderHarness
         return maxX < 0
             ? SD.Rectangle.Empty
             : SD.Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+    }
+
+    // ---- chrome that has to grow with the monitor ----------------------------------
+
+    /// <summary>
+    /// The crosshair's white guide is drawn with an aliased pen (the surface paints with
+    /// SmoothingMode.None), and an aliased pen covers floor(width) rows — so the old
+    /// weight = scale gave 1.5 -> ONE row, exactly what a 100% monitor gets. The growth was a
+    /// no-op at 125% and 150% and only started working at 175%, while the shadow (3x) grew
+    /// regardless: a 5 px black band around a 1 px white core on the reporter's own display.
+    /// </summary>
+    [Fact]
+    public void TheCrosshairGuideGetsThickerOnAHigherDpiMonitor()
+    {
+        int at100 = GuideThickness(1.0d);
+        int at150 = GuideThickness(1.5d);
+        int at200 = GuideThickness(2.0d);
+
+        Assert.Equal(1, at100);
+        Assert.True(at150 > at100, $"the guide is {at150} px at 150% and {at100} px at 100% — it did not grow");
+        Assert.True(at200 >= at150, $"the guide shrank from {at150} px at 150% to {at200} px at 200%");
+    }
+
+    /// <summary>
+    /// Rows of near-white the HORIZONTAL guide actually covers. Drawn straight through
+    /// SelectorChrome onto a black ground with SmoothingMode.None, which is how the selector
+    /// surface paints it — an antialiased scan would blur the very quantisation being measured.
+    /// The column is far to the left of the cursor so it misses the gap and the vertical arm.
+    /// </summary>
+    private static int GuideThickness(double scale)
+    {
+        var size = new SD.Size(Width, Height);
+        var cursor = new SD.Point(Width / 2, Height / 2);
+        using var bmp = new SD.Bitmap(Width, Height, SD.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = SD.Graphics.FromImage(bmp))
+        {
+            g.Clear(SD.Color.Black);
+            g.SmoothingMode = SD.Drawing2D.SmoothingMode.None;
+            SelectorChrome.DrawCrosshair(g, size, cursor, scale);
+        }
+
+        int rows = 0;
+        for (int y = 0; y < Height; y++)
+        {
+            // The guide is 210-alpha white over black; its shadow is black on black. Only the
+            // stroke clears this floor.
+            if (bmp.GetPixel(20, y).R > 150)
+                rows++;
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// The loupe was the one selector surface that took no scale at all: every constant in its
+    /// renderer and its layout was consumed as raw device px, so a 120-logical box came out 120
+    /// DEVICE px — 80 logical, two thirds of intended — on a 150% display, with 5.3-logical
+    /// zoom cells, while its Point-font labels scaled with the primary monitor regardless.
+    /// </summary>
+    [Fact]
+    public void TheLoupeBoxAndItsLabelPillGrowWithTheMonitor()
+    {
+        SD.Rectangle At(double scale) => FastSelectorLoupeRenderer.OccupiedRect(
+            new SD.Size(Width * 3, Height * 3),
+            new SD.Rectangle(0, 0, Width * 3, Height * 3),
+            new SD.Point(200, 200),
+            new SD.Point(200, 200),
+            scale);
+
+        SD.Rectangle at100 = At(1.0d);
+        SD.Rectangle at150 = At(1.5d);
+        SD.Rectangle at200 = At(2.0d);
+
+        Assert.False(at100.IsEmpty, "the loupe should be showing at all");
+        // The box is square and 120 logical px, so its width IS the scaling, exactly.
+        Assert.Equal(120, at100.Width);
+        Assert.Equal(180, at150.Width);
+        Assert.Equal(240, at200.Width);
+        // And the label pill under it grows too, rather than staying a fixed slab that the
+        // box outgrows.
+        int Pill(SD.Rectangle r) => r.Height - r.Width;
+        Assert.True(Pill(at150) > Pill(at100),
+            $"the label pill stayed {Pill(at100)} px tall while the loupe grew to {at150.Width}");
+        Assert.True(Pill(at200) > Pill(at150),
+            $"the label pill stayed {Pill(at150)} px tall while the loupe grew to {at200.Width}");
+    }
+
+    /// <summary>
+    /// The gap between a dimension line and its pill goes through the scaler its siblings use.
+    /// It was a bare constant, so at 150% the size pill stood 12 device px off its rect while
+    /// the measurement pill stood 6 off its line — half the intended distance, and the pill's
+    /// own hit corridor in Measure mode was 4 logical px tall.
+    /// </summary>
+    [Fact]
+    public void TheDimensionPillGapScalesLikeEveryOtherSpacingToken()
+    {
+        Assert.Equal(6, SelectorChrome.DimensionPillGapPx(1.0d));
+        Assert.Equal(9, SelectorChrome.DimensionPillGapPx(1.5d));
+        Assert.Equal(12, SelectorChrome.DimensionPillGapPx(2.0d));
     }
 
     // ---- selector states -----------------------------------------------------------

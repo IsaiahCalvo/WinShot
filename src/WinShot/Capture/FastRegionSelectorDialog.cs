@@ -2454,7 +2454,8 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             if (_magnifierOn)
             {
                 FastSelectorLoupeRenderer.Draw(
-                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize);
+                    g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize,
+                    WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
             }
             else if (dragSize.IsEmpty)
             {

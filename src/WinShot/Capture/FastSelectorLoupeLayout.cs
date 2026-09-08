@@ -14,9 +14,16 @@ public readonly record struct FastSelectorLoupe(
 
 public static class FastSelectorLoupeLayout
 {
+    /// <summary>Pointer-follow offsets and the flip clearance, in LOGICAL px — every one of
+    /// them is multiplied by the monitor scale before use. They were consumed raw, which put
+    /// the loupe 16 logical px right of the pointer on a 150 % display instead of 24.</summary>
     private const int OffsetX = 24;
     private const int OffsetY = 52;
     internal const int FlipY = 56;
+
+    /// <summary>Room the label pill needs below the loupe before the box has to flip above the
+    /// pointer, in LOGICAL px.</summary>
+    private const int LabelClearance = 28;
 
     public static FastSelectorLoupe Calculate(
         SD.Size clientSize,
@@ -25,7 +32,8 @@ public static class FastSelectorLoupeLayout
         SD.Point cursorScreen,
         int loupeSize,
         int zoom,
-        SD.Size dragSize = default)
+        SD.Size dragSize = default,
+        double scale = 1d)
     {
         if (clientSize.Width < 1 ||
             clientSize.Height < 1 ||
@@ -46,12 +54,14 @@ public static class FastSelectorLoupeLayout
         int sourceTop = Clamp(cursorScreen.Y - sampleSize / 2, virtualScreen.Top, virtualScreen.Bottom - sampleSize);
         var source = new SD.Rectangle(sourceLeft, sourceTop, sampleSize, sampleSize);
 
-        int left = cursorClient.X + OffsetX;
-        int top = cursorClient.Y + OffsetY;
+        int offsetX = Px(OffsetX, scale);
+        int offsetY = Px(OffsetY, scale);
+        int left = cursorClient.X + offsetX;
+        int top = cursorClient.Y + offsetY;
         if (left + loupeSize > clientSize.Width)
-            left = cursorClient.X - OffsetX - loupeSize;
-        if (top + loupeSize + 28 > clientSize.Height)
-            top = cursorClient.Y - FlipY - loupeSize;
+            left = cursorClient.X - offsetX - loupeSize;
+        if (top + loupeSize + Px(LabelClearance, scale) > clientSize.Height)
+            top = cursorClient.Y - Px(FlipY, scale) - loupeSize;
 
         left = Clamp(left, 0, Math.Max(0, clientSize.Width - loupeSize));
         top = Clamp(top, 0, Math.Max(0, clientSize.Height - loupeSize));
@@ -83,6 +93,9 @@ public static class FastSelectorLoupeLayout
             targetSample,
             cornerRadius);
     }
+
+    private static int Px(int logical, double scale) =>
+        Math.Max(1, (int)Math.Round(logical * (scale is > 0d and < 100d ? scale : 1d)));
 
     private static int Clamp(int value, int min, int max)
     {

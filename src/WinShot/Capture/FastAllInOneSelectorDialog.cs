@@ -1125,7 +1125,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         if (cursorOnThisSurface && _magnifierOn)
         {
             FastSelectorLoupeRenderer.Draw(
-                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize);
+                g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize,
+                WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
         }
         else if (cursorOnThisSurface && dragSize.IsEmpty && _pendingPx is null && _hoverWindow is null)
         {
@@ -1526,7 +1527,10 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private static readonly SD.Color SelectedFill = ThemePalette.AccentPressed;
         private static readonly SD.Color GlyphColor = ThemePalette.TextPrimary;
         private static readonly SD.Color LabelColor = ThemePalette.TextSecondary;
-        private static readonly SD.Color FieldFill = SD.Color.FromArgb(0x3A, 0x3A, 0x3A);
+        /// <summary>The size fields' ground. Was a bare 0x3A3A3A — two counts off SurfaceAlt
+        /// on red and green and one on blue, and the only line in this block that did not
+        /// alias a token, in a block whose whole point is that the bar cannot drift.</summary>
+        private static readonly SD.Color FieldFill = ThemePalette.SurfaceAlt;
 
         // Design units (96-DPI logical px). Point-based fonts render at the monitor's
         // DPI, so the pixel layout must scale with them via U() or the bar renders
@@ -1537,10 +1541,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private const int ButtonGap = 2;
         private const int BarPadX = 6;
         private const int BarGap = 12;       // transparent gap between the two bars
-        private const int GlyphTop = 12;
+        // Glyph 11..35, a 2 px breath, label 37..53: a 42-tall block centred in the 64 bar
+        // with 11 above and 11 below. It used to start at 12 and end at 54, which is 12 above
+        // and 10 below - the content sat a pixel low in its own bar.
+        private const int GlyphTop = 11;
         private const int GlyphHeight = 24;
-        private const int LabelTop = 38;
+        private const int LabelTop = 37;
         private const int LabelHeight = 16;
+
+        /// <summary>The ratio badge's band at the bottom of its cell, and the breathing room
+        /// left above the glyph and below the badge.</summary>
+        private const int RatioBadgeHeight = 11;
+        private const int RatioBadgeMargin = 1;
 
         private readonly double _u = WinShot.Recording.RecordingMonitorDpi.ScaleFor(PrimaryBounds());
 
@@ -1621,7 +1633,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 new SD.Size(12, 8));
             _toolTip.Draw += (_, e) =>
             {
-                using var bg = new SD.SolidBrush(SD.Color.FromArgb(0x2B, 0x2B, 0x2B));
+                // ToolbarBg, not a hand-picked 0x2B2B2B: a tooltip is chrome raised off the
+                // same bar, so it wears the bar's own token.
+                using var bg = new SD.SolidBrush(ThemePalette.ToolbarBg);
                 e.Graphics.FillRectangle(bg, e.Bounds);
                 using var edge = new SD.Pen(BarBorder, 1);
                 e.Graphics.DrawRectangle(edge,
@@ -2043,9 +2057,18 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                     SD.Color.FromArgb((int)Math.Round(SelectedFill.A * badgeFade), SelectedFill));
                 g.FillPath(brush, path);
             }
+            // The glyph gets everything above the badge's band - exactly above it. The two
+            // boxes used to OVERLAP by U(2): the glyph rect ended at Bottom-U(11) while the
+            // badge started at Bottom-U(13). The pair also sat flush against the cell's top
+            // with U(2) spare underneath, so a vertically centred glyph was centred inside a
+            // box that was itself off-centre.
+            int badgeTop = _ratioRect.Bottom - U(RatioBadgeHeight + RatioBadgeMargin);
             var ratioGlyphRect = _ratioRect;
             if (ratioChosen)
-                ratioGlyphRect.Height -= U(11); // make room for the badge under the glyph
+            {
+                ratioGlyphRect.Y += U(RatioBadgeMargin);
+                ratioGlyphRect.Height = badgeTop - ratioGlyphRect.Y;
+            }
             // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
             // showing two identical accent-filled crop icons a few cells apart.
             SelectorChrome.DrawCenteredText(g, "", _glyphFont, ratioGlyphRect,
@@ -2057,7 +2080,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 int badgeAlpha = (int)Math.Round(255 * badgeFade);
                 var badgeRect = new SD.Rectangle(
-                    _ratioRect.X, _ratioRect.Bottom - U(13), _ratioRect.Width, U(11));
+                    _ratioRect.X, badgeTop, _ratioRect.Width, U(RatioBadgeHeight));
                 // GDI+ DrawString, not TextRenderer: GDI drops the alpha byte, so the ramp
                 // this fade exists for was popping the badge in at full strength.
                 SelectorChrome.DrawCenteredText(g, preset.Badge, _labelFont, badgeRect,

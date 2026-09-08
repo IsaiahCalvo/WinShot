@@ -12,10 +12,27 @@ namespace WinShot.Tests;
 /// snapshot — no real screen, no real pointer, and the chrome is pixel-scanned rather than
 /// eyeballed.
 /// </summary>
-public class MeasureModeTests
+public class MeasureModeTests : IDisposable
 {
     private static readonly Rectangle Screen = new(0, 0, 400, 300);
     private static readonly Rectangle Card = new(50, 40, 100, 60);
+
+    private readonly Func<Rectangle, double>? _previousScale =
+        WinShot.Recording.RecordingMonitorDpi.ScaleSource;
+
+    /// <summary>
+    /// Pins the monitor scale at 100% for every scan in this class. Screen above is a
+    /// FABRICATED 400x300 monitor at the origin, but ScaleFor resolves a rectangle against the
+    /// REAL desktop — so on Isaiah's 150% primary these tests were quietly scanning
+    /// 1.5x-scaled chrome laid out for a 400x300 screen, and every hard-coded pixel offset in
+    /// here meant something different on his machine than on a 96-DPI one. Exactly the seam
+    /// the handoff says to check first when a selector test fails only on his box.
+    /// </summary>
+    public MeasureModeTests() =>
+        WinShot.Recording.RecordingMonitorDpi.ScaleSource = _ => 1d;
+
+    public void Dispose() =>
+        WinShot.Recording.RecordingMonitorDpi.ScaleSource = _previousScale;
 
     /// <summary>A blue desktop with one solid card on it, which is the whole world these
     /// tests need to measure.</summary>
