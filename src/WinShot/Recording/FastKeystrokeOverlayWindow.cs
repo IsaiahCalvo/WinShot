@@ -184,27 +184,34 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
         using var frame = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = SD.Graphics.FromImage(frame))
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            int fillAlpha = (int)Math.Round(235 * _opacity);
-            using var path = GdiPaths.RoundedRect(new SD.Rectangle(0, 0, width - 1, height - 1), height / 2);
-            using var brush = new SD.SolidBrush(SD.Color.FromArgb(fillAlpha, PillBack));
-            using var pen = new SD.Pen(SD.Color.FromArgb((int)Math.Round(PillBorder.A * _opacity), PillBorder), 1);
-            g.FillPath(brush, path);
-            g.DrawPath(pen, path);
+            // The fade is composited, not handed to each brush: TextRenderer drops the alpha
+            // channel, so an alpha-scaled ink colour left the chord at full strength while the
+            // capsule under it dissolved. GdiFade fades the finished pill as one image.
+            GdiFade.Draw(g, new SD.Rectangle(0, 0, width, height), _opacity, (target, box) =>
+            {
+                target.SmoothingMode = SmoothingMode.AntiAlias;
+                using var path = GdiPaths.RoundedRect(
+                    new SD.Rectangle(box.Left, box.Top, box.Width - 1, box.Height - 1), box.Height / 2);
+                using var brush = new SD.SolidBrush(SD.Color.FromArgb(235, PillBack));
+                using var pen = new SD.Pen(PillBorder, 1);
+                target.FillPath(brush, path);
+                target.DrawPath(pen, path);
 
-            // Centred in the pill's CURRENT width, so the text stays put while the pill grows
-            // around it rather than sliding as the edges move.
-            var textBounds = new SD.Rectangle(S(10), 0, Math.Max(1, width - S(20)), height);
-            WF.TextRenderer.DrawText(
-                g,
-                _run,
-                _font,
-                textBounds,
-                SD.Color.FromArgb((int)Math.Round(255 * _opacity), TextColor),
-                WF.TextFormatFlags.HorizontalCenter |
-                WF.TextFormatFlags.VerticalCenter |
-                WF.TextFormatFlags.SingleLine |
-                WF.TextFormatFlags.EndEllipsis);
+                // Centred in the pill's CURRENT width, so the text stays put while the pill
+                // grows around it rather than sliding as the edges move.
+                var textBounds = new SD.Rectangle(
+                    box.Left + S(10), box.Top, Math.Max(1, box.Width - S(20)), box.Height);
+                WF.TextRenderer.DrawText(
+                    target,
+                    _run,
+                    _font,
+                    textBounds,
+                    TextColor,
+                    WF.TextFormatFlags.HorizontalCenter |
+                    WF.TextFormatFlags.VerticalCenter |
+                    WF.TextFormatFlags.SingleLine |
+                    WF.TextFormatFlags.EndEllipsis);
+            });
         }
 
         Present(frame, KeystrokeDisplay.Anchor(

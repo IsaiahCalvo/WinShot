@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using WinShot.Capture;
 using Xunit;
 using SD = System.Drawing;
@@ -15,15 +15,30 @@ public class SelectorHintPillTests
     private const string Hint = "Drag to record part of the screen, or click a window to record it.";
     private static readonly SD.Size Surface = new(1280, 720);
 
-    private static SD.Bitmap Render(string text, double opacity)
+    private static SD.Bitmap Render(string text, double opacity) =>
+        Render(text, opacity, SD.Color.FromArgb(255, 20, 20, 20));
+
+    private static SD.Bitmap Render(string text, double opacity, SD.Color ground)
     {
         var canvas = new SD.Bitmap(Surface.Width, Surface.Height, PixelFormat.Format32bppArgb);
         using (SD.Graphics g = SD.Graphics.FromImage(canvas))
         {
-            g.Clear(SD.Color.FromArgb(255, 20, 20, 20));
+            g.Clear(ground);
             SelectorChrome.DrawHint(g, Surface, text, opacity);
         }
         return canvas;
+    }
+
+    /// <summary>The darkest pixel anywhere inside the pill's box — the ink's core.</summary>
+    private static int DarkestInk(SD.Bitmap bmp, SD.Rectangle box)
+    {
+        int darkest = 255;
+        for (int y = box.Top; y < box.Bottom; y++)
+        {
+            for (int x = box.Left; x < box.Right; x++)
+                darkest = Math.Min(darkest, bmp.GetPixel(x, y).R);
+        }
+        return darkest;
     }
 
     private static SD.Rectangle LitBounds(SD.Bitmap bmp)
@@ -114,5 +129,48 @@ public class SelectorHintPillTests
         Assert.True(
             half.GetPixel(sample.X, sample.Y).R < full.GetPixel(sample.X, sample.Y).R,
             "the fading pill was not dimmer than the resting one");
+    }
+
+    /// <summary>
+    /// The sentence has to fade WITH its capsule. GDI's TextRenderer drops the alpha channel,
+    /// so handing it an alpha-scaled colour faded only the GDI+ fill underneath: the capsule
+    /// dissolved out from under solid black text that then vanished in a single frame. Rendered
+    /// over white, where fading ink moves unmistakably toward the ground rather than toward it
+    /// by four units. The sample above only ever touched fill, which is why it passed over this.
+    /// </summary>
+    [Fact]
+    public void Pill_InkFadesWithItsCapsule()
+    {
+        SD.Rectangle box;
+        using (SD.Bitmap onDark = Render(Hint, opacity: 1))
+            box = LitBounds(onDark);
+
+        using SD.Bitmap full = Render(Hint, opacity: 1, SD.Color.White);
+        using SD.Bitmap eighth = Render(Hint, opacity: 0.125, SD.Color.White);
+
+        int solid = DarkestInk(full, box);
+        int fading = DarkestInk(eighth, box);
+        Assert.InRange(solid, 0, 60);
+        Assert.True(
+            fading > solid + 100,
+            $"the ink did not fade with the capsule: {solid} at rest, {fading} at one-eighth");
+
+        // ...and it fades rather than disappearing. The pill is composited through an ARGB
+        // buffer; text that lost its alpha on the way into that buffer would satisfy the
+        // assertion above by not being drawn at all, so mid-fade the ink must still be there,
+        // still darker than the fill around it.
+        using SD.Bitmap mid = Render(Hint, opacity: 0.6);
+        SD.Rectangle interior = SD.Rectangle.Inflate(box, -box.Height, 0);
+        int ink = 0;
+        for (int y = interior.Top; y < interior.Bottom; y++)
+        {
+            for (int x = interior.Left; x < interior.Right; x++)
+            {
+                if (mid.GetPixel(x, y).R < 60)
+                    ink++;
+            }
+        }
+
+        Assert.True(ink > 20, $"the pill lost its text on the way through the fade ({ink} ink px)");
     }
 }

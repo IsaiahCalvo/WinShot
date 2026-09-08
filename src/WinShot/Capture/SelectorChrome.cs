@@ -101,18 +101,23 @@ internal static class SelectorChrome
         int top = Math.Max(0, (int)Math.Round(clientSize.Height * 0.12));
         var bg = new SD.Rectangle(left, top, w, h);
 
-        double amount = Math.Clamp(opacity, 0, 1);
-        SmoothingMode prev = g.SmoothingMode;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bg, h / 2))
-        using (var bgBrush = new SD.SolidBrush(
-            SD.Color.FromArgb((int)Math.Round(238 * amount), ThemePalette.TextPrimary)))
-            g.FillPath(bgBrush, path);
-        g.SmoothingMode = prev;
+        // Buffered, not alpha-scaled: TextRenderer drops the alpha channel, so scaling the ink
+        // colour would dissolve the capsule out from under a still-solid black sentence that
+        // then vanished in one frame. GdiFade composites the whole pill instead.
+        GdiFade.Draw(g, bg, opacity, (target, box) =>
+        {
+            SmoothingMode prev = target.SmoothingMode;
+            target.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = GdiPaths.RoundedRect(box, box.Height / 2))
+            using (var bgBrush = new SD.SolidBrush(
+                SD.Color.FromArgb(238, ThemePalette.TextPrimary)))
+                target.FillPath(bgBrush, path);
+            target.SmoothingMode = prev;
 
-        WF.TextRenderer.DrawText(g, text, font, bg,
-            SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.WindowBg),
-            WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.NoPadding);
+            WF.TextRenderer.DrawText(target, text, font, box, ThemePalette.WindowBg,
+                WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
+                WF.TextFormatFlags.NoPadding);
+        });
     }
 
     /// <summary>Draws the size/coordinate label pill, clamped inside the client area.</summary>
