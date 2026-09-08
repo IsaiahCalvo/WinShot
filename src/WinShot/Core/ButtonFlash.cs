@@ -24,6 +24,9 @@ public static class ButtonFlash
     /// leave the button lying about what it does.</summary>
     public const int HoldMs = 1200;
 
+    // ponytail: plain Dictionary, no lock. Every caller is on the one WPF UI thread, which
+    // is what makes the DispatcherTimer legal in the first place. If a second UI thread ever
+    // flashes a button, key this per-Dispatcher rather than adding a lock to the fast path.
     private static readonly Dictionary<ContentControl, Flash> Running = new();
 
     private sealed record Flash(DispatcherTimer Timer, RoutedEventHandler Unloaded);
