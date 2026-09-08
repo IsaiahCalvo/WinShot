@@ -468,8 +468,12 @@ public partial class EditorWindow : Window
         {
             // Huge is the same look at double size; previewing it at double size would
             // blow the menu open, so every row previews at one readable size.
+            // ponytail: the size comes off the type scale; the INK stays literal white.
+            // The arrow preview binds its ink to the row, but this factory paints three
+            // different element kinds (TextBlock, Path, Border) from one Brush argument, so
+            // following the row would mean teaching the factory about rows.
             FrameworkElement preview = AnnotationFactory.CreateStyledTextLabel(
-                style.ToString(), Brushes.White, 14, style);
+                style.ToString(), Brushes.White, (double)FindResource("TextBodyLg"), style);
             preview.VerticalAlignment = VerticalAlignment.Center;
             var row = AddPopoverRow(TextStyleList, "TextStyle", preview, style, $"{style} text");
             TextStyle picked = style;

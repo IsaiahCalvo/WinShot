@@ -229,6 +229,11 @@ public partial class EditorWindow : Window
         if (marks.Count == 0) return false;
         AnnotationClipboard.Clear();
         AnnotationClipboard.AddRange(marks);
+        // Ctrl+C over a mark used to be completely silent: nothing on screen, nothing on the
+        // Windows clipboard, while the button beside it said the image had been copied. The
+        // user pressed it twice with no clue why the first press did nothing. Same checkmark
+        // the picture copy flashes — this IS a copy, and the button's help text says which.
+        ButtonFlash.Show(BtnCopy, "", "");
         return true;
     }
 
@@ -278,7 +283,13 @@ public partial class EditorWindow : Window
             AnnotationCanvas.Children.Add(element);
             added.Add(element);
         }
-        if (added.Count == 0) return;
+        if (added.Count == 0)
+        {
+            // Every mark failed to rebuild. The reasons are in the log; without this the
+            // paste simply looks like it did nothing.
+            App.Toast("Paste", "WinShot could not paste those marks.", severity: ToastSeverity.Error);
+            return;
+        }
 
         Push(new EditorAction(
             undo: () =>
@@ -373,23 +384,55 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Live preview while the drag is still happening. Repainting means re-running the
-    /// effect over the covered pixels, which is linear in the area — so on a very large
-    /// mark this rate-limits itself rather than dropping the frame rate of the drag.
+    /// The floor between two live repaints. Repainting means re-running the effect over the
+    /// covered pixels, which is linear in the AREA: measured on a 4K source, a 400x120
+    /// Blur-secure mark costs 2.5 ms a frame and a 2400x1400 one costs 173-267 ms.
     /// ponytail: a fixed interval, not an adaptive one; measure before making it clever.
     /// </summary>
     private const int RedactPreviewIntervalMs = 30;
 
+    /// <summary>
+    /// Whether a live repaint is due. The gate is the interval OR the last repaint's own
+    /// cost, whichever is longer, because a fixed interval buys nothing on exactly the
+    /// marks that need it: a paint that takes 267 ms has already overrun a 30 ms floor by
+    /// the time the next mouse-move arrives, so every frame repaints and the editor drops
+    /// to ~4 fps. Charging the gesture the paint's own cost caps live repainting at about
+    /// half the drag's frames however big the mark is.
+    /// </summary>
+    internal static bool RedactRepaintDue(long sinceLastPaintMs, long lastPaintCostMs) =>
+        sinceLastPaintMs >= Math.Max(RedactPreviewIntervalMs, Math.Max(0, lastPaintCostMs));
+
+    /// <summary>What the last pixel-backed repaint cost, in milliseconds. See above.</summary>
+    private long _redactPaintCostMs;
+
+    /// <summary>
+    /// A clock that has never run means nothing has been painted yet, so the first repaint
+    /// of a mark loaded from a project is due immediately — without this it would be queued
+    /// against a stopwatch reading zero forever and never land.
+    /// </summary>
+    private bool RedactPreviewDue() =>
+        !_redactPreviewClock.IsRunning ||
+        RedactRepaintDue(_redactPreviewClock.ElapsedMilliseconds, _redactPaintCostMs);
+
+    /// <summary>Repaints a pixel-backed mark and remembers what it cost.</summary>
+    private void PaintPixelBackedMark(Action paint)
+    {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        paint();
+        _redactPaintCostMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _redactPreviewClock.Restart();
+    }
+
+    /// <summary>Live preview while the drag is still happening.</summary>
     private void UpdateRedactionPreview(System.Windows.Shapes.Rectangle mark, Rect bounds, bool force)
     {
         Canvas.SetLeft(mark, bounds.X);
         Canvas.SetTop(mark, bounds.Y);
         mark.Width = Math.Max(1, bounds.Width);
         mark.Height = Math.Max(1, bounds.Height);
-        if (!force && _redactPreviewClock.ElapsedMilliseconds < RedactPreviewIntervalMs)
-            return;
-        _redactPreviewClock.Restart();
-        AnnotationFactory.PaintRedaction(mark, _source, bounds, _redactStyle, _redactStrength, _activeRedactSeed);
+        if (!force && !RedactPreviewDue()) return;
+        PaintPixelBackedMark(() => AnnotationFactory.PaintRedaction(
+            mark, _source, bounds, _redactStyle, _redactStrength, _activeRedactSeed));
     }
 
     /// <summary>
@@ -426,16 +469,36 @@ public partial class EditorWindow : Window
         Canvas.SetTop(bubble, bounds.Y);
         bubble.Width = Math.Max(1, bounds.Width);
         bubble.Height = Math.Max(1, bounds.Height);
-        if (!force && _redactPreviewClock.ElapsedMilliseconds < RedactPreviewIntervalMs) return;
-        _redactPreviewClock.Restart();
-        AnnotationFactory.PaintMagnifier(
-            bubble, _source, bounds, MagnifierLayout.DefaultFocus(bounds), _magnification);
+        if (!force && !RedactPreviewDue()) return;
+        PaintPixelBackedMark(() => AnnotationFactory.PaintMagnifier(
+            bubble, _source, bounds, MagnifierLayout.DefaultFocus(bounds), _magnification));
     }
+
+    /// <summary>
+    /// True while a pointer gesture is driving repaints frame by frame: a drag-move, a
+    /// handle resize, or one of the two live sliders. Those are the callers that must not
+    /// pay full price on every mouse-move; a nudge, a crop, an undo or a redo is a single
+    /// repaint and simply pays it.
+    /// </summary>
+    private bool RedactRepaintIsLive =>
+        _movingSelection || _activeHandle >= 0 ||
+        _redactStrengthElement is not null || _magnifyElement is not null;
+
+    /// <summary>Marks a live gesture skipped, repainted when the rate limit allows.</summary>
+    private readonly HashSet<UIElement> _redactPending = new();
+    private DispatcherTimer? _redactPendingTimer;
 
     /// <summary>
     /// Repaints a committed redaction from the pixels it covers NOW — after a move, a
     /// resize, a crop shift, a style change or an undo. The seed rides in the metadata so
     /// a mosaic redraws with the same blocks instead of reshuffling on every recompute.
+    ///
+    /// The initial drag rate-limits itself; move, resize and the strength slider used to
+    /// not, so the expensive gesture was the unguarded one — a 2400x1400 Blur-secure mark
+    /// ran 173-267 ms of GDI on the UI thread per mouse-move frame. They come through here,
+    /// so the gate lives here rather than at each call site, and a skipped frame is queued
+    /// instead of dropped: whatever the gesture skipped is repainted on the next tick, so
+    /// no mark can be left showing pixels it no longer covers.
     /// </summary>
     private void RefreshRedaction(UIElement element)
     {
@@ -443,20 +506,81 @@ public partial class EditorWindow : Window
             mark.Tag is not AnnotationData meta)
             return;
 
-        // Two marks are painted from the pixels underneath rather than from their own
-        // properties, and both have to be repainted by the same six callers — every move,
-        // resize, crop, rotate, undo and redo. One entry point, so a new pixel-backed mark
-        // never has to find those six again.
+        if (RedactRepaintIsLive && !RedactPreviewDue())
+        {
+            _redactPending.Add(element);
+            StartRedactPendingTimer();
+            return;
+        }
+        _redactPending.Remove(element);
+        RepaintPixelBackedMark(mark, meta);
+    }
+
+    /// <summary>
+    /// Two marks are painted from the pixels underneath rather than from their own
+    /// properties, and both have to be repainted by the same six callers — every move,
+    /// resize, crop, rotate, undo and redo. One entry point, so a new pixel-backed mark
+    /// never has to find those six again.
+    /// </summary>
+    private void RepaintPixelBackedMark(System.Windows.Shapes.Rectangle mark, AnnotationData meta)
+    {
         switch (meta.Type)
         {
             case AnnotationData.TypeRedact:
-                AnnotationFactory.PaintRedaction(mark, _source, RedactionBounds(mark, meta),
-                    Redaction.Parse(meta.Style), meta.Strength ?? Redaction.DefaultStrength, meta.Seed ?? 0);
+                PaintPixelBackedMark(() => AnnotationFactory.PaintRedaction(
+                    mark, _source, RedactionBounds(mark, meta),
+                    Redaction.Parse(meta.Style), meta.Strength ?? Redaction.DefaultStrength, meta.Seed ?? 0));
                 break;
             case AnnotationData.TypeMagnifier:
-                AnnotationFactory.PaintMagnifier(mark, _source, RedactionBounds(mark, meta),
-                    MagnifierFocus(meta), meta.Zoom ?? MagnifierLayout.DefaultScale);
+                PaintPixelBackedMark(() => AnnotationFactory.PaintMagnifier(
+                    mark, _source, RedactionBounds(mark, meta),
+                    MagnifierFocus(meta), meta.Zoom ?? MagnifierLayout.DefaultScale));
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Drains the skipped repaints once the rate limit allows. A timer rather than a hook
+    /// on each gesture's end: a mark whose repaint was skipped has to catch up whether the
+    /// gesture finished, was aborted, or lost mouse capture to an Alt+Tab.
+    /// </summary>
+    private void StartRedactPendingTimer()
+    {
+        if (_redactPendingTimer is not null) return;
+        _redactPendingTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(RedactPreviewIntervalMs),
+        };
+        _redactPendingTimer.Tick += (_, _) =>
+        {
+            if (_redactPending.Count > 0 && !RedactPreviewDue()) return;
+            StopRedactPendingTimer();
+            FlushRedactionRefresh();
+        };
+        _redactPendingTimer.Start();
+    }
+
+    private void StopRedactPendingTimer()
+    {
+        _redactPendingTimer?.Stop();
+        _redactPendingTimer = null;
+    }
+
+    /// <summary>
+    /// Repaints everything a live gesture skipped. Called from the timer and before the
+    /// canvas is read for pixels, so a flatten can never bake a stale redaction.
+    /// </summary>
+    private void FlushRedactionRefresh()
+    {
+        if (_redactPending.Count == 0) return;
+        UIElement[] pending = _redactPending.ToArray();
+        _redactPending.Clear();
+        // Straight to the paint, not back through the gate: this pass IS the catch-up, so
+        // re-asking "is a repaint due?" would queue the same marks again forever.
+        foreach (UIElement element in pending)
+        {
+            if (element is System.Windows.Shapes.Rectangle mark && mark.Tag is AnnotationData meta)
+                RepaintPixelBackedMark(mark, meta);
         }
     }
 
@@ -548,7 +672,7 @@ public partial class EditorWindow : Window
         // GetAwaiter().GetResult() on the UI thread, which awaits Dispatcher.InvokeAsync inside
         // RefreshImageAsync -> the UI thread blocks waiting on itself -> deadlock.
         _source = after;
-        await OnSourceReplacedAsync();
+        await OnSourceReplacedAsync(refreshPixelMarks: false);
         if (_closed) return;
         ShiftAnnotations(-region.X, -region.Y);
 
@@ -556,20 +680,26 @@ public partial class EditorWindow : Window
             undo: async () =>
             {
                 _source = before;
-                await OnSourceReplacedAsync();
+                await OnSourceReplacedAsync(refreshPixelMarks: false);
                 ShiftAnnotations(region.X, region.Y);
             },
             redo: async () =>
             {
                 _source = after;
-                await OnSourceReplacedAsync();
+                await OnSourceReplacedAsync(refreshPixelMarks: false);
                 ShiftAnnotations(-region.X, -region.Y);
             }), apply: false);
     }
 
     private void OnCancelCrop(object sender, RoutedEventArgs e) => ClearCropPreview();
 
-    private async Task OnSourceReplacedAsync()
+    /// <summary>
+    /// <paramref name="refreshPixelMarks"/> is false when the caller is about to shift every
+    /// annotation: ShiftAnnotations moves each mark through MoveElement, which repaints the
+    /// pixel-backed ones anyway. Doing it here as well made a crop on a shot with a large
+    /// redaction pay that cost twice for no visible difference — the second pass wins.
+    /// </summary>
+    private async Task OnSourceReplacedAsync(bool refreshPixelMarks = true)
     {
         using IDisposable sourceOperation = _sourceLifetime.Acquire();
         _sourceOperationActive = true;
@@ -590,7 +720,7 @@ public partial class EditorWindow : Window
         SyncImageSizeLabel();
         // The source under every redaction just changed (crop / rotate / resize), so each
         // one has to re-read the pixels it now covers or it keeps showing the old ones.
-        RefreshAllRedactions();
+        if (refreshPixelMarks) RefreshAllRedactions();
         Select(null);
         FitNow();
     }

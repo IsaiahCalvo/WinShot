@@ -425,6 +425,9 @@ public partial class EditorWindow : Window
         if (e.Key == Key.Z && _zoomKeyDown)
         {
             _zoomKeyDown = false;
+            // Both flags together, or a menu-armed gesture that is pressed and released
+            // without a drag leaves the arming set and disarms the NEXT Z drag mid-gesture.
+            _zoomArmedByMenu = false;
             // Letting Z go mid-drag abandons the gesture rather than zooming to a
             // rectangle the user was no longer choosing.
             AbortZoomGesture();
@@ -561,6 +564,9 @@ public partial class EditorWindow : Window
     {
         CommitText();
         CommitPendingCurve();
+        // A live gesture may have deferred a redaction repaint; baking it now would put the
+        // pixels the mark USED to cover into the saved file.
+        FlushRedactionRefresh();
         CanvasHost.UpdateLayout();
         return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
     }
@@ -700,7 +706,11 @@ public partial class EditorWindow : Window
             // whatever was on the clipboard before. The line is FriendlyError's, not a
             // hand-written one: the fixed clipboard sentence this used to carry blamed
             // another app for a full disk, an out-of-memory flatten and a GDI+ encode too.
-            ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
+            // A busy clipboard is exactly the failure slow enough for the user to close the
+            // editor first, and ThemedMessageDialog assigns Owner unconditionally — WPF
+            // throws on a closed one, out of an async void handler with nobody to catch it.
+            if (!_closed)
+                ThemedMessageDialog.Show(this, "Could not copy", FriendlyError.For(ex));
         }
     }
 
@@ -753,7 +763,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private async void OnExportGif(object sender, RoutedEventArgs e)
     {
-        if (_sourceOperationActive) return;
+        if (_sourceOperationActive || _gifExportRunning) return;
         CommitText();
         CommitPendingCurve();
 
@@ -776,6 +786,11 @@ public partial class EditorWindow : Window
 
         SD.Bitmap? before = null;
         SD.Bitmap? after = null;
+        // Two flattens plus an encode is seconds on a large canvas. Without this the button
+        // stays live and says nothing is happening, and a second click opens a second save
+        // dialog over the first — the same guard OCR takes for the same reason.
+        _gifExportRunning = true;
+        ExportGifBtn.IsEnabled = false;
         try
         {
             // "Before" is the canvas with the added images hidden — not the raw source:
@@ -823,10 +838,15 @@ public partial class EditorWindow : Window
         }
         finally
         {
+            _gifExportRunning = false;
+            if (!_closed) ExportGifBtn.IsEnabled = true;
             before?.Dispose();
             after?.Dispose();
         }
     }
+
+    /// <summary>Set while a before/after GIF is being flattened and encoded.</summary>
+    private bool _gifExportRunning;
 
     /// <summary>The image annotations on the canvas, bottom to top.</summary>
     private List<UIElement> ImageAnnotations()
