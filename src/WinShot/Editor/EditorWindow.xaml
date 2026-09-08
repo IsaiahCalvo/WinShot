@@ -451,7 +451,7 @@
                         <Canvas x:Name="AnnotationCanvas" Background="Transparent" ClipToBounds="True"/>
                     </Grid>
                     <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
-                        <Path x:Name="CropDim" Fill="#66000000" Visibility="Collapsed"/>
+                        <Path x:Name="CropDim" Fill="{StaticResource GuideStrokeShadowBrush}" Visibility="Collapsed"/>
                         <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Fill="#110A84FF" Visibility="Collapsed"/>
                         <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
@@ -507,6 +507,14 @@
             <!-- Where you are in a zoomed-in image. Indicators, never controls: the
                  editor pans an infinite canvas, so there is no track to drag. -->
             <Canvas x:Name="ScrollOverlay" IsHitTestVisible="False" Opacity="0">
+                <!-- The ground under these is the user's screenshot, not a theme surface, so
+                     a light bar alone composites to nothing over a white region. Same pairing
+                     the thirds guides use: a dark bar one pixel down-right, under the light
+                     one, which reads on any picture. -->
+                <Rectangle x:Name="ScrollBarHShadow" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource GuideStrokeShadowBrush}"/>
+                <Rectangle x:Name="ScrollBarVShadow" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource GuideStrokeShadowBrush}"/>
                 <Rectangle x:Name="ScrollBarH" RadiusX="2" RadiusY="2" Visibility="Collapsed"
                            Fill="{StaticResource TextSecondaryBrush}"/>
                 <Rectangle x:Name="ScrollBarV" RadiusX="2" RadiusY="2" Visibility="Collapsed"
@@ -656,7 +664,7 @@
                             AutomationProperties.HelpText="Open the edited image in a local always-on-top pin window."/>
                     <Button x:Name="BtnCopy" Style="{StaticResource CircleActionButton}" Content="&#xE8C8;"
                             ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy" AutomationProperties.Name="Copy"
-                            AutomationProperties.HelpText="Copy the source-resolution edited image, or just the selection. Shortcut Ctrl+C."/>
+                            AutomationProperties.HelpText="Copy the source-resolution edited image to the Windows clipboard. With marks selected, Ctrl+C copies those marks for pasting inside the editor instead."/>
                     <Button x:Name="BtnCenter" Style="{StaticResource CircleActionButton}" Content="&#xE9A6;"
                             ToolTip="Fit &amp; center (Ctrl+1)" Click="OnCenterView" AutomationProperties.Name="Fit and center"
                             AutomationProperties.HelpText="Fit and center the whole image. Shortcut Ctrl+1."/>

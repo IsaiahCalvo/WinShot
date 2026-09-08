@@ -333,7 +333,7 @@
          on top of the picture once the answer has been read. -->
     <Storyboard x:Key="ScrollHintFlash">
         <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                         To="0.55" Duration="{StaticResource MotionQuick}"
+                         To="0.9" Duration="{StaticResource MotionQuick}"
                          EasingFunction="{StaticResource EaseOutCubic}"/>
         <DoubleAnimation Storyboard.TargetProperty="Opacity"
                          To="0" BeginTime="{StaticResource MotionHintDwell}" Duration="{StaticResource MotionSwap}"

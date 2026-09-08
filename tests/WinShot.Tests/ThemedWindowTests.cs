@@ -591,6 +591,18 @@ public class ThemedWindowTests
         finally { Motion.AnimationsEnabled = animations; }
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(zoomButton)));
 
+        // The one-row toolbar's 1152 DIP floor is not a promise a screen can keep — a
+        // 1536x1024 laptop at 150 % is 1024 DIP of work area — and WM_GETMINMAXINFO would
+        // enforce it anyway, opening the window wider than the monitor with the docked
+        // Save as… / Done pair off the right edge and no way to drag narrower. Every open
+        // path clamps, not just the grow: this editor came up the History/CLI way.
+        var work = SystemParameters.WorkArea;
+        Assert.True(editor.MinWidth <= work.Width + 0.5,
+            $"MinWidth {editor.MinWidth} exceeds the {work.Width:0} DIP work area.");
+        Assert.True(editor.MinHeight <= work.Height + 0.5,
+            $"MinHeight {editor.MinHeight} exceeds the {work.Height:0} DIP work area.");
+        Assert.True(editor.MinWidth > 0 && editor.MinHeight > 0);
+
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
         var toolbar = (Border)editor.FindName("TopToolbar")!;
@@ -604,7 +616,13 @@ public class ThemedWindowTests
     /// Measuring the row's HEIGHT proves nothing — it is a DockPanel, which does not wrap;
     /// it clips its fill child's right-hand end away in silence, which is how a whole crop
     /// group (Snap, then Image size) went missing without a red test. So this measures what
-    /// the row WANTS, unconstrained, against what it is actually given.
+    /// the row WANTS, unconstrained, against the declared budget — and, when the display can
+    /// actually hold a window that wide, against what the row is really given.
+    ///
+    /// The display check is not decoration: the minimum is 1152 DIP and a 1024 DIP screen
+    /// cannot produce a 1152 DIP window, which is the whole reason the editor now clamps its
+    /// minimum instead of forcing its Done button off the right edge. On such a display the
+    /// arithmetic assertion is the contract; the clipping one has nothing to say.
     /// </summary>
     private static void ToolbarFitsAtMinimumWidth(EditorWindow editor)
     {
@@ -626,9 +644,12 @@ public class ThemedWindowTests
             Assert.True(needed <= EditorShellContract.PrimaryToolbarLogicalWidth,
                 $"{tool}'s toolbar row needs {needed:0} DIP, over the declared " +
                 $"{EditorShellContract.PrimaryToolbarLogicalWidth} DIP budget.");
-            Assert.True(needed <= available + 0.5,
-                $"{tool}'s toolbar row is clipped at the minimum window width: " +
-                $"needs {needed:0} DIP, has {available:0}.");
+            if (editor.ActualWidth >= EditorShellContract.MinimumEditorLogicalWidth - 0.5)
+            {
+                Assert.True(needed <= available + 0.5,
+                    $"{tool}'s toolbar row is clipped at the minimum window width: " +
+                    $"needs {needed:0} DIP, has {available:0}.");
+            }
         }
     }
 

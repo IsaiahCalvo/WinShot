@@ -274,6 +274,7 @@ public partial class EditorWindow : Window
         // image, so a sensible default footprint is enough; the image is
         // fitted and centered once layout is known.
         var wa = SystemParameters.WorkArea;
+        ClampMinimumsTo(wa.Width, wa.Height);
         Width = Math.Min(DefaultWidthDip, wa.Width * EditorGrowLayout.MaxWorkAreaFraction);
         Height = Math.Min(DefaultHeightDip, wa.Height * EditorGrowLayout.MaxWorkAreaFraction);
 
@@ -311,8 +312,8 @@ public partial class EditorWindow : Window
             _closed = true;
             _growMotion?.Dispose();
             _growMotion = null;
-            _zoomTween?.Dispose();
-            _zoomTween = null;
+            CancelZoomTween();
+            StopRedactPendingTimer();
             _dragPreview?.Dispose();
             _dragPreview = null;
             Task sourceOperationsDrained = _sourceLifetime.BeginClose();
@@ -391,6 +392,31 @@ public partial class EditorWindow : Window
     private IDisposable? _growMotion;
 
     /// <summary>
+    /// Lowers the declared minimum size to whatever the display can actually hold.
+    ///
+    /// <see cref="EditorShellContract.MinimumEditorLogicalWidth"/> is a consequence of the
+    /// one-row toolbar, not a promise a screen can keep: 1152 DIP is wider than a
+    /// 1536x1024 laptop at 150 % (1024 DIP) or a 2160x1440 at 200 %. Windows enforces
+    /// MinWidth through WM_GETMINMAXINFO, so leaving it declared on a display that small
+    /// opens the window WIDER than the monitor — and because Save as… / Done are docked to
+    /// the right of the row, what goes off the edge is the pair that finishes the job, with
+    /// no way to drag narrower because the minimum is what put them there. A toolbar
+    /// clipped at its right end is recoverable; an unreachable Done button is not.
+    ///
+    /// Every open path needs this, not just the grow: the constructor sizes itself from the
+    /// work area but never touched the floor, so History and the CLI hit exactly that case.
+    /// <see cref="EditorShellContract.FitsOnMonitor"/> is the same question asked as a
+    /// predicate.
+    /// </summary>
+    private void ClampMinimumsTo(double availableWidthDip, double availableHeightDip)
+    {
+        if (double.IsFinite(availableWidthDip) && availableWidthDip > 0)
+            MinWidth = Math.Min(MinWidth, availableWidthDip);
+        if (double.IsFinite(availableHeightDip) && availableHeightDip > 0)
+            MinHeight = Math.Min(MinHeight, availableHeightDip);
+    }
+
+    /// <summary>
     /// Places the window on the origin's display and tweens it out of the origin rect.
     /// Runs once, on the first frame that has an HWND, and entirely in DEVICE PIXELS with
     /// the ORIGIN monitor's DPI: at this moment the window has not been moved yet, so its
@@ -410,7 +436,7 @@ public partial class EditorWindow : Window
         SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
 
         // WPF enforces MinWidth/MinHeight through WM_GETMINMAXINFO, so without this every
-        // frame of the tween would paint at the 980x520 floor and only the position would
+        // frame of the tween would paint at the 1152x520 floor and only the position would
         // move — a full-size window sliding in from the card's corner instead of growing
         // out of it. The floor is a resize constraint for the user, not for the entrance.
         double minWidth = MinWidth, minHeight = MinHeight;
@@ -427,8 +453,9 @@ public partial class EditorWindow : Window
         // the declared floor cannot leave a minimum wider than the screen it opened on.
         void RestoreMinimums()
         {
-            MinWidth = Math.Min(minWidth, to.Width / scale);
-            MinHeight = Math.Min(minHeight, to.Height / scale);
+            MinWidth = minWidth;
+            MinHeight = minHeight;
+            ClampMinimumsTo(to.Width / scale, to.Height / scale);
         }
 
         MinWidth = 0;
@@ -665,6 +692,7 @@ public partial class EditorWindow : Window
     {
         newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
         if (Math.Abs(newZoom - _zoom) < 0.00001) return;
+        CancelZoomTween();
         _pendingInitialFit = false; // explicit zoom — stop auto-refitting on resize
 
         double cx = (anchor.X - ViewTranslate.X) / _zoom;
@@ -748,7 +776,7 @@ public partial class EditorWindow : Window
 
         double fromZoom = _zoom;
         double fromX = ViewTranslate.X, fromY = ViewTranslate.Y;
-        _zoomTween?.Dispose();
+        CancelZoomTween();
         _zoomTween = Motion.Run(Motion.EnterDurationMs, Motion.EaseOutCubic, t =>
         {
             _zoom = fromZoom + (target.Zoom - fromZoom) * t;
@@ -762,6 +790,19 @@ public partial class EditorWindow : Window
 
     /// <summary>The in-flight targeted zoom, cancelled on a second one and on close.</summary>
     private IDisposable? _zoomTween;
+
+    /// <summary>
+    /// Drops the glide so the user's own gesture wins. <see cref="ApplyZoomView"/> writes
+    /// _zoom and the view transforms ABSOLUTELY on every frame, so a wheel tick or a pan
+    /// during the 280 ms was overwritten 8 ms later and the view carried on to the menu's
+    /// target — a transition blocking input, which is the one thing the motion rule forbids.
+    /// Every gesture that moves the view itself calls this first.
+    /// </summary>
+    private void CancelZoomTween()
+    {
+        _zoomTween?.Dispose();
+        _zoomTween = null;
+    }
 
     /// <summary>Ctrl+plus / Ctrl+minus: one step of the same 1.2 ratio the wheel uses.</summary>
     private void StepZoom(double factor) => AnimateZoomTo(_zoom * factor);
@@ -785,8 +826,17 @@ public partial class EditorWindow : Window
     /// "is there more above this?" while the view moves, and to be gone once it has been
     /// answered — so they fade out rather than sitting on the picture.
     /// </summary>
-    /// <summary>Whether the indicators are currently up, so the flash is not restarted per frame.</summary>
+    /// <summary>Whether a flash is RUNNING, so it is not restarted on every frame of the
+    /// gesture that started it. Cleared when the flash ends — the guard suppresses
+    /// restarts while the clock is ticking, not for the rest of the session.</summary>
     private bool _scrollBarsShown;
+
+    /// <summary>
+    /// Our own copy of ScrollHintFlash, so its Completed can clear the guard. The resource
+    /// is shared with every other editor window; subscribing to it directly would add a
+    /// handler per flash and fire for windows that did not raise it.
+    /// </summary>
+    private Storyboard? _scrollFlash;
 
     private void UpdateScrollOverlay()
     {
@@ -797,20 +847,24 @@ public partial class EditorWindow : Window
             _zoom,
             new Vector(ViewTranslate.X, ViewTranslate.Y));
 
-        static void Place(System.Windows.Shapes.Rectangle bar, Rect? area)
+        static void Place(System.Windows.Shapes.Rectangle bar, Rect? area, double offset = 0)
         {
             if (area is not Rect r)
             {
                 bar.Visibility = Visibility.Collapsed;
                 return;
             }
-            Canvas.SetLeft(bar, r.X);
-            Canvas.SetTop(bar, r.Y);
+            Canvas.SetLeft(bar, r.X + offset);
+            Canvas.SetTop(bar, r.Y + offset);
             bar.Width = r.Width;
             bar.Height = r.Height;
             bar.Visibility = Visibility.Visible;
         }
 
+        // Shadow first, one pixel down-right, so the light bar keeps an edge over a white
+        // screenshot — the same pairing the thirds guides use for the same reason.
+        Place(ScrollBarHShadow, horizontal, 1);
+        Place(ScrollBarVShadow, vertical, 1);
         Place(ScrollBarH, horizontal);
         Place(ScrollBarV, vertical);
         if (horizontal is null && vertical is null)
@@ -822,17 +876,26 @@ public partial class EditorWindow : Window
         }
         // This runs on every pan MouseMove and on every frame of a zoom tween. Restarting
         // the flash each time gave the storyboard a fresh 0.9 s dwell ~35 times per zoom, so
-        // the bars only began fading long after the view stopped. Start it when the bars
-        // APPEAR; while they are already up, the one running clock owns the fade.
+        // the bars only began fading long after the view stopped. While one is RUNNING, that
+        // clock owns the fade; once it has ended the next gesture gets its own flash. Gating
+        // on "the bars exist" instead answered "is there more above this?" exactly once and
+        // then never again while the view stayed zoomed in, which is the opposite of the job.
         if (_scrollBarsShown) return;
         _scrollBarsShown = true;
-        ScrollOverlay.BeginStoryboard((Storyboard)FindResource("ScrollHintFlash"));
+        if (_scrollFlash is null)
+        {
+            _scrollFlash = ((Storyboard)FindResource("ScrollHintFlash")).Clone();
+            _scrollFlash.Completed += (_, _) => _scrollBarsShown = false;
+        }
+        ScrollOverlay.BeginStoryboard(_scrollFlash, HandoffBehavior.SnapshotAndReplace);
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();
 
     private void OnViewportMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        // A wheel tick is the user taking the view back off a running glide.
+        CancelZoomTween();
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             // Ctrl+wheel zooms around the cursor (ZoomAt clears _pendingInitialFit). A plain
@@ -858,6 +921,7 @@ public partial class EditorWindow : Window
 
     private void StartPan(Point viewportPos)
     {
+        CancelZoomTween();
         CommitText();
         _panning = true;
         _panLast = viewportPos;
