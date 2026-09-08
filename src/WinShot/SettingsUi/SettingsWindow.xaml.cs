@@ -1047,11 +1047,16 @@ public partial class SettingsWindow : Window
         string keep = stored ?? "";
         if (keep.Length > 0 && !devices.Any(d => string.Equals(d.DeviceName, keep, StringComparison.Ordinal)))
         {
-            combo.Items.Add(new ComboBoxItem
+            var missing = new ComboBoxItem
             {
                 Content = (keep.Length <= 40 ? keep : keep[..39] + "…") + " (not connected)",
                 Tag = keep,
-            });
+            };
+            // Dimmed, not disabled: it has to stay selectable, because it is the selected row —
+            // disabling it is exactly what would drop the pick the row exists to keep.
+            if (combo.TryFindResource("TextDisabledBrush") is System.Windows.Media.Brush dim)
+                missing.Foreground = dim;
+            combo.Items.Add(missing);
         }
 
         SelectByTag(combo, keep, fallbackIndex: 0);

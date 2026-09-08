@@ -105,6 +105,44 @@ public class RecordingOptionsTests
         Assert.True(layout.IsFullscreen);
     }
 
+    /// <summary>
+    /// Every settings.json written before WebcamOverlayCorner existed has no such key, so it
+    /// reads back as the C# initializer ("bottom-right") whatever corner the user actually
+    /// picked. Switching the overlay off then banked that initializer and destroyed the real
+    /// choice — silently, unrecoverably, on the first off-toggle after upgrading.
+    /// </summary>
+    [Fact]
+    public void SwitchingTheWebcamOffBanksTheCornerTheUserHadBeforeTheCornerKeyExisted()
+    {
+        var legacy = new Settings
+        {
+            WebcamOverlayPosition = "top-left",
+            // Not written by the old build: this is the property's own default.
+            WebcamOverlayCorner = RecordingOptions.WebcamDefaultCorner,
+        };
+
+        legacy.SetWebcamOverlayPosition(RecordingOptions.WebcamOff);
+
+        Assert.Equal(RecordingOptions.WebcamOff, legacy.WebcamOverlayPosition);
+        Assert.Equal("top-left", legacy.WebcamOverlayCorner);
+        Assert.Equal(
+            "top-left",
+            RecordingController.WebcamPositionFor(
+                true, legacy.WebcamOverlayPosition, legacy.WebcamOverlayCorner));
+    }
+
+    /// <summary>The corner already banked is not overwritten by a second off-toggle.</summary>
+    [Fact]
+    public void SwitchingTheWebcamOffTwiceKeepsTheBankedCorner()
+    {
+        var s = new Settings();
+        s.SetWebcamOverlayPosition("top-right");
+        s.SetWebcamOverlayPosition(RecordingOptions.WebcamOff);
+        s.SetWebcamOverlayPosition(RecordingOptions.WebcamOff);
+
+        Assert.Equal("top-right", s.WebcamOverlayCorner);
+    }
+
     /// <summary>A settings.json carrying an explicit 0 is an unset key or a zero-initialising
     /// migration, not a request for the worst H.264 the encoder can make.</summary>
     [Fact]

@@ -26,6 +26,16 @@ public sealed class FastRecordingControlBar : WF.Form
     private const string GlyphStop = "";
     private const string GlyphDiscard = "";
 
+    // ThemePalette publishes the type scale in points; every face on this owner-drawn pill is
+    // sized in device pixels (each coordinate here is already multiplied by _scale, so a
+    // point-size font would apply the monitor's scale a second time). These are that scale in
+    // DIPs, named once here rather than inlined at each call site. The glyph face is
+    // deliberately off the text scale — see ThemePalette.GlyphActionPt.
+    private const int GlyphFontDip = 16;
+    private const int TimerFontDip = 14;
+    private const int TipFontDip = 11;
+    private const int SavingFontDip = 13;
+
     /// <summary>Idle transparency of the pill. The entrance tween ends here.</summary>
     private const double RestingOpacity = 0.96;
 
@@ -41,6 +51,7 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly SD.Font _glyphFont;
     private readonly SD.Font _timerFont;
     private readonly SD.Font _tipFont;
+    private readonly SD.Font _savingFont;
     private readonly SD.Rectangle? _recordingRegion;
     private readonly bool _showTimer;
     private readonly string _stopHotkey;
@@ -59,6 +70,9 @@ public sealed class FastRecordingControlBar : WF.Form
     private readonly HoverWash<int> _hover;
     private readonly HoverWash<int> _press;
     private readonly StateAmount _dim;
+    // Pause and resume are a state change like every other one on this bar, so they ease:
+    // 0 is recording, 1 is paused, and the glyph cross-fade and the dot's colour both read it.
+    private readonly StateAmount _pause;
     private string _elapsedText = "00:00";
     private int _hoverIndex = -1;
     private int _focusIndex = -1;
@@ -93,11 +107,13 @@ public sealed class FastRecordingControlBar : WF.Form
         _hover = new HoverWash<int>(InvalidateSafely);
         _press = new HoverWash<int>(InvalidateSafely);
         _dim = new StateAmount(InvalidateSafely);
+        _pause = new StateAmount(InvalidateSafely);
         // Pixel-unit faces: every coordinate here is already multiplied by _scale, and a
         // point-size font would apply the monitor's scale to itself a second time.
-        _glyphFont = ThemePalette.IconFontPx(S(16));
-        _timerFont = ThemePalette.MonoFontPx(S(14));
-        _tipFont = ThemePalette.UiFontPx(S(11));
+        _glyphFont = ThemePalette.IconFontPx(S(GlyphFontDip));
+        _timerFont = ThemePalette.MonoFontPx(S(TimerFontDip));
+        _tipFont = ThemePalette.UiFontPx(S(TipFontDip));
+        _savingFont = ThemePalette.UiFontPx(S(SavingFontDip));
 
         AutoScaleMode = WF.AutoScaleMode.None;
         // The pill is one owner-drawn form with no child controls, so a cell cannot be its own
@@ -157,7 +173,12 @@ public sealed class FastRecordingControlBar : WF.Form
             double wave = Motion.AnimationsEnabled()
                 ? (1 + Math.Sin(2 * Math.PI * Environment.TickCount64 / 1600.0)) / 2
                 : 1;
-            int alpha = _paused ? 255 : 120 + (int)Math.Round(135 * wave);
+            // Settled on pause the dot holds steady (and the guard below then stops repainting
+            // it); mid-transition it keeps breathing, because the paint lerps that breath up to
+            // solid amber over the same eased amount the glyph cross-fades on.
+            int alpha = _paused && _pause.Value >= 0.998
+                ? 255
+                : 120 + (int)Math.Round(135 * wave);
             string elapsed = FormatElapsed(_elapsed.Elapsed);
             if (alpha == _dotAlpha && elapsed == _elapsedText)
                 return;
@@ -255,7 +276,7 @@ public sealed class FastRecordingControlBar : WF.Form
     {
         // Form.Dispose() does not raise Closed, so a bar disposed without being closed (the
         // app shutting down mid-take) would otherwise keep a timer ticking against a dead
-        // form and leak three font handles and a ToolTip per take. One guarded teardown,
+        // form and leak its font handles and a ToolTip per take. One guarded teardown,
         // called from both, the way the keystroke overlay and the marker surface do it.
         if (disposing)
             TearDown();
@@ -282,9 +303,11 @@ public sealed class FastRecordingControlBar : WF.Form
         _glyphFont.Dispose();
         _timerFont.Dispose();
         _tipFont.Dispose();
+        _savingFont.Dispose();
         _hover.Dispose();
         _press.Dispose();
         _dim.Dispose();
+        _pause.Dispose();
     }
 
     private static string FormatElapsed(TimeSpan t) =>
@@ -495,15 +518,35 @@ public sealed class FastRecordingControlBar : WF.Form
         // TextError, not Red: this is a glyph drawn through the text path on ToolbarBg, the
         // exact pair ThemePalette documents as only reading 4.43:1. The dot stays Red.
         SD.Color color = cell == RecordingControlBarCell.Stop ? ThemePalette.TextError : GlyphColor;
+        // Stop is the safe end of a take and Discard is the irreversible one, so the bar's only
+        // warning colour cannot live on Stop alone. Red stays there (it is the record-stop
+        // convention), and Discard picks it up as the pointer reaches for it.
+        if (cell == RecordingControlBarCell.Discard)
+            color = DarkControlPalette.Mix(color, ThemePalette.TextError, Math.Max(hover, press));
         // Once an action is taken the cells go quiet. TextRenderer drops the alpha channel, so
         // the dim has to be composited against the plate rather than handed over as an alpha —
         // which also lets it ease instead of cutting.
         color = DarkControlPalette.Mix(
             color, ThemePalette.Over(SD.Color.FromArgb(0x60, color), Back), _dim.Value);
-        WF.TextRenderer.DrawText(g, GlyphFor(cell), _glyphFont, bounds, Fade(color, leave),
+
+        // Pause↔resume was the one state on this bar that still cut: the glyph swapped and the
+        // dot jumped colour in a single frame while everything around them eased. The two
+        // glyphs cross-fade through the pill's own fill over the same QuickMs.
+        double paused = _pause.Value;
+        if (cell == RecordingControlBarCell.PauseResume && paused > 0.002 && paused < 0.998)
+        {
+            DrawGlyph(g, GlyphPause, bounds, Fade(Fade(color, leave), paused));
+            DrawGlyph(g, GlyphResume, bounds, Fade(Fade(color, leave), 1 - paused));
+            return;
+        }
+
+        DrawGlyph(g, GlyphFor(cell), bounds, Fade(color, leave));
+    }
+
+    private void DrawGlyph(SD.Graphics g, string glyph, SD.Rectangle bounds, SD.Color color) =>
+        WF.TextRenderer.DrawText(g, glyph, _glyphFont, bounds, color,
             WF.TextFormatFlags.HorizontalCenter | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
-    }
 
     /// <summary>
     /// Dissolves a colour into the pill's own fill by <paramref name="amount"/>. TextRenderer
@@ -540,8 +583,9 @@ public sealed class FastRecordingControlBar : WF.Form
             0,
             ClientSize.Width - arc.Right - S(8) - S(RecordingControlBarLayout.SidePadDip),
             ClientSize.Height);
-        using SD.Font font = ThemePalette.UiFontPx(S(13));
-        WF.TextRenderer.DrawText(g, "Saving…", font, textRect, Fade(GlyphColor, arrive),
+        // Cached, not per-frame: BeginSaving retunes the tick to Motion.FrameIntervalMs, so a
+        // font built here was ~125 GDI+ allocations a second for the whole finalization.
+        WF.TextRenderer.DrawText(g, "Saving…", _savingFont, textRect, Fade(GlyphColor, arrive),
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
     }
@@ -554,9 +598,12 @@ public sealed class FastRecordingControlBar : WF.Form
             bounds.Top + ((bounds.Height - dot) / 2),
             dot,
             dot);
+        // Both ends of the pause state ride the same eased amount as the glyph above: the
+        // breathing red settles into a steady amber instead of jumping to it.
+        double paused = _pause.Value;
         using (var brush = new SD.SolidBrush(SD.Color.FromArgb(
-            (int)Math.Round((_paused ? 255 : _dotAlpha) * (1 - leave)),
-            _paused ? PausedAmber : RecordingRed)))
+            (int)Math.Round((_dotAlpha + ((255 - _dotAlpha) * paused)) * (1 - leave)),
+            DarkControlPalette.Mix(RecordingRed, PausedAmber, paused))))
         {
             g.FillEllipse(brush, dotRect);
         }
@@ -806,6 +853,7 @@ public sealed class FastRecordingControlBar : WF.Form
             return;
 
         _paused = !_paused;
+        _pause.To(_paused ? 1 : 0);
         if (_paused)
         {
             _elapsed.Stop();
@@ -835,6 +883,7 @@ public sealed class FastRecordingControlBar : WF.Form
             return;
 
         _paused = paused;
+        _pause.To(paused ? 1 : 0);
         if (paused)
             _elapsed.Stop();
         else

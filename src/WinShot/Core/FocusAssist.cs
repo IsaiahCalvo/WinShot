@@ -59,9 +59,13 @@ public static class FocusAssist
             if (!File.Exists(BreadcrumbPath))
                 return false;
 
-            SavedSwitch[]? saved = JsonSerializer.Deserialize<SavedSwitch[]>(
-                File.ReadAllText(BreadcrumbPath));
+            // Read then delete BEFORE parsing. File.WriteAllText is not atomic and the write
+            // happens during a take that may be killed mid-flight, so a truncated breadcrumb is
+            // reachable — and one that threw on the way to the delete stayed on disk and failed
+            // again on every launch, forever.
+            string json = File.ReadAllText(BreadcrumbPath);
             File.Delete(BreadcrumbPath);
+            SavedSwitch[]? saved = JsonSerializer.Deserialize<SavedSwitch[]>(json);
             if (saved is null || saved.Length == 0)
                 return false;
 

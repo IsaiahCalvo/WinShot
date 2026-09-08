@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using WinShot.Core;
 using Xunit;
@@ -163,6 +164,33 @@ public class FocusAssistTests
             store.Write(key, value, data);
 
         Assert.All(FocusAssist.Switches, s => Assert.Equal(1, store.Values[(s.Key, s.Value)]));
+    }
+
+    /// <summary>File.WriteAllText is not atomic and the breadcrumb is written during a take
+    /// that can be killed mid-write, so a truncated one is reachable. It used to throw before
+    /// the delete that follows it, so the same unreadable file failed again on every launch.</summary>
+    [Fact]
+    public void ACorruptBreadcrumbIsDeletedRatherThanFailingOnEveryLaunch()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "winshot-focus-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string? previous = SettingsService.DirOverride;
+        SettingsService.DirOverride = dir;
+        try
+        {
+            string breadcrumb = Path.Combine(dir, "focus-assist.json");
+            File.WriteAllText(breadcrumb, "{not json");
+
+            Assert.False(FocusAssist.RecoverFromCrash());
+            Assert.False(
+                File.Exists(breadcrumb),
+                "the unreadable breadcrumb was left on disk and will fail again every launch");
+        }
+        finally
+        {
+            SettingsService.DirOverride = previous;
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
     }
 
     [Fact]

@@ -157,7 +157,14 @@ public class Settings
     /// </summary>
     public void SetWebcamOverlayPosition(string? position)
     {
-        WebcamOverlayCorner = RecordingOptions.RememberedWebcamCorner(position, WebcamOverlayCorner);
+        // Seed from the position being replaced before overwriting it. Every settings.json
+        // written before WebcamOverlayCorner existed has no such key, so the corner reads back
+        // as the C# initializer no matter which corner the user actually picked — the outgoing
+        // WebcamOverlayPosition is the only place that choice still lives, and the first
+        // "webcam off" would otherwise wipe it to the default.
+        WebcamOverlayCorner = RecordingOptions.RememberedWebcamCorner(
+            position,
+            RecordingOptions.RememberedWebcamCorner(WebcamOverlayPosition, WebcamOverlayCorner));
         WebcamOverlayPosition = RecordingOptions.NormalizeWebcamPosition(position);
     }
 }

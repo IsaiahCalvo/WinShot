@@ -27,7 +27,7 @@
                     AutomationProperties.AcceleratorKey="Space"/>
             <TextBlock x:Name="FrameLabel" DockPanel.Dock="Right"
                        Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}"
-                       FontFamily="Consolas" VerticalAlignment="Center" Margin="10,0,0,0" Text="0 / 0"
+                       FontFamily="{StaticResource MonoFamily}" VerticalAlignment="Center" Margin="10,0,0,0" Text="0 / 0"
                        AutomationProperties.Name="Current frame and frame count"/>
             <TextBlock x:Name="ScrubHint" VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
@@ -123,11 +123,11 @@
 
             <Grid Grid.Row="1" Margin="0,6,0,0">
                 <TextBlock x:Name="TrimStartLabel" HorizontalAlignment="Left" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="In 0"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="In 0"/>
                 <TextBlock x:Name="TrimRangeLabel" HorizontalAlignment="Center" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="0 frames"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="0 frames"/>
                 <TextBlock x:Name="TrimEndLabel" HorizontalAlignment="Right" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="Out 0"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="Out 0"/>
             </Grid>
         </Grid>
 

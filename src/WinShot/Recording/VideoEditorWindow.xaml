@@ -29,7 +29,7 @@
                     AutomationProperties.HelpText="Plays or pauses the preview. Keyboard shortcut: Space."
                     AutomationProperties.AcceleratorKey="Space"/>
             <TextBlock x:Name="TimeLabel" DockPanel.Dock="Right" Foreground="{StaticResource TextPrimaryBrush}" FontSize="{StaticResource TextBody}"
-                       FontFamily="Consolas" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
+                       FontFamily="{StaticResource MonoFamily}" VerticalAlignment="Center" Margin="10,0,0,0" Text="0:00 / 0:00"
                        AutomationProperties.Name="Current position and video duration"/>
             <TextBlock x:Name="ScrubHint" VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="{StaticResource TextCaption}"
@@ -148,9 +148,9 @@
 
             <Grid Grid.Row="1" Margin="0,6,0,0">
                 <TextBlock x:Name="TrimStartLabel" HorizontalAlignment="Left" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="In 0:00"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="In 0:00"/>
                 <TextBlock x:Name="TrimRangeLabel" HorizontalAlignment="Center" Style="{StaticResource FieldLabel}"
-                           FontFamily="Consolas" Text="0:00"/>
+                           FontFamily="{StaticResource MonoFamily}" Text="0:00"/>
                 <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                     <Button x:Name="BtnZoomFit" Style="{StaticResource PillButtonSecondary}"
                             Content="Fit" MinWidth="52" Visibility="Collapsed"
@@ -159,7 +159,7 @@
                             AutomationProperties.HelpText="Zooms the timeline back out to the whole recording."/>
                     <TextBlock x:Name="TrimEndLabel" VerticalAlignment="Center"
                                Style="{StaticResource FieldLabel}"
-                               FontFamily="Consolas" Text="Out 0:00"/>
+                               FontFamily="{StaticResource MonoFamily}" Text="Out 0:00"/>
                 </StackPanel>
             </Grid>
         </Grid>

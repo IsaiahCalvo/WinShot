@@ -168,6 +168,11 @@
     <sys:Double x:Key="TextTitle">16</sys:Double>     <!-- section and window headings -->
     <sys:Double x:Key="TextDisplay">22</sys:Double>   <!-- the one big number or wordmark on a pane -->
 
+    <!-- The one monospaced face, for readouts whose digits must not shuffle as they
+         count (timecodes, frame counts). Core/ThemePalette.MonoFamily is the same
+         decision for the WinForms surfaces. -->
+    <FontFamily x:Key="MonoFamily">Consolas</FontFamily>
+
     <!-- Icon-font glyphs used as illustration rather than as type: empty-state art,
          a thumbnail placeholder, the badge on a selected card, the small chevron
          trailing a split button. Sized apart from the type scale — they are

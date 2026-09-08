@@ -45,7 +45,7 @@ public readonly record struct TimelineView(double StartSeconds, double EndSecond
     public TimelineView Zoomed(double factor, double anchorSeconds, double durationSeconds)
     {
         double duration = CleanDuration(durationSeconds);
-        if (!double.IsFinite(factor) || factor <= 0)
+        if (!double.IsFinite(factor) || factor <= 0 || !double.IsFinite(anchorSeconds))
             return this;
 
         double span = Math.Clamp(Span / factor, Math.Min(MinimumSpanSeconds, duration), duration);
@@ -59,6 +59,9 @@ public readonly record struct TimelineView(double StartSeconds, double EndSecond
     /// <summary>Slides the window by <paramref name="seconds"/> without changing its span.</summary>
     public TimelineView Panned(double seconds, double durationSeconds)
     {
+        if (!double.IsFinite(seconds))
+            return this;
+
         double duration = CleanDuration(durationSeconds);
         double span = Math.Min(Span, duration);
         return Clamped(StartSeconds + seconds, StartSeconds + seconds + span, duration);

@@ -177,4 +177,19 @@ public class TimelineViewTests
         foreach (double seconds in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
             Assert.Equal(view, view.Containing(seconds, Duration));
     }
+
+    /// <summary>Containing guarded itself; Zoomed's anchor and Panned's offset did not, and a
+    /// non-finite one ran straight through Math.Clamp (which returns NaN) into a NaN view the
+    /// strip could never come back from.</summary>
+    [Fact]
+    public void ANonFiniteAnchorOrPanLeavesTheViewAlone()
+    {
+        var view = new TimelineView(10, 40);
+
+        foreach (double bad in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            Assert.Equal(view, view.Zoomed(2, bad, Duration));
+            Assert.Equal(view, view.Panned(bad, Duration));
+        }
+    }
 }
