@@ -12,6 +12,7 @@ let records = [];
 let shown = 0;
 let objectUrls = [];
 const rows = new Map(); // id -> { row, checkbox }
+const selected = new Set(); // record ids — spans records that are not rendered yet
 
 function releaseObjectUrls() {
   for (const url of objectUrls) URL.revokeObjectURL(url);
@@ -29,9 +30,8 @@ function filtered() {
 }
 
 function updateDeleteButton() {
-  const count = [...rows.values()].filter((entry) => entry.checkbox.checked).length;
-  deleteButton.textContent = `Delete selected [${count}]`;
-  deleteButton.disabled = count === 0;
+  deleteButton.textContent = `Delete selected [${selected.size}]`;
+  deleteButton.disabled = selected.size === 0;
 }
 
 function renderRow(record) {
@@ -40,7 +40,12 @@ function renderRow(record) {
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.addEventListener("click", (event) => { event.stopPropagation(); updateDeleteButton(); });
+  checkbox.checked = selected.has(record.id);
+  checkbox.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (checkbox.checked) selected.add(record.id); else selected.delete(record.id);
+    updateDeleteButton();
+  });
 
   let visual;
   if (record.thumbnail instanceof Blob) {
@@ -89,6 +94,7 @@ function render(reset = false) {
     releaseObjectUrls();
     list.textContent = "";
     rows.clear();
+    selected.clear();
     shown = 0;
     selectAll.checked = false;
   }
@@ -107,14 +113,16 @@ async function reload() {
 }
 
 selectAll.addEventListener("change", () => {
-  for (const entry of rows.values()) entry.checkbox.checked = selectAll.checked;
+  // Select-all covers every filtered record, including pages not rendered yet.
+  selected.clear();
+  if (selectAll.checked) for (const record of filtered()) selected.add(record.id);
+  for (const [id, entry] of rows) entry.checkbox.checked = selected.has(id);
   updateDeleteButton();
 });
 
 deleteButton.addEventListener("click", async () => {
-  const ids = [...rows.entries()].filter(([, entry]) => entry.checkbox.checked).map(([id]) => id);
   deleteButton.disabled = true;
-  for (const id of ids) await deleteCapture(id);
+  for (const id of selected) await deleteCapture(id);
   await reload();
 });
 

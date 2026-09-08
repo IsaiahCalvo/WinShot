@@ -186,7 +186,7 @@ test("exact MV3 popup captures the full page, exports PNG, and restores state", 
     expect(record.report.tileCount).toBeGreaterThan(1);
     expect(record.report.coverage.complete).toBe(true);
     expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
-    expect(record.report.restoration).toBe("verified");
+    expect(record.report.restoration).toBe("verified by read-back");
     expect(record.report.dimensionsPx.width / record.report.dimensionsCss.width).toBeCloseTo(1.25, 1);
 
     const after = await page.evaluate(() => ({
@@ -205,6 +205,7 @@ test("exact MV3 popup captures the full page, exports PNG, and restores state", 
       await editor.click("#save-png");
       await expect.poll(() => fs.readdirSync(downloadRoot).find((name) => name.endsWith(".png")), { timeout: 30_000 }).toBeTruthy();
       const name = fs.readdirSync(downloadRoot).find((value) => value.endsWith(".png"));
+      expect(name).toBe(`${record.fileName}.png`);
       const bytes = fs.readFileSync(path.join(downloadRoot, name));
       expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
       expect(bytes.readUInt32BE(16)).toBe(record.report.dimensionsPx.width);
@@ -424,7 +425,7 @@ test("Ctrl-hover picker captures a nested independently scrolling element", asyn
     expect(record.report.dimensionsCss.height).toBe(1800);
     expect(record.report.coverage.complete).toBe(true);
     expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
-    expect(record.report.restoration).toBe("verified");
+    expect(record.report.restoration).toBe("verified by read-back");
     const restored = await page.evaluate(() => ({
       outer: document.querySelector("#outer").scrollTop,
       inner: document.querySelector("#inner").scrollTop,
@@ -472,7 +473,7 @@ test("sticky header and fixed footer appear exactly once in the captured tiles",
     await page.evaluate(() => scrollTo(0, 255));
     const { editor, record } = await captureFromPopup(run, page, "[data-mode='full-page']");
     expect(record, record.error).toMatchObject({ state: "complete" });
-    expect(record.report.restoration).toBe("verified");
+    expect(record.report.restoration).toBe("verified by read-back");
     const colors = await editor.evaluate(async () => {
       const id = new URL(location.href).searchParams.get("id");
       const store = await import(chrome.runtime.getURL("src/store.js"));
@@ -523,7 +524,7 @@ test("animated, repetitive, and shadow-DOM pages capture without false seams", a
       expect(record.report.tileCount).toBeGreaterThan(1);
       expect(record.report.coverage.complete).toBe(true);
       expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
-      expect(record.report.restoration).toBe("verified");
+      expect(record.report.restoration).toBe("verified by read-back");
       if (fixture === "shadow") {
         expect(record.semantics.text.map((entry) => entry.text).join(" ")).toContain("SHADOW 0");
         expect(record.semantics.text.map((entry) => entry.text).join(" ")).toContain("SHADOW 29");
@@ -564,7 +565,7 @@ test("growing-page setting follows added content or stops with an honest partial
     expect(enabled.record.report.dimensionsCss.height).toBe(12_000);
     expect(enabled.record.report.coverage.complete).toBe(true);
     expect(enabled.record.report.warnings.join(" ")).not.toMatch(/growing|capture limit/i);
-    expect(enabled.record.report.restoration).toBe("verified");
+    expect(enabled.record.report.restoration).toBe("verified by read-back");
 
     await page.goto("http://127.0.0.1:4173/endless", { waitUntil: "networkidle0" });
     waitingEditor = editorTarget(run);
@@ -575,7 +576,7 @@ test("growing-page setting follows added content or stops with an honest partial
     expect(limited.record.state).toBe("partial");
     expect(limited.record.report.tileCount).toBe(4);
     expect(limited.record.report.warnings.join(" ")).toMatch(/4-tile limit/i);
-    expect(limited.record.report.restoration).toBe("verified");
+    expect(limited.record.report.restoration).toBe("verified by read-back");
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);
@@ -598,10 +599,63 @@ test("scroll-snap element capture restores focus and its original scroll positio
     const { record } = await recordFromEditorTarget(await waitingEditor);
     expect(record, record.error).toMatchObject({ state: "complete" });
     expect(record.report.target).toBe("self-scroller");
-    expect(record.report.restoration).toBe("verified");
+    expect(record.report.restoration).toBe("verified by read-back");
     expect(await page.evaluate(() => ({ active: document.activeElement?.id, y: document.querySelector("#snap").scrollTop })))
       .toEqual({ active: "focus", y: 360 });
     expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("picker overlays are modal — no press or click reaches the page underneath", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    monitorPage(page, run.errors);
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    await page.evaluate(() => {
+      window.__pageHits = 0;
+      for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+        document.addEventListener(type, () => { window.__pageHits += 1; });
+      }
+    });
+
+    // Element picker: the capture click must not leak to the page.
+    let waitingEditor = editorTarget(run);
+    await startPicker(run, page, "element");
+    await page.mouse.click(200, 200);
+    const { record } = await recordFromEditorTarget(await waitingEditor);
+    expect(record.state).toBe("complete");
+    expect(await page.evaluate(() => window.__pageHits)).toBe(0);
+
+    // Region picker: neither the drag nor the synthesized click may leak.
+    waitingEditor = editorTarget(run);
+    await startPicker(run, page, "region");
+    await page.mouse.move(100, 150);
+    await page.mouse.down();
+    await page.mouse.move(400, 400, { steps: 5 });
+    await page.mouse.up();
+    await recordFromEditorTarget(await waitingEditor);
+    expect(await page.evaluate(() => window.__pageHits)).toBe(0);
+    expect(run.errors).toEqual([]);
+  } finally {
+    await closeExactExtension(run);
+  }
+});
+
+test("frame picker refuses a frameless page with a clear popup error", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    monitorPage(page, run.errors);
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    const popup = await openPopup(run, page);
+    await popup.click("[data-picker='frame']");
+    await popup.waitForFunction(() =>
+      /No capturable frames/i.test(document.querySelector("#status")?.textContent || ""), { timeout: 10_000 });
+    expect(await page.evaluate(() => Boolean(document.querySelector("[data-winshot-picker]")))).toBe(false);
+    await popup.close();
   } finally {
     await closeExactExtension(run);
   }
@@ -629,7 +683,7 @@ test("drag selection auto-scrolls at the edge and restores the pre-picker page s
     expect(record.report.dimensionsCss.width).toBeLessThan(510);
     expect(record.report.dimensionsCss.height).toBeGreaterThan(1700);
     expect(record.report.coverage.complete).toBe(true);
-    expect(record.report.restoration).toBe("verified");
+    expect(record.report.restoration).toBe("verified by read-back");
     expect(await page.evaluate(() => scrollY)).toBe(0);
     expect(run.errors).toEqual([]);
   } finally {
@@ -668,6 +722,21 @@ test("selection modifiers lock a square and capture the full page width", async 
     expect(fullWidth.record.report.dimensionsCss.width).toBe(5400);
     expect(fullWidth.record.report.dimensionsCss.height).toBeCloseTo(300, 0);
     expect(fullWidth.record.report.coverage.complete).toBe(true);
+
+    // Ctrl+click without dragging captures the hovered element (FireShot parity).
+    await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    waitingEditor = editorTarget(run);
+    await startPicker(run, page, "region");
+    await page.keyboard.down("Control");
+    await page.mouse.move(200, 200);
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    const element = await recordFromEditorTarget(await waitingEditor);
+    expect(element.record.state).toBe("complete");
+    expect(element.record.report.target).toBe("page-element");
+    expect(element.record.report.dimensionsCss.height).toBeLessThan(
+      await page.evaluate(() => document.documentElement.scrollHeight));
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);
@@ -813,7 +882,7 @@ test("registered visible-capture command runs through the production command han
     monitorPage(page, run.errors);
     await page.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
     const commands = await run.worker.evaluate(async () => await chrome.commands.getAll());
-    expect(commands.find((command) => command.name === "capture-visible")?.shortcut).toContain("Alt+Shift+V");
+    expect(commands.find((command) => command.name === "capture-visible")?.shortcut).toContain("Alt+Shift+3");
     const popup = await openPopup(run, page);
     await popup.close();
     const waitingEditor = editorTarget(run);
@@ -905,7 +974,7 @@ test("same-origin and permitted cross-origin frames scroll deeply and restore st
       expect(record.report.dimensionsCss.height).toBe(1680);
       expect(record.report.tileCount).toBeGreaterThan(4);
       expect(record.report.coverage.complete).toBe(true);
-      expect(record.report.restoration).toBe("verified");
+      expect(record.report.restoration).toBe("verified by read-back");
       expect(await frame.evaluate(() => scrollY)).toBeCloseTo(240, 0);
       expect(await page.evaluate(() => scrollY)).toBeCloseTo(selectionTop, 0);
     }
@@ -997,7 +1066,7 @@ test("cross-origin scrolling frame taller than the browser viewport is fitted, c
     expect(record.report.dimensionsCss.height).toBe(1680);
     expect(record.report.tileCount).toBeGreaterThan(1);
     expect(record.report.coverage.complete).toBe(true);
-    expect(record.report.restoration).toBe("verified");
+    expect(record.report.restoration).toBe("verified by read-back");
     expect(await frame.evaluate(() => scrollY)).toBeCloseTo(100, 0);
     expect(await page.$eval("iframe", (element) => ({ style: element.getAttribute("style") || null, height: element.clientHeight }))).toEqual(original);
     expect(run.errors).toEqual([]);

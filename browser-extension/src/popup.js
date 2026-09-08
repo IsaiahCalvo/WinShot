@@ -48,46 +48,78 @@ for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode,
   }));
 }
 
+// Callers set their own status text BEFORE calling (a delayed capture shows its
+// countdown) — request must not stomp it with a generic message.
 async function request(message) {
   status.className = "";
-  status.textContent = "Starting...";
   const response = await chrome.runtime.sendMessage(message);
   if (response?.error) throw new Error(response.error);
   return response;
 }
 
+// Hold Alt while clicking any capture button for a one-off delayed capture (FireShot parity).
+function launchSettings(event) {
+  const delayMs = event?.altKey ? Math.max(settings.delayMs, 5000) : settings.delayMs;
+  return { ...settings, delayMs };
+}
+
+async function startMode(mode, event) {
+  try {
+    await persistSettings();
+    const launch = launchSettings(event);
+    status.textContent = launch.delayMs ? `Capture starts in ${launch.delayMs / 1000} seconds...` : "Capture running. Keep this tab active...";
+    const result = await request({ type: "WINSHOT_START_CAPTURE", mode, settings: launch });
+    if (result?.error) throw new Error(result.error);
+    status.textContent = result?.state === "complete" ? "Capture complete." : `Capture ${result?.state || "finished"}.`;
+  } catch (error) {
+    status.className = "error";
+    status.textContent = error.message;
+  }
+}
+
+async function startPicker(mode, event) {
+  try {
+    await persistSettings();
+    const launch = launchSettings(event);
+    status.textContent = launch.delayMs ? `Capture starts in ${launch.delayMs / 1000} seconds...` : "Starting...";
+    await request({ type: "WINSHOT_START_PICKER", mode, settings: launch });
+    window.close();
+  } catch (error) {
+    status.className = "error";
+    status.textContent = error.message;
+  }
+}
+
 for (const button of document.querySelectorAll("[data-mode]")) {
-  button.addEventListener("click", async () => {
-    try {
-      await persistSettings();
-      status.textContent = settings.delayMs ? `Capture starts in ${settings.delayMs / 1000} seconds...` : "Capture running. Keep this tab active...";
-      const result = await request({ type: "WINSHOT_START_CAPTURE", mode: button.dataset.mode, settings });
-      if (result?.error) throw new Error(result.error);
-      status.textContent = result?.state === "complete" ? "Capture complete." : `Capture ${result?.state || "finished"}.`;
-    } catch (error) {
-      status.className = "error";
-      status.textContent = error.message;
-    }
-  });
+  button.addEventListener("click", (event) => startMode(button.dataset.mode, event));
 }
 
 for (const button of document.querySelectorAll("[data-picker]")) {
-  button.addEventListener("click", async () => {
-    try {
-      await persistSettings();
-      await request({ type: "WINSHOT_START_PICKER", mode: button.dataset.picker, settings });
-      window.close();
-    } catch (error) {
-      status.className = "error";
-      status.textContent = error.message;
-    }
-  });
+  button.addEventListener("click", (event) => startPicker(button.dataset.picker, event));
 }
+
+const MODE_LABELS = {
+  "visible": "Visible viewport",
+  "full-page": "Entire page",
+  "region": "Drag a selection",
+  "element": "Select an element"
+};
+const repeatLabel = document.querySelector("#repeat-label");
+repeatLabel.textContent = MODE_LABELS[settings.lastMode] || MODE_LABELS["full-page"];
+document.querySelector("#repeat-last").addEventListener("click", (event) => {
+  const mode = MODE_LABELS[settings.lastMode] ? settings.lastMode : "full-page";
+  if (mode === "region" || mode === "element") return startPicker(mode, event);
+  return startMode(mode, event);
+});
 
 document.querySelector("#browser-window").addEventListener("click", async () => {
   try {
-    await chrome.tabs.create({ url: "winshot://capture-window" });
-    window.close();
+    // Navigating the current tab to an external-protocol URL launches the handler
+    // without committing a navigation, so the page is untouched either way.
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.id) throw new Error("No active browser tab was found.");
+    await chrome.tabs.update(tab.id, { url: "winshot://capture-window" });
+    status.textContent = "Asked WinShot desktop to capture this window. Nothing happening? Install WinShot desktop, or press Ctrl+Shift+8 in WinShot.";
   } catch {
     status.className = "error";
     status.textContent = "WinShot desktop is required for browser-window capture. You can also press Ctrl+Shift+8 in WinShot.";

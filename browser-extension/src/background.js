@@ -7,7 +7,7 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
-import { getTiles, listRecords, pruneOlderThan, putRecord, putTile } from "./store.js";
+import { deleteCapture, getTiles, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
 import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
 const activeCaptures = new Map();     // keyed by tabId
@@ -236,6 +236,14 @@ function progress(session, message) {
     tileCount: session.report.tileCount,
     message
   }).catch(() => {});
+  updateBadge(session.report?.tileCount ? String(session.report.tileCount) : "…");
+}
+
+// Toolbar badge is the progress surface that can never contaminate captured pixels.
+function updateBadge(text = "…") {
+  const busy = activeCaptures.size > 0 || Boolean(activeBatch);
+  chrome.action.setBadgeText({ text: busy ? text : "" }).catch(() => {});
+  if (busy) chrome.action.setBadgeBackgroundColor({ color: "#0A84FF" }).catch(() => {});
 }
 
 function fileSafeTitle(value) {
@@ -321,15 +329,25 @@ async function storeScrollingCapture(session, controller) {
       captureMetrics = await sendToTab(session.tabId, { type: "WINSHOT_METRICS", sessionId: session.id }, session.frameId);
     }
     extent = { width: captureMetrics.width, height: captureMetrics.height };
-    viewportSize = {
-      width: Math.max(1, captureMetrics.clip.width || captureMetrics.viewport.width),
-      height: Math.max(1, captureMetrics.clip.height || captureMetrics.viewport.height)
-    };
+    // Window-scrolling kinds sweep the full viewport across the target, so the tile
+    // step is the viewport — the PREPARE-time clip can be a thin sliver (a drag
+    // released near the viewport edge) and would explode the tile count. Element
+    // scrollers advance by their own visible box, which IS their clip.
+    const scrollsWindow = ["document", "region", "page-element"].includes(captureMetrics.kind);
+    viewportSize = scrollsWindow
+      ? {
+          width: Math.max(1, captureMetrics.viewport.width),
+          height: Math.max(1, captureMetrics.viewport.height)
+        }
+      : {
+          width: Math.max(1, captureMetrics.clip.width || captureMetrics.viewport.width),
+          height: Math.max(1, captureMetrics.clip.height || captureMetrics.viewport.height)
+        };
     session.report.warnings.push(...(prep.warnings || []));
     session.report.dimensionsCss = { ...extent };
     session.report.target = captureMetrics.kind;
     session.state = SessionState.CAPTURING;
-    await putRecord(session);
+    if (!(await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
 
     let safetyStopReason = null;
     if (extent.width > session.limits.maxWidthCss || extent.height > session.limits.maxHeightCss) {
@@ -404,6 +422,7 @@ async function storeScrollingCapture(session, controller) {
         const tile = {
           captureId: session.id,
           index,
+          planKey: key,
           blob: cropped.blob,
           destX: result.metrics.destX,
           destY: result.metrics.destY,
@@ -442,7 +461,11 @@ async function storeScrollingCapture(session, controller) {
         capturedThisPass++;
         session.report.tileCount = index;
         session.report.dimensionsCss = { ...extent };
-        await putRecord({ ...session, tiles: tileMetadata });
+        // A record the user deleted from History mid-run must stay deleted — never
+        // resurrect it as a "complete" capture missing its earlier tiles.
+        if (!(await updateRecord({ ...session, tiles: tileMetadata }))) {
+          throw new DOMException("This capture was deleted from history.", "AbortError");
+        }
 
         const measuredWidth = Math.min(result.metrics.width, session.limits.maxWidthCss);
         const measuredHeight = Math.min(result.metrics.height, session.limits.maxHeightCss);
@@ -462,7 +485,23 @@ async function storeScrollingCapture(session, controller) {
       extent = { width: Math.max(extent.width, nextExtent.width), height: Math.max(extent.height, nextExtent.height) };
       if (extent.width <= plannedExtent.width + 1 && extent.height <= plannedExtent.height + 1) break;
       if (safetyStopReason) break;
+      // The page grew: tiles captured as "last" have bottom-anchored fixed elements
+      // (footers, chat bars) painted in, and those pixels are now stale mid-image.
+      // Recapture those positions; the newer tile paints over the stale band.
+      const oldMaxX = Math.max(0, plannedExtent.width - viewportSize.width);
+      const oldMaxY = Math.max(0, plannedExtent.height - viewportSize.height);
+      for (const staleKey of [...capturedPositions]) {
+        const [x, y] = staleKey.split(":").map(Number);
+        if (x >= oldMaxX - 0.5 && y >= oldMaxY - 0.5) {
+          capturedPositions.delete(staleKey);
+          // Drop the superseded tile from seam scoring — comparing a footer-bearing
+          // tile against its footer-free recapture would falsely report a bad seam.
+          const stale = workingTiles.findIndex((tile) => tile.planKey === staleKey);
+          if (stale !== -1) workingTiles.splice(stale, 1);
+        }
+      }
       growthPass++;
+      progress(session, `Page keeps growing — following new content (pass ${growthPass}). Press Ctrl+Shift+S to stop.`);
     }
 
     if (growthPass > session.limits.maxGrowthPasses) {
@@ -516,6 +555,12 @@ async function storeScrollingCapture(session, controller) {
 async function runCapture(mode, target = null, tabOverride = null, options = {}) {
   const tab = tabOverride || await activeTab();
   if (!tab.id) throw new Error("No active tab.");
+  // A capture started while a picker overlay is open (hotkey, context menu) would
+  // burn the overlay into the pixels and strand its modal event shield — dismiss it.
+  if (pickerFrames.has(tab.id)) {
+    pickerSettings.delete(tab.id);
+    await stopPickers(tab.id);
+  }
   if (activeCaptures.has(tab.id)) throw new Error("A WinShot capture is already running in this tab.");
   // captureVisibleTab shoots whatever tab is active in the WINDOW, so captures must
   // also be exclusive per window, not just per tab.
@@ -537,6 +582,8 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   }
   const activeEntry = { session, controller, failureReason: null };
   activeCaptures.set(tab.id, activeEntry);
+  refreshContextMenu().catch(() => {});
+  updateBadge();
 
   try {
     await putRecord(session);
@@ -561,10 +608,13 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     }
   } finally {
     session.finishedAt = new Date().toISOString();
-    await putRecord(session);
+    // Never resurrect a record the user deleted from History mid-capture; sweep any
+    // tiles written after the delete.
+    if (!(await updateRecord(session))) await deleteCapture(session.id).catch(() => {});
     activeCaptures.delete(tab.id);
     activeWindowLocks.delete(tab.windowId);
     refreshContextMenu().catch(() => {});
+    updateBadge();
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
@@ -609,6 +659,11 @@ async function captureBatchTab(tab, controller, mode, settings) {
 
 async function runBatch(kind, urls = [], batchOptions = {}) {
   if (activeBatch) throw new Error("A WinShot batch is already running.");
+  // captureBatchTab activates other tabs, which would make a running capture's
+  // assertStillActive throw and destroy it — refuse instead of wrecking it.
+  if (activeCaptures.size > 0 || activeWindowLocks.size > 0) {
+    throw new Error("A WinShot capture is already running. Wait for it to finish or press Stop before starting a batch.");
+  }
   const original = await activeTab();
   const controller = new AbortController();
   const createdTabIds = [];
@@ -618,6 +673,8 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   const settings = normalizeSettings(batchOptions.settings || await loadSettings());
   const mode = settings.batchMode;
   activeBatch = { id: batchId, controller, currentTabId: null };
+  refreshContextMenu().catch(() => {});
+  updateBadge();
 
   try {
     let tabs;
@@ -637,9 +694,14 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
       tabs = [];
       for (const url of valid.slice(0, 20)) {
         throwIfAborted(controller.signal);
-        const tab = await chrome.tabs.create({ url, active: false, windowId: original.windowId });
-        createdTabIds.push(tab.id);
-        tabs.push(tab);
+        try {
+          const tab = await chrome.tabs.create({ url, active: false, windowId: original.windowId });
+          createdTabIds.push(tab.id);
+          tabs.push(tab);
+        } catch {
+          // One malformed http-prefixed URL must not abort the whole batch.
+          skipped.push({ title: url, reason: "The browser rejected this URL." });
+        }
       }
     } else {
       throw new Error("Unknown batch capture type.");
@@ -663,6 +725,8 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
     }
     try { await chrome.tabs.update(original.id, { active: true }); } catch { /* The original tab may be gone. */ }
     activeBatch = null;
+    refreshContextMenu().catch(() => {});
+    updateBadge();
   }
 
   const summary = { id: batchId, kind, mode, combinePdf: Boolean(batchOptions.combinePdf), createdAt: new Date().toISOString(), results, skipped };
@@ -746,15 +810,27 @@ async function startPicker(mode, tabOverride = null, suppliedSettings = null) {
   try {
     const injected = await injectCaptureScript(tab.id, 0, true);
     const frameIds = [...new Set(injected.map((result) => result.frameId))];
+    let frameInfo = null;
+    if (mode === "frame") {
+      if (frameIds.length <= 1) {
+        const error = new Error("No capturable frames were found on this page. Cross-origin frames need site access, and scrolling areas are captured with Select an element.");
+        error.winshotFriendly = true;
+        throw error;
+      }
+      const allFrames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => null);
+      const inaccessible = allFrames ? Math.max(0, allFrames.length - frameIds.length) : 0;
+      frameInfo = { accessible: frameIds.length - 1, inaccessible };
+    }
     pickerFrames.set(tab.id, frameIds);
     pickerSettings.set(tab.id, settings);
     const started = await Promise.allSettled(frameIds.map((frameId) =>
-      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode }, frameId)));
+      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo }, frameId)));
     if (!started.some((result) => result.status === "fulfilled")) throw new Error("The picker could not start in any accessible frame.");
     return { started: true, frameCount: frameIds.length };
   } catch (error) {
     pickerFrames.delete(tab.id);
     pickerSettings.delete(tab.id);
+    if (error?.winshotFriendly) throw error;
     throw new Error(`${restrictedPageReason(tab.url)} (${friendlyError(error)})`);
   }
 }
@@ -810,6 +886,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         frameId: sender.frameId || 0,
         frameUrl: sender.url || tab.url
       };
+      // A capture this picker superseded may still be unwinding and holding the
+      // tab/window lock — wait briefly so the pick is not silently rejected.
+      const lockDeadline = Date.now() + 5000;
+      while ((activeCaptures.has(tab.id) || activeWindowLocks.has(tab.windowId)) && Date.now() < lockDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       runCapture(message.mode, target, tab, { settings, limits: captureLimits(settings) }).catch(() => {});
       return { started: true };
     }

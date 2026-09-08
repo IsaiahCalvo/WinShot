@@ -62,6 +62,44 @@ function fixture(name, crossPort) {
       return shell("pixel-surfaces", `<canvas id="two" width="700" height="500"></canvas><canvas id="gl" width="700" height="500"></canvas><video controls width="700"></video>${rows(10)}`, `const c=document.querySelector('#two').getContext('2d');c.fillStyle='#1687ff';c.fillRect(0,0,700,500);c.fillStyle='white';c.font='40px sans-serif';c.fillText('CANVAS PIXELS',100,250);const gl=document.querySelector('#gl').getContext('webgl');gl.clearColor(.1,.7,.3,1);gl.clear(gl.COLOR_BUFFER_BIT);`);
     case "recovery":
       return shell("recovery", `<input id="focus" value="original"><div id="snap" style="scroll-snap-type:y mandatory;height:500px;overflow:auto">${rows(20,"RECOVERY")}</div>`);
+    case "fixed-badge":
+      return shell("fixed-badge", `<div id="badge">BADGE</div>${rows(30)}`, "", "#badge{position:fixed;top:300px;left:40px;width:220px;height:64px;background:#ff00cc;color:#ff00cc;z-index:5}");
+    case "shadow-iframe":
+      return shell("shadow-iframe", `<h1>Shadow frame host</h1><frame-holder></frame-holder>${rows(6)}`, `customElements.define('frame-holder',class extends HTMLElement{connectedCallback(){const root=this.attachShadow({mode:'open'});root.innerHTML='<iframe src="/frame" style="display:block;width:900px;height:300px;margin:20px;border:4px solid #1687ff"></iframe>'}})`);
+    case "mixed-frames":
+      return shell("mixed-frames", `<h1>Mixed frames</h1><p id="plain">PLAIN TEXT AREA — not a frame, not scrollable</p><iframe id="good" src="/frame"></iframe><iframe id="opaque" src="data:text/html,<h1>DATA FRAME</h1>"></iframe><div id="panel">${rows(10,"PANEL")}</div>`, "", "iframe{width:460px;height:200px;margin:10px;border:4px solid #1687ff}#panel{width:700px;height:300px;overflow:auto;border:5px solid #234;margin:10px}#plain{padding:20px}");
+    case "srcdoc-frame":
+      return shell("srcdoc-frame", `<h1>Srcdoc frame</h1><iframe id="sd" srcdoc='<style>body{margin:0}div{height:120px;border-bottom:1px solid #999;padding:10px;box-sizing:border-box}</style>${Array.from({length:10},(_,i)=>`<div>SRCDOC ${i}</div>`).join("")}'></iframe>${rows(4)}`, "", "#sd{display:block;width:800px;height:300px;margin:20px;border:4px solid #1687ff}");
+    case "vanishing":
+      return shell("vanishing-element", `<div id="doomed">DOOMED CONTENT</div>${rows(8)}`, `new MutationObserver((mutations)=>{for(const m of mutations){if(m.attributeName==='data-winshot-target'&&m.target.id==='doomed')m.target.remove()}}).observe(document.body,{attributes:true,subtree:true,attributeFilter:['data-winshot-target']});`, "#doomed{height:150px;padding:20px;background:#8cf}");
+    case "css-zoom":
+      return shell("css-zoom", `<div id="zoomed"><h1>ZOOMED CONTENT</h1>${rows(24, "ZOOM")}</div>`, "", "body{zoom:1.5}");
+    case "hidden-body":
+      return shell("hidden-body", `<div id="tall">${rows(25, "HIDDEN")}</div>`, "", "body{overflow:hidden}");
+    case "js-animated":
+      return shell("js-animated", `<canvas id="anim" width="1100" height="2800"></canvas>${rows(4, "AFTER")}`, `
+        const cv=document.querySelector('#anim'),cx=cv.getContext('2d');
+        function draw(){
+          const bucket=Math.floor(performance.now()/300);
+          let s=(bucket*2654435761)%4294967296;
+          const rand=()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296};
+          for(let y=0;y<2800;y+=40){for(let x=0;x<1100;x+=40){cx.fillStyle=rand()>0.5?'#000':'#fff';cx.fillRect(x,y,40,40)}}
+          requestAnimationFrame(draw);
+        }
+        draw();
+      `, "canvas{display:block}");
+    case "growing-footer":
+      // Heights are exact on purpose: with a 1000px viewport and 64px overlap the
+      // first pass captures y=0 and y=936, growth to 2872 makes the second pass
+      // reuse position 936, and the 100px fixed footer is taller than the overlap.
+      return shell("growing-footer", `<div id="feed"></div><footer id="foot"></footer>`, `
+        let grown=false;
+        addEventListener('scroll',()=>{
+          if(!grown&&scrollY+innerHeight>=document.body.scrollHeight-60){grown=true;document.querySelector('#feed').style.height='2872px'}
+        });
+      `, "#feed{height:1936px;background:repeating-linear-gradient(180deg,#e8eef8 0 60px,#ffffff 60px 121px)}#foot{position:fixed;left:0;bottom:0;width:100%;height:100px;background:#ff00c8}");
+    case "scaled-scroller":
+      return shell("scaled-scroller", `<h1>Scaled scroller</h1><div class="scalewrap"><div id="scaled">${rows(25, "SCALED")}</div></div>`, "", ".scalewrap{transform:scale(0.5);transform-origin:0 0}#scaled{width:800px;height:600px;overflow:auto;border:4px solid #223}");
     default:
       return shell("fixture-index", `<h1>WinShot fixture corpus</h1><ul>${["body","horizontal","nested","sticky","lazy","animated","repetitive","shadow","iframes","duplicate-frames","tall-frame","long","infinite","endless","virtual","media","recovery"].map(value=>`<li><a href="/${value}">${value}</a></li>`).join("")}</ul>`);
   }

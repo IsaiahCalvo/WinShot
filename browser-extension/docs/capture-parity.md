@@ -4,16 +4,26 @@
 
 - Visible viewport, full page, dragged selection, exact element, and independently scrolling-area capture.
 - Selection edge auto-scroll, Ctrl square selection, Alt full-page-width selection, and Ctrl-hover element selection.
+- FireShot-style selection chrome: dimmed page with a bright selection cutout, dashed crosshair guides, and Ctrl+hover element highlight with Ctrl+click element capture inside the region picker.
+- Repeat-last-capture popup row and toolbar-badge progress; Alt-hold on any capture button adds a one-off delay.
 - Sticky/fixed-element handling, lazy content, virtualized rows, changing page extents, horizontal pages, and configurable delay and safety limits.
 - Same-origin, permitted cross-origin, nested, and duplicate-URL sibling frames using exact frame identity.
 - All-open-tab and URL-list batches in visible or full-page mode, plus one-click all-tabs-to-one-PDF.
-- Browser-window capture exists in WinShot desktop. The extension can request it through `winshot://capture-window`, but that external-app handoff still requires live manual acceptance and does not return a success acknowledgement.
+- Browser-window capture exists in WinShot desktop. The extension requests it by navigating the active tab to `winshot://capture-window` (an external-protocol launch that leaves the page untouched), but the handoff still requires live manual acceptance and does not return a success acknowledgement.
 - Tile-backed captures above 32,000 pixels, cancellation, navigation failure, service-worker recovery, and exact page restoration.
 - PNG, bounded-canvas JPEG/WebP, searchable linked PDF, single- or multipage PDF, standard/custom page sizes, headers, footers, and watermarks. An independent PDF reader extracts the Latin, Japanese, and Arabic text and link annotations in the end-to-end suite.
 
 The browser-native paths are covered by unit tests, packaged Manifest V3 end-to-end tests in disposable Chrome-for-Testing profiles, and Chrome/Edge fixture smoke tests. Desktop regressions are checked separately; selectors, global hotkeys, and the external-protocol handoff cannot be called fully end to end without interacting with the real Windows desktop.
 
 See [fireshot-capture-matrix.md](fireshot-capture-matrix.md) for the feature-by-feature comparison.
+
+## Known FireShot UX niceties still open
+
+- Edge-triangle "capture from this point to the end of the page" affordance in selection mode.
+- A dedicated batch setup page with per-batch options (load wait, render delay, output folder); WinShot uses hardcoded 30 s load wait and 250 ms settle.
+- A dedicated options page; WinShot settings live in the popup's Capture settings section.
+- A page scrolling-speed setting (WinShot uses fixed settle timings).
+- Per-mode remembered actions ("+ Save", "+ PDF"); WinShot always opens its editor page, which offers every export.
 
 ## Deliberate boundaries
 

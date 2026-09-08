@@ -5,6 +5,8 @@
   "description": "Reliable, local-first webpage capture for WinShot.",
   "version": "0.1.0",
   "minimum_chrome_version": "109",
+  "offline_enabled": true,
+  "incognito": "spanning",
   "action": {
     "default_title": "Capture with WinShot",
     "default_popup": "src/popup.html",
@@ -32,14 +34,14 @@
     "downloads",
     "scripting",
     "storage",
+    "tabs",
     "webNavigation"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "optional_permissions": [
-    "nativeMessaging",
-    "tabs"
+    "nativeMessaging"
   ],
   "commands": {
     "capture-full-page": {

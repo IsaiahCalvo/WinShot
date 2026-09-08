@@ -25,8 +25,16 @@
     return { x, y, any: x || y };
   }
 
+  // parentElement stops at shadow boundaries; hop to the shadow host so walks keep
+  // going for nodes picked inside open shadow roots.
+  function composedParent(node) {
+    if (node?.parentElement) return node.parentElement;
+    const root = node?.getRootNode?.();
+    return root instanceof ShadowRoot ? root.host : null;
+  }
+
   function nearestScrollOwner(element) {
-    for (let node = element?.parentElement; node && node !== document.body; node = node.parentElement) {
+    for (let node = composedParent(element); node && node !== document.body; node = composedParent(node)) {
       if (isScrollable(node).any) return node;
     }
     return scrollingElement();
@@ -115,7 +123,17 @@
       selection: snapshotSelection(),
       timer: 0
     };
-    state.timer = setTimeout(() => restorePickerState(), WATCHDOG_MS);
+    // Leaked-state watchdog only: a user can legitimately hover or hold a drag far
+    // longer than WATCHDOG_MS, so the timer re-arms while a picker overlay is open
+    // and fires only once the overlay is gone and nothing consumed the state.
+    const tick = () => {
+      if (pickerCleanup) {
+        state.timer = setTimeout(tick, WATCHDOG_MS);
+        return;
+      }
+      restorePickerState();
+    };
+    state.timer = setTimeout(tick, WATCHDOG_MS);
     pendingPickerState = state;
   }
 
@@ -206,10 +224,20 @@
     return { restored: true };
   }
 
+  // querySelectorAll never pierces shadow roots — walk them so frames hosted inside
+  // web components are still matched and counted.
+  function allFrameElements(root = document) {
+    const frames = [...root.querySelectorAll("iframe,frame")];
+    for (const element of root.querySelectorAll("*")) {
+      if (element.shadowRoot) frames.push(...allFrameElements(element.shadowRoot));
+    }
+    return frames;
+  }
+
   addEventListener("message", (event) => {
     const data = event.data;
     if (!data || data.source !== "winshot-frame" || typeof data.token !== "string") return;
-    const frame = [...document.querySelectorAll("iframe,frame")].find((candidate) => candidate.contentWindow === event.source);
+    const frame = allFrameElements().find((candidate) => candidate.contentWindow === event.source);
     if (!frame) return;
     announcedFrames.set(data.token, frame);
     setTimeout(() => announcedFrames.delete(data.token), 5000);
@@ -293,7 +321,26 @@
     let reachedX;
     let reachedY;
 
-    if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
+    if (session.fixedTarget) {
+      // The element ignores window scroll — clip its live viewport rect where it sits.
+      const rect = session.targetElement.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      const left = Math.max(rect.left, 0);
+      const top = Math.max(rect.top, 0);
+      const right = Math.min(rect.right, view.width);
+      const bottom = Math.min(rect.bottom, view.height);
+      clip = {
+        left: left + view.offsetLeft,
+        top: top + view.offsetTop,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top)
+      };
+      destX = Math.max(0, left - rect.left);
+      destY = Math.max(0, top - rect.top);
+      reachedX = window.scrollX;
+      reachedY = window.scrollY;
+    } else if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
       const target = session.kind === "document"
         ? { left: 0, top: 0, ...documentSize() }
         : session.targetRect;
@@ -464,7 +511,7 @@
   function collectWarnings() {
     const warnings = [];
     let inaccessibleFrames = 0;
-    for (const frame of document.querySelectorAll("iframe,frame")) {
+    for (const frame of allFrameElements()) {
       try {
         if (!frame.contentDocument) inaccessibleFrames++;
       } catch {
@@ -483,6 +530,21 @@
     return warnings;
   }
 
+  // Pickers mark nodes found via composedPath(), which pierces open shadow roots —
+  // the lookup must pierce them too.
+  function findMarkedTarget(token) {
+    const selector = `[data-winshot-target="${CSS.escape(token)}"]`;
+    const roots = [document];
+    for (let index = 0; index < roots.length; index++) {
+      const found = roots[index].querySelector(selector);
+      if (found) return found;
+      for (const element of roots[index].querySelectorAll("*")) {
+        if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
+      }
+    }
+    return null;
+  }
+
   function classifyTarget(request) {
     if (request.mode === "full-page") {
       return { kind: "document", owner: scrollingElement(), targetRect: { left: 0, top: 0, ...documentSize() } };
@@ -491,7 +553,7 @@
       return { kind: "region", owner: scrollingElement(), targetRect: request.target.rect };
     }
     if (request.mode === "element") {
-      const element = document.querySelector(`[data-winshot-target="${CSS.escape(request.target.token)}"]`);
+      const element = findMarkedTarget(request.target.token);
       if (!element) throw new Error("The selected element is no longer on the page.");
       const ownScroll = isScrollable(element);
       const rect = element.getBoundingClientRect();
@@ -502,6 +564,20 @@
           targetElement: element,
           targetRect: { left: 0, top: 0, width: element.scrollWidth, height: element.scrollHeight }
         };
+      }
+      // A position:fixed element (or one inside a fixed container) never moves with
+      // window scroll — scrolling to its document coordinates would capture whatever
+      // page content sits underneath. Capture its viewport rect in place instead.
+      for (let node = element; node instanceof Element; node = composedParent(node)) {
+        if (getComputedStyle(node).position === "fixed") {
+          return {
+            kind: "page-element",
+            fixedTarget: true,
+            owner: scrollingElement(),
+            targetElement: element,
+            targetRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+          };
+        }
       }
       const owner = nearestScrollOwner(element);
       if (owner === scrollingElement()) {
@@ -560,6 +636,8 @@
       const node = nodes[i];
       const position = getComputedStyle(node).position;
       if (position !== "fixed" && position !== "sticky") continue;
+      // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
+      if (classification.fixedTarget && (node === classification.targetElement || node.contains(classification.targetElement))) continue;
       const rect = node.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       if (position === "sticky") {
@@ -576,6 +654,9 @@
   }
 
   async function prepare(request) {
+    // A stale picker overlay must never be captured into the pixels or keep
+    // swallowing page events after the capture.
+    pickerCleanup?.();
     restore("superseded");
     const classification = classifyTarget(request);
     const owner = classification.owner;
@@ -585,6 +666,7 @@
     session = {
       id: request.sessionId,
       kind: classification.kind,
+      fixedTarget: classification.fixedTarget || false,
       owner,
       ownerOffset: classification.ownerOffset || null,
       targetRect: classification.targetRect,
@@ -637,7 +719,9 @@
     const maxY = Math.max(0, request.extent.height - request.viewport.height);
     setFloatingVisibility(request.x <= 0.5 && request.y <= 0.5, request.x >= maxX - 0.5 && request.y >= maxY - 0.5);
 
-    if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
+    if (session.fixedTarget) {
+      // Fixed elements do not move with window scroll — capture in place.
+    } else if (session.kind === "document" || session.kind === "region" || session.kind === "page-element") {
       const target = session.kind === "document" ? { left: 0, top: 0 } : session.targetRect;
       window.scrollTo(target.left + request.x, target.top + request.y);
     } else if (session.kind === "self-scroller") {
@@ -651,13 +735,35 @@
     return result;
   }
 
-  async function beginPicker(mode) {
+  async function beginPicker(mode, frameInfo = null) {
     pickerCleanup?.();
     restore("picker-started");
     savePickerState();
     if (mode === "region") startRegionPicker();
-    else startElementPicker(mode);
+    else startElementPicker(mode, frameInfo);
     return { started: true };
+  }
+
+  // A picker overlay must be modal: no press, click, or context menu may reach the
+  // page underneath, or the page mutates mid-capture. Pointer events are only
+  // stopped, not cancelled — cancelling pointerdown would suppress the
+  // compatibility mouse events the pickers themselves handle.
+  function swallowPageEvents(except = []) {
+    const types = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu"];
+    const handlers = types.filter((type) => !except.includes(type)).map((type) => {
+      const handler = (event) => {
+        if (!type.startsWith("pointer")) event.preventDefault();
+        event.stopPropagation();
+      };
+      addEventListener(type, handler, true);
+      return { type, handler };
+    });
+    // The browser dispatches the gesture's trailing `click` AFTER mouseup, so tearing
+    // the shield down synchronously inside a mouseup/click handler would leak that
+    // click to the page. Defer removal to the next task.
+    return () => {
+      setTimeout(() => { for (const entry of handlers) removeEventListener(entry.type, entry.handler, true); }, 0);
+    };
   }
 
   function cancelPicker() {
@@ -682,12 +788,18 @@
     chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload }).catch(() => {});
   }
 
-  function startElementPicker(mode = "element") {
+  function startElementPicker(mode = "element", frameInfo = null) {
     const frameMode = mode === "frame";
     const { outline, tip } = pickerChrome("Click an element · Hold Ctrl for the exact node · Yellow means hidden scrollable content · Esc cancels");
-    if (frameMode) tip.textContent = window === top
-      ? "Click inside the frame you want to capture · Esc cancels"
-      : "Click anywhere to capture this entire scrolling frame · Esc cancels";
+    if (frameMode) {
+      const blocked = frameInfo?.inaccessible
+        ? ` · ${frameInfo.inaccessible} frame(s) here can't be captured (cross-origin or restricted)`
+        : "";
+      tip.textContent = window === top
+        ? `Click inside the frame you want to capture${blocked} · Esc cancels`
+        : "Click anywhere to capture this entire scrolling frame · Esc cancels";
+    }
+    const unswallow = swallowPageEvents();
     let current = null;
 
     const chooseCandidate = (event) => {
@@ -702,6 +814,15 @@
       return candidate;
     };
     const move = (event) => {
+      if (frameMode && window !== top) {
+        // The whole frame is the target — outline the entire frame viewport.
+        outline.style.display = "block";
+        outline.style.left = "0px";
+        outline.style.top = "0px";
+        outline.style.width = `${innerWidth}px`;
+        outline.style.height = `${innerHeight}px`;
+        return;
+      }
       current = chooseCandidate(event);
       if (!current) return;
       const rect = current.getBoundingClientRect();
@@ -719,7 +840,21 @@
       event.stopPropagation();
       if (frameMode) {
         if (window === top) {
-          tip.textContent = "Click inside the frame, not its border.";
+          // Clicks over an accessible frame land in that frame, never here. Landing
+          // here means the click hit the top page — help instead of nagging: a
+          // scrollable element is captured directly, like the element picker would.
+          const candidate = chooseCandidate(event);
+          if (candidate && candidate !== document.body && candidate !== document.documentElement && isScrollable(candidate).any) {
+            const before = candidate.getAttribute("data-winshot-target");
+            const token = crypto.randomUUID();
+            candidate.setAttribute("data-winshot-target", token);
+            cleanup();
+            sendPickerResult({ mode: "element", target: { token, attributeBefore: before }, title: candidate.tagName.toLowerCase() });
+            return;
+          }
+          tip.textContent = candidate?.closest?.("iframe, frame, object, embed")
+            ? "This frame can't be captured (cross-origin or restricted). Grant site access or use Select an element."
+            : "That isn't a frame or scrolling area. Click inside a frame, or press Esc and use Select an element.";
           return;
         }
         cleanup();
@@ -742,6 +877,7 @@
       }
     };
     const cleanup = () => {
+      unswallow();
       removeEventListener("mousemove", move, true);
       removeEventListener("click", click, true);
       removeEventListener("keydown", key, true);
@@ -755,12 +891,44 @@
   }
 
   function startRegionPicker() {
-    const { outline, tip } = pickerChrome("Drag a rectangle · Alt captures full page width · Ctrl locks a square · Move to an edge to auto-scroll · Esc cancels");
+    const { outline, tip } = pickerChrome("Drag to select · Ctrl+click captures an element · Alt selects full page width · Ctrl while dragging locks a square · Esc cancels");
+    // FireShot-style chrome: dimmed page, dashed crosshair guides, Ctrl element highlight.
+    const dim = document.createElement("div");
+    dim.style.cssText = `position:fixed;inset:0;pointer-events:none;z-index:${PICKER_Z - 2};background:rgba(0,0,0,.3)`;
+    dim.dataset.winshotPicker = "dim";
+    const guideH = document.createElement("div");
+    const guideV = document.createElement("div");
+    guideH.style.cssText = `position:fixed;left:0;width:100vw;height:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-top:1px dashed rgba(255,255,255,.85)`;
+    guideV.style.cssText = `position:fixed;top:0;height:100vh;width:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-left:1px dashed rgba(255,255,255,.85)`;
+    guideH.dataset.winshotPicker = "guide";
+    guideV.dataset.winshotPicker = "guide";
+    document.documentElement.append(dim, guideH, guideV);
+    const ownNodes = [outline, tip, dim, guideH, guideV];
+    const unswallow = swallowPageEvents();
     let dragging = false;
     let start = null;
     let currentClient = null;
     let currentModifiers = { altKey: false, ctrlKey: false };
+    let hoverTarget = null;
     let autoTimer = 0;
+
+    const elementUnderCursor = (event) => {
+      const path = event.composedPath?.() || [];
+      const candidate = path.find((node) => node instanceof Element && !ownNodes.includes(node)) || event.target;
+      return candidate instanceof Element ? candidate : null;
+    };
+    const showElementHighlight = (element) => {
+      const rect = element.getBoundingClientRect();
+      const scrollable = isScrollable(element).any;
+      outline.style.display = "block";
+      outline.style.boxShadow = "none";
+      outline.style.left = `${rect.left}px`;
+      outline.style.top = `${rect.top}px`;
+      outline.style.width = `${rect.width}px`;
+      outline.style.height = `${rect.height}px`;
+      outline.style.borderColor = scrollable ? "#f4bd00" : "#1687ff";
+      outline.style.background = scrollable ? "rgba(244,189,0,.15)" : "rgba(22,135,255,.12)";
+    };
 
     const documentPoint = (event) => ({ x: event.clientX + window.scrollX, y: event.clientY + window.scrollY });
     const selectionRect = (end, modifiers) => {
@@ -786,6 +954,10 @@
       const now = { x: currentClient.x + window.scrollX, y: currentClient.y + window.scrollY };
       const rect = selectionRect(now, currentModifiers);
       outline.style.display = "block";
+      outline.style.borderColor = "#1687ff";
+      outline.style.background = "rgba(22,135,255,.12)";
+      // The selection stays bright while everything around it dims.
+      outline.style.boxShadow = "0 0 0 200000px rgba(0,0,0,.3)";
       outline.style.left = `${rect.left - window.scrollX}px`;
       outline.style.top = `${rect.top - window.scrollY}px`;
       outline.style.width = `${rect.width}px`;
@@ -795,6 +967,9 @@
       if (event.button !== 0) return;
       event.preventDefault(); event.stopPropagation();
       dragging = true;
+      guideH.style.display = "none";
+      guideV.style.display = "none";
+      dim.style.display = "none";
       start = documentPoint(event);
       currentClient = { x: event.clientX, y: event.clientY };
       currentModifiers = { altKey: event.altKey, ctrlKey: event.ctrlKey };
@@ -810,7 +985,22 @@
       }, 16);
     };
     const move = (event) => {
-      if (!dragging) return;
+      if (!dragging) {
+        if (event.ctrlKey) {
+          hoverTarget = elementUnderCursor(event);
+          guideH.style.display = "none";
+          guideV.style.display = "none";
+          if (hoverTarget) showElementHighlight(hoverTarget);
+        } else {
+          hoverTarget = null;
+          outline.style.display = "none";
+          guideH.style.display = "block";
+          guideV.style.display = "block";
+          guideH.style.top = `${event.clientY}px`;
+          guideV.style.left = `${event.clientX}px`;
+        }
+        return;
+      }
       event.preventDefault(); event.stopPropagation();
       currentClient = { x: event.clientX, y: event.clientY };
       currentModifiers = { altKey: event.altKey, ctrlKey: event.ctrlKey };
@@ -824,20 +1014,36 @@
         altKey: event.altKey || currentModifiers.altKey,
         ctrlKey: event.ctrlKey || currentModifiers.ctrlKey
       });
+      if (rect.width < 4 || rect.height < 4) {
+        // FireShot parity: Ctrl+click (no drag) captures the hovered element;
+        // the capture engine scrolls a scrollable one fully on its own.
+        const element = event.ctrlKey ? (hoverTarget || elementUnderCursor(event)) : null;
+        cleanup();
+        if (element) {
+          const before = element.getAttribute("data-winshot-target");
+          const token = crypto.randomUUID();
+          element.setAttribute("data-winshot-target", token);
+          sendPickerResult({ mode: "element", target: { token, attributeBefore: before }, title: element.tagName.toLowerCase() });
+        } else {
+          restorePickerState();
+          sendPickerResult({ cancelled: true });
+        }
+        return;
+      }
       cleanup();
-      if (rect.width < 4 || rect.height < 4) { restorePickerState(); sendPickerResult({ cancelled: true }); }
-      else sendPickerResult({ mode: "region", target: { rect } });
+      sendPickerResult({ mode: "region", target: { rect } });
     };
     const key = (event) => {
       if (event.key === "Escape") { cleanup(); restorePickerState(); sendPickerResult({ cancelled: true }); }
     };
     const cleanup = () => {
+      unswallow();
       clearInterval(autoTimer);
       removeEventListener("mousedown", down, true);
       removeEventListener("mousemove", move, true);
       removeEventListener("mouseup", up, true);
       removeEventListener("keydown", key, true);
-      outline.remove(); tip.remove();
+      outline.remove(); tip.remove(); dim.remove(); guideH.remove(); guideV.remove();
       pickerCleanup = null;
     };
     pickerCleanup = cleanup;
@@ -867,7 +1073,7 @@
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
           return { alive: Boolean(frameHostSession) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
-        case "WINSHOT_START_PICKER": return await beginPicker(request.mode);
+        case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null);
         case "WINSHOT_CANCEL_PICKER": return cancelPicker();
         default: return undefined;
       }
