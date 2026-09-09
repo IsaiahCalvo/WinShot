@@ -194,8 +194,10 @@ public class AnnotationEditorRenderHarness
         thread.Join();
 
         Assert.Null(failure);
-        // Twelve painted renders, each already pixel-scanned by SaveBitmap.
-        Assert.Equal(12, Directory.GetFiles(outDir, "*.png").Length);
+        // Nineteen painted renders, each already pixel-scanned by SaveBitmap. It was twelve
+        // on each branch before the merge; the union adds the group strips, the colour
+        // picker, the redaction row and the toolbar strip.
+        Assert.Equal(19, Directory.GetFiles(outDir, "*.png").Length);
 
         // The three scale passes are one state rendered three ways, so their pixel sizes are
         // exact multiples. Anything else means the states drifted apart again.
@@ -1242,13 +1244,15 @@ public class AnnotationEditorRenderHarness
                 Check("SelectToolBtn");
                 Click(0.10, 0.40); Shot("pointer-rect-selected.png");
                 // LAYOUT-01/02: with Select armed, Survey's category strip is force-closed and no
-                // chip is gold, whatever is selected (PDFViewer.jsx:4558-4568, AppShell.jsx:1647).
+                // chip is lit, whatever is selected (PDFViewer.jsx:4558-4568, AppShell.jsx:1647).
+                // The lit colour is the accent, not Survey's gold — that alias went with the rest
+                // of Survey's palette.
                 {
                     var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
                     File.WriteAllText(Path.Combine(outDir, "layout-select-chrome.txt"),
                         $"select+rect selected: band={groupBar.Visibility} " +
                         $"shapeChipFg={(shapeChip.Foreground as SolidColorBrush)?.Color} " +
-                        $"goldBrush={((SolidColorBrush)editor.FindResource("SurveyGoldBrush")).Color}");
+                        $"accent={((SolidColorBrush)editor.FindResource("ChromeAccentBrush")).Color}");
                 }
                 Click(0.55, 0.735); Shot("pointer-arrow-selected.png");
                 // Survey's curve-bend midpoint carries a <title>Drag to bend</title>
@@ -1525,9 +1529,14 @@ public class AnnotationEditorRenderHarness
                     void CloseUp(FrameworkElement? fe, string name)
                     {
                         if (fe is null || fe.ActualWidth < 1 || fe.ActualHeight < 1) return;
-                        RenderElementToPng(fe, Path.Combine(outDir, name));
+                        // An annotation's ground is the picture, not a chrome surface.
+                        RenderElementToPng(fe, Path.Combine(outDir, name), onTransparentGround: true);
                     }
-                    CloseUp(selCallout?.Label, "textfmt-committed-callout.png");
+                    // The callout VISUAL, not its bare glyph TextBlock: a TextBlock on its own
+                    // is glyphs over nothing, so AssertPainted's "did this composite at all"
+                    // floor reads a perfectly good render as a blank one. The visual carries
+                    // the box, the leader and the ink, which is what the restyle changed.
+                    CloseUp(selCallout, "textfmt-committed-callout.png");
 
                     // ---- ROUND 2 PROBES: colour-channel separation + edit-mode selection ----
                     var r2 = new System.Text.StringBuilder();
@@ -1694,7 +1703,11 @@ public class AnnotationEditorRenderHarness
                         $"gridH={grownEl?.ActualHeight:F1} glyphsH={grownGlyphs?.ActualHeight:F1} room={contentRoom:F1}");
                     r2.AppendLine($"[R2-G expect] box grew AND the glyphs fit inside it -> " +
                         $"{(gH1 > gH0 + 0.5 && grownGlyphs is not null && grownGlyphs.ActualHeight <= contentRoom + 0.5 ? "PASS" : "FAIL")}");
-                    CloseUp(grownEl, "textfmt-selected-restyle-regrow.png");
+                    // No close-up here. The subject is whatever LastText() finds, and by this
+                    // point in the run that is the box the blanking probe emptied — an empty
+                    // Survey text box is a transparent chrome rect and no glyphs, so the PNG
+                    // was a blank image proving nothing, and AssertPainted was right to say so.
+                    // The regrow itself is asserted above, in text, against the real numbers.
 
                     File.WriteAllText(Path.Combine(outDir, "text-format-round2.txt"), r2.ToString());
                     Shot("pointer-text-format-round2.png");
@@ -1942,8 +1955,19 @@ public class AnnotationEditorRenderHarness
                     for (int i = 1; i <= steps; i++) { editor.PointerMove(PA(a + (b - a) * (i / (double)steps))); Pump(1); }
                     editor.PointerUp(PA(b)); Pump(3);
                 }
-                Check("PixelateToolBtn"); Drag(new[] { (0.62, 0.30), (0.80, 0.45) });
-                Check("BlurToolBtn"); Drag(new[] { (0.62, 0.50), (0.80, 0.62) }); Pump(30);
+                // Survey's two effect tools are one re-editable redaction mark now, so the pair
+                // of drags is the same pair of regions in two of its four STYLES: pixelate,
+                // then blur. Nothing is baked into the source either time.
+                var redactStyle = (System.Windows.Controls.ComboBox)editor.FindName("RedactStyleBox")!;
+                void PickRedactStyle(string tag)
+                {
+                    foreach (System.Windows.Controls.ComboBoxItem it in redactStyle.Items.OfType<System.Windows.Controls.ComboBoxItem>())
+                        if (it.Tag as string == tag) { redactStyle.SelectedItem = it; break; }
+                    Pump(3);
+                }
+                Check("RedactToolBtn");
+                PickRedactStyle("Pixelate"); Drag(new[] { (0.62, 0.30), (0.80, 0.45) });
+                PickRedactStyle("BlurSecure"); Drag(new[] { (0.62, 0.50), (0.80, 0.62) }); Pump(30);
                 Shot("pointer-effects.png");
 
                 // --- Callout mechanics: knee and tip move independently, corners resize, box moves. ---
@@ -2748,13 +2772,14 @@ public class AnnotationEditorRenderHarness
                 Check("TextToolBtn"); Pump(4);
                 var textEditBtn = (Button)editor.FindName("TextEditBtn")!;
                 var textEditPanel = (FrameworkElement)editor.FindName("TextEditPanel")!;
-                RenderElementToPng(textEditPanel, Path.Combine(outDir, "chrome-text-edit-aa-idle.png"));
+                RenderElementToPng(textEditPanel, Path.Combine(outDir, "chrome-text-edit-aa-idle.png"), onTransparentGround: true);
                 string aaIdle = $"visible={textEditPanel.Visibility} enabled={textEditBtn.IsEnabled} tip={textEditBtn.ToolTip}";
                 Click(0.30, 0.30);                    // places a text box and opens its editor
                 Pump(6);
                 Shot("pointer-rich-text-subrow.png");
+                // The rich-text host is portalled over the page, so its ground is transparent.
                 RenderElementToPng((FrameworkElement)editor.FindName("EditorRichTextHost")!,
-                    Path.Combine(outDir, "chrome-rich-text-strip.png"));
+                    Path.Combine(outDir, "chrome-rich-text-strip.png"), onTransparentGround: true);
                 var stylePanel = (StackPanel)editor.FindName("TextStylePanel")!;
                 var fontColorBtn = (Button)editor.FindName("FontColorBtn")!;
                 File.WriteAllText(Path.Combine(outDir, "rich-text-strip.txt"),
@@ -2774,7 +2799,7 @@ public class AnnotationEditorRenderHarness
                 // The tool cluster: `.btn-icon` squares, the #5a6473 divider, and the
                 // gold `.btn-active` glyph on the live category button.
                 RenderElementToPng(editor.FindName("ToolPanel") as UIElement,
-                    Path.Combine(outDir, "chrome-tool-cluster.png"));
+                    Path.Combine(outDir, "chrome-tool-cluster.png"), onTransparentGround: true);
 
                 // Cloud border reveals the Bump field; the size popover shows preset previews.
                 var lineBox = (ComboBox)editor.FindName("LineStyleBox")!;
@@ -2784,7 +2809,7 @@ public class AnnotationEditorRenderHarness
                 Pump(4);
                 Shot("pointer-chrome-cloud-bump.png");
                 RenderElementToPng(editor.FindName("SizeField") as UIElement,
-                    Path.Combine(outDir, "chrome-size-field.png"));
+                    Path.Combine(outDir, "chrome-size-field.png"), onTransparentGround: true);
                 ((System.Windows.Controls.Primitives.ToggleButton)editor.FindName("SizePresetsBtn")!).IsChecked = true;
                 Pump(6);
                 RenderElementToPng(((System.Windows.Controls.Primitives.Popup)editor.FindName("SizePresetsPopup")!).Child,
@@ -2796,7 +2821,7 @@ public class AnnotationEditorRenderHarness
                 var arrowBox = (ComboBox)editor.FindName("ArrowStyleBox")!;
                 Check("ArrowToolBtn"); Pump(4);
                 arrowBox.IsDropDownOpen = true; Pump(8);
-                RenderElementToPng(arrowBox, Path.Combine(outDir, "chrome-dropdown-trigger.png"));
+                RenderElementToPng(arrowBox, Path.Combine(outDir, "chrome-dropdown-trigger.png"), onTransparentGround: true);
                 arrowBox.IsDropDownOpen = false; Pump(3);
 
                 // Eraser split menu, and the counter colour-swatch variant.
@@ -2811,7 +2836,7 @@ public class AnnotationEditorRenderHarness
                 counterBtn2.IsChecked = true; Pump(4);
                 Shot("pointer-chrome-counter-row.png");
                 RenderElementToPng(editor.FindName("ColorWellBtn") as UIElement,
-                    Path.Combine(outDir, "chrome-color-swatch-counter.png"));
+                    Path.Combine(outDir, "chrome-color-swatch-counter.png"), onTransparentGround: true);
 
                 // ---- SWEEP PROBE: one shared preset palette, tooltip delay, small counters ----
                 {
@@ -3520,7 +3545,14 @@ public class AnnotationEditorRenderHarness
         SaveBitmap(bitmap, path);
     }
 
-    private static void RenderElementToPng(UIElement element, string path, double dpi = 96)
+    /// <param name="onTransparentGround">
+    /// True when the element paints over the page rather than over a chrome surface — a
+    /// format strip portalled into the sub-row, an annotation, a text box. Those are mostly
+    /// holes by design, so they are held to "did this composite at all" rather than to the
+    /// coverage floor a full window has to clear.
+    /// </param>
+    private static void RenderElementToPng(
+        UIElement element, string path, double dpi = 96, bool onTransparentGround = false)
     {
         element.UpdateLayout();
         var size = element.RenderSize;
@@ -3528,7 +3560,7 @@ public class AnnotationEditorRenderHarness
             (int)Math.Ceiling(size.Width * dpi / 96), (int)Math.Ceiling(size.Height * dpi / 96),
             dpi, dpi, PixelFormats.Pbgra32);
         bitmap.Render(element);
-        SaveBitmap(bitmap, path);
+        SaveBitmap(bitmap, path, onTransparentGround);
     }
 
     /// <summary>
@@ -3537,7 +3569,7 @@ public class AnnotationEditorRenderHarness
     /// every bitmap is scanned before it is written, and an unpainted one fails the test with
     /// the numbers that prove it.
     /// </summary>
-    private static void AssertPainted(BitmapSource bitmap, string path)
+    private static void AssertPainted(BitmapSource bitmap, string path, bool onTransparentGround = false)
     {
         int stride = bitmap.PixelWidth * 4;
         var pixels = new byte[stride * bitmap.PixelHeight];
@@ -3553,9 +3585,10 @@ public class AnnotationEditorRenderHarness
         }
 
         double coverage = (double)opaque / (pixels.Length / 4);
-        Assert.True(coverage >= MinOpaqueCoverage && colours.Count > MinDistinctColours,
+        double floor = onTransparentGround ? MinTransparentGroundCoverage : MinOpaqueCoverage;
+        Assert.True(coverage >= floor && colours.Count > MinDistinctColours,
             $"{Path.GetFileName(path)} is not a painted render: {coverage:P1} of its pixels are " +
-            $"opaque (need {MinOpaqueCoverage:P0}) across {colours.Count} colours " +
+            $"opaque (need {floor:P0}) across {colours.Count} colours " +
             $"(need more than {MinDistinctColours}). The visual tree laid out but never composited.");
     }
 
@@ -3563,11 +3596,21 @@ public class AnnotationEditorRenderHarness
     // over 76, so these floors clear a genuine render by a wide margin and cannot be met by a
     // transparent, flat or single-glyph bitmap.
     private const double MinOpaqueCoverage = 0.6;
+
+    /// <summary>
+    /// The floor for an element that paints over the PAGE rather than over a chrome surface.
+    /// A control strip with a transparent host, an annotation, a text box: all of them are
+    /// mostly holes when they are working perfectly, so 60 % is the wrong question. What is
+    /// still worth asking is whether anything composited at all — a blank bitmap sits at 0 %
+    /// over 0 colours and still fails, which is the whole point of the scan.
+    /// </summary>
+    private const double MinTransparentGroundCoverage = 0.05;
+
     private const int MinDistinctColours = 16;
 
-    private static void SaveBitmap(BitmapSource bitmap, string path)
+    private static void SaveBitmap(BitmapSource bitmap, string path, bool onTransparentGround = false)
     {
-        AssertPainted(bitmap, path);
+        AssertPainted(bitmap, path, onTransparentGround);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);

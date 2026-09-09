@@ -555,6 +555,11 @@ public partial class EditorWindow : Window
     {
         CommitText();
         CommitPendingCurve();
+        // A redaction and a magnifier are painted from the pixels they cover, and a live
+        // gesture is allowed to SKIP repaints to stay responsive. This is the last moment
+        // before those pixels are read, so whatever was skipped is paid for here — a flatten
+        // that baked a stale redaction would ship the thing it was drawn to hide.
+        FlushRedactionRefresh();
         CanvasHost.UpdateLayout();
         return HighlighterBlend.Flatten(CanvasHost, BaseTiles, AnnotationCanvas, _source.Width, _source.Height);
     }
@@ -672,7 +677,7 @@ public partial class EditorWindow : Window
             // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
             BtnCopy.Content = "";
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
-            timer.Tick += (_, _) => { timer.Stop(); BtnCopy.Content = ""; };
+            timer.Tick += (_, _) => { timer.Stop(); if (!_closed) BtnCopy.Content = ""; };
             timer.Start();
         }
         catch (Exception ex)
@@ -851,7 +856,9 @@ public partial class EditorWindow : Window
             // malformed entry can never leak a half-initialized editor.
             var built = doc.Annotations
                 .OrderBy(a => a.Z)
-                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images)))
+                // The source goes in so a saved redaction or magnifier comes back showing the
+                // pixels it covers, not the flat-black safe failure.
+                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images, bitmap)))
                 .ToList();
 
             var win = new EditorWindow(bitmap, settings, history);

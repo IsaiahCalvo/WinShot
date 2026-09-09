@@ -1434,6 +1434,10 @@ public partial class EditorWindow : Window
         if (_closed)
             return;
         SetSurfaceSize(_source.Width, _source.Height);
+        // Every crop, rotate, flip and resize lands here, and every one of them changes what
+        // is UNDER a pixel-backed mark. One repaint pass at the one place the source is
+        // swapped, rather than six call sites each remembering.
+        RefreshAllRedactions();
         Select(null);
         FitToView();
     }
@@ -1635,6 +1639,11 @@ public partial class EditorWindow : Window
         };
         _redactPendingTimer.Tick += (_, _) =>
         {
+            // A DispatcherTimer keeps ticking after the window has gone, and what it would
+            // tick INTO is a repaint that reads _source — which the close path disposes. An
+            // exception from a timer tick is unhandled by construction, so it takes the
+            // process, not the editor.
+            if (_closed) { StopRedactPendingTimer(); _redactPending.Clear(); return; }
             if (_redactPending.Count > 0 && !RedactPreviewDue()) return;
             StopRedactPendingTimer();
             FlushRedactionRefresh();
@@ -1654,6 +1663,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void FlushRedactionRefresh()
     {
+        if (_closed) { _redactPending.Clear(); return; }
         if (_redactPending.Count == 0) return;
         UIElement[] pending = _redactPending.ToArray();
         _redactPending.Clear();

@@ -1791,9 +1791,18 @@
                     RenderTransformOrigin="0.5,0.5"/>
             <!-- Wave 0: hover and press are washes that CROSS-FADE, not bare Background
                  setters that snap. Survey's lift/press geometry rides on top of them, so the
-                 button keeps its motion and gains the app's. -->
-            <Border x:Name="Hover" Opacity="0" CornerRadius="6"
-                    Background="{StaticResource HoverFillBrush}" IsHitTestVisible="False"/>
+                 button keeps its motion and gains the app's.
+                 The WHOLE hover state lives on the Hover layer — the wash, Survey's emphasis
+                 border and its 1px outer ring — because one storyboard fades one element:
+                 a ring left behind as a setter would still snap beside the wash it belongs to. -->
+            <Border x:Name="Hover" Opacity="0" CornerRadius="6" BorderThickness="1"
+                    BorderBrush="{StaticResource BorderStrongBrush}"
+                    Background="{StaticResource HoverFillBrush}"
+                    RenderTransformOrigin="0.5,0.5" IsHitTestVisible="False">
+                <!-- Margin -2 from inside a 1px border lands on FocusRing's -1. -->
+                <Border x:Name="HoverRing" Margin="-2" CornerRadius="7" BorderThickness="1"
+                        BorderBrush="{StaticResource BorderBrush}"/>
+            </Border>
             <Border x:Name="Press" Opacity="0" CornerRadius="6"
                     Background="{StaticResource PressedShadeBrush}" IsHitTestVisible="False"/>
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -1804,22 +1813,28 @@
         </Grid>
         <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
-                <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
                 <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1"/></Setter.Value></Setter>
-                <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
+                <Setter TargetName="Hover" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1"/></Setter.Value></Setter>
+                <!-- The shadow rides the layer that now draws the ring casting it, so it
+                     fades in with the ring instead of arriving under a transparent Bd. -->
+                <Setter TargetName="Hover" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
                 <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
                 <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
-                <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
+                <Setter TargetName="Hover" Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
+                <Setter TargetName="Hover" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
                 <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
                 <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True">
                 <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                 <Setter TargetName="FocusRing" Property="BorderThickness" Value="2"/>
+                <!-- Both rings sit at -1, and the focus one used to win because it was the
+                     later setter on the same element. Now they are two elements, so the
+                     hover ring stands down instead of painting over a focus ring. -->
+                <Setter TargetName="HoverRing" Property="Visibility" Value="Collapsed"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4"/>
@@ -1943,10 +1958,18 @@
                                      ToolButton uses, so a hover on a CHECKED button tints
                                      the chip instead of replacing it. The chip is its own
                                      layer so arming a tool CROSS-FADES rather than snapping. -->
-                                <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                                <!-- Margin -1 puts the chip's ring exactly where Bd's border
+                                     is, and a Border paints its fill INSIDE that ring, so the
+                                     chip still covers the same 5-radius inner rect. -->
+                                <Border x:Name="Chip" Opacity="0" Margin="-1" CornerRadius="6"
+                                        BorderThickness="1" BorderBrush="{StaticResource ToolChipRingBrush}"
                                         Background="{StaticResource ToolChipBrush}"/>
                                 <Border x:Name="Hover" Opacity="0" CornerRadius="5"
-                                        Background="{StaticResource HoverFillBrush}"/>
+                                        Background="{StaticResource HoverFillBrush}">
+                                    <!-- Survey's 1px outer ring, on the layer that fades. -->
+                                    <Border x:Name="HoverRing" Margin="-2" CornerRadius="7"
+                                            BorderThickness="1" BorderBrush="{StaticResource BorderBrush}"/>
+                                </Border>
                                 <Border x:Name="Press" Opacity="0" CornerRadius="5"
                                         Background="{StaticResource PressedShadeBrush}"/>
                                 <!-- Survey draws these at 16px; the shared icon resources are
@@ -1961,12 +1984,10 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource ToolChipRingBrush}"/>
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
                             <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1"/></Setter.Value></Setter>
                             <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
@@ -1981,6 +2002,9 @@
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
                             <Setter TargetName="FocusRing" Property="BorderThickness" Value="2"/>
+                            <!-- See SurveyButtonTemplate: the hover ring stands down so the
+                                 focus ring keeps the -1 offset it used to win by setter order. -->
+                            <Setter TargetName="HoverRing" Property="Visibility" Value="Collapsed"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
@@ -2008,8 +2032,10 @@
                     <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
                             BorderBrush="Transparent" BorderThickness="1">
                         <Grid>
-                            <!-- Chip under, washes over: see SurveyIconToggle. -->
-                            <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                            <!-- Chip under, washes over: see SurveyIconToggle. The ring rides
+                                 the chip at Margin -1, which is where Bg's own border sits. -->
+                            <Border x:Name="Chip" Opacity="0" Margin="-1" CornerRadius="6"
+                                    BorderThickness="1" BorderBrush="{StaticResource ToolChipRingBrush}"
                                     Background="{StaticResource ToolChipBrush}"/>
                             <Border x:Name="Hover" Opacity="0" CornerRadius="5"
                                     Background="{StaticResource HoverFillBrush}"/>
@@ -2023,7 +2049,6 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource ToolChipRingBrush}"/>
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
                         </Trigger>
@@ -2060,15 +2085,23 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="Bd" Background="Transparent" BorderBrush="Transparent"
-                            BorderThickness="0,0,0,2" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                    <Grid>
+                        <Border x:Name="Bd" Background="Transparent" BorderBrush="Transparent"
+                                BorderThickness="0,0,0,2" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <!-- Wave 0: the underline is its own layer at the same 2px bottom
+                             edge, so moving between tabs cross-fades instead of snapping.
+                             Bd keeps the transparent 2px border that reserves the space. -->
+                        <Border x:Name="Check" Opacity="0" BorderThickness="0,0,0,2"
+                                BorderBrush="{StaticResource AccentBrush}" IsHitTestVisible="False"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource CheckIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource CheckOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
@@ -2115,17 +2148,27 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                            Padding="{TemplateBinding Padding}">
+                    <!-- Wave 0: same shape as EraserModeRow — the washes are their own
+                         layers under the label, and the Padding moves to the content's
+                         Margin so the layers still cover the whole row. -->
+                    <Grid>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="4"
+                                Background="{StaticResource HoverFillBrush}" IsHitTestVisible="False"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="4"
+                                Background="{StaticResource PressedShadeBrush}" IsHitTestVisible="False"/>
                         <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
+                                          Margin="{TemplateBinding Padding}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource PressedShadeBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -2339,21 +2382,30 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
+                <!-- Wave 0: hover and open both raise the cell to Elevated, so each gets
+                     its own layer inside Bg's 1px border — where Bg's own fill already
+                     stops — and cross-fades in. Chip under Hover, per the house order. -->
+                <Border x:Name="Chip" Grid.ColumnSpan="2" Opacity="0" CornerRadius="4"
+                        Background="{StaticResource ElevatedBrush}" IsHitTestVisible="False"/>
+                <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" CornerRadius="4"
+                        Background="{StaticResource ElevatedBrush}" IsHitTestVisible="False"/>
                 <!-- The chevron pins its own colour in Survey, so it does NOT brighten
                      with the label on hover. -->
                 <Path x:Name="Caret" Grid.Column="1" Margin="8,0,7,0"
                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Data="M0,0 L4,4 L8,0" Stroke="{StaticResource TextSecondaryBrush}"
+                      Data="M0,0 L4,4 L8,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
                       StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       StrokeLineJoin="Round" Fill="Transparent"/>
             </Grid>
         </Border>
         <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
+                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
+                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
             </Trigger>
         </ControlTemplate.Triggers>
     </ControlTemplate>
@@ -2394,7 +2446,12 @@
     <Style x:Key="SurveyDropdown" TargetType="ComboBox">
         <Setter Property="Height" Value="24"/>
         <Setter Property="MinWidth" Value="72"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <!-- Three levels, and they have to stay three: the chevron below the resting label,
+             the resting label below the open one. Survey's are #9da6b4 / #e8e2d4 / #fff;
+             WinShot's are disabled / secondary / primary, which is the same ladder in this
+             palette's own steps. A label that started at the top would have nothing to
+             brighten to. -->
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -2529,7 +2586,21 @@
                         <!-- The cell is recessed relative to the input beside it: a 12%
                              black shade, the same one a saturated fill uses to hover. -->
                         <Border x:Name="Bg" Background="{StaticResource HoverShadeBrush}"/>
+                        <!-- Wave 0: hover and open both raise the cell to the 12% white
+                             wash, each on its own layer over the recess, so the chevron
+                             cell cross-fades like the ToolButtons in the same bar.
+                             The 1px seam stays ABOVE the washes, where it was. -->
+                        <Border x:Name="Chip" Opacity="0" IsHitTestVisible="False"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Hover" Opacity="0" IsHitTestVisible="False"
+                                Background="{StaticResource HoverFillBrush}"/>
                         <Border Width="1" HorizontalAlignment="Left" Background="{StaticResource BorderBrush}"/>
+                        <!-- Pinned, not inherited. AnnotationDropdown.css:46-49 sets the
+                             chevron's colour on the icon element itself precisely so the
+                             trigger label's brighten-on-hover/open never reaches it: the
+                             label says "you are here", the chevron says "there is more",
+                             and only the first of those changes. TemplateBinding Foreground
+                             would have made them one signal. -->
                         <Path x:Name="Caret" HorizontalAlignment="Center" VerticalAlignment="Center"
                               Data="M1,1 L5,5 L9,1" Stroke="{TemplateBinding Foreground}"
                               StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -2537,12 +2608,14 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

@@ -1226,7 +1226,9 @@ public partial class EditorWindow : Window
 
         var btn = new Button
         {
-            Style = (Style)FindResource("PickerSwatchButton"),
+            // WinShot already has one swatch cell, hover wash and focus ring included;
+            // Survey's PickerSwatchButton was the same 22px cell in its own colours.
+            Style = (Style)FindResource("SwatchButton"),
             ToolTip = c.A == 0 ? "Transparent" : hex,
             Tag = c,
             Background = fill,
@@ -1581,6 +1583,17 @@ public partial class EditorWindow : Window
 
         _settings.Current.SavedColors = next;
         _savedColorsDirty = true;
+    }
+
+    /// <summary>Writes the palette out, once, when the editor is done with it.</summary>
+    private void PersistSavedColors()
+    {
+        if (!_savedColorsDirty) return;
+        _savedColorsDirty = false;
+        // Quietly: the palette is runtime state nothing subscribes to, and a plain Save()
+        // raises Changed, which unregisters and re-registers every global hotkey.
+        try { _settings.SaveQuietly(); }
+        catch (Exception ex) { WinShot.Core.Log.Error("Could not save the color palette (non-fatal)", ex); }
     }
 
 

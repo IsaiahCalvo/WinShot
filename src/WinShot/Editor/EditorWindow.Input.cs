@@ -235,7 +235,12 @@ public partial class EditorWindow : Window
             if (d.X != 0 || d.Y != 0)
             {
                 foreach (UIElement el in SelectionList())
+                {
                     MoveElement(el, d.X, d.Y);
+                    // It is now over different pixels, so a pixel-backed mark has to show
+                    // them. Rate-limited inside RefreshRedaction; a skipped frame is queued.
+                    RefreshRedaction(el);
+                }
                 _moveTotal += d;
                 _moveLast = posMove;
                 UpdateSelectionVisual();

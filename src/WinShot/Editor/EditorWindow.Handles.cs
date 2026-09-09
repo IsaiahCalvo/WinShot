@@ -860,6 +860,9 @@ public partial class EditorWindow : Window
     {
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
+        // The rate limiter lets a resize skip repaints; the gesture is over, so pay them.
+        FlushRedactionRefresh();
+        if (_selected is not null) RefreshRedaction(_selected);
         ScheduleHideRotationPill();
         _justDraggedAt = Environment.TickCount64;
 
@@ -2056,6 +2059,12 @@ public partial class EditorWindow : Window
     private void OnPillShowTick(object? sender, EventArgs e)
     {
         _pillShowTimer!.Stop();
+        // A DispatcherTimer armed when the editor closed still fires, and what it fires into
+        // is a torn-down template. The exception that follows is raised from the dispatcher
+        // with nothing to catch it, so it takes the process rather than the editor — which is
+        // how a 500 ms hide timer became an intermittent, position-shifting crash in the test
+        // run. Both ticks check, and Closed stops them.
+        if (_closed) return;
         PlaceRotationPill();
     }
 
@@ -2072,6 +2081,7 @@ public partial class EditorWindow : Window
     private void OnPillHideTick(object? sender, EventArgs e)
     {
         _pillHideTimer!.Stop();
+        if (_closed || RotationPill is null || RotationInput is null) return;
         if (RotationInput.IsKeyboardFocused || RotationPill.IsMouseOver || _activeHandle == RotateHandleIndex) return;
         RotationPill.Visibility = Visibility.Collapsed;
     }

@@ -643,8 +643,9 @@
                                                     </StackPanel>
 
                                                     <!-- Survey's `Aa` re-edit affordance (AppShell.jsx:2641-2678): height 24,
-                                                         padding 0 8px, radius 5, 13px/600; idle #3a4252 on #e8e2d4, editing
-                                                         gold-on-gold-tint, disabled #5a6473 at 0.5 with a two-state tooltip.
+                                                         padding 0 8px, radius 5, 13px/600; idle is the control fill under the
+                                                         chrome text, editing is accent-on-accent-tint (Survey's is gold; the
+                                                         accent is WinShot's), disabled at 0.5 with a two-state tooltip.
                                                          It lives in the TOP row next to the swatch and width input - NOT in the
                                                          rich-text strip that portals into the sub-row - and stays
                                                          VISIBLE-but-disabled whenever the context tool is text or callout, which

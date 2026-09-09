@@ -343,7 +343,13 @@ public partial class EditorWindow : Window
         Closed += (_, _) =>
         {
             PersistZoomPreference();
+            PersistSavedColors();
             _closed = true;
+            // Every timer this window owns, stopped in one place. A tick that lands after the
+            // template is gone is an unhandled dispatcher exception, and an unhandled
+            // dispatcher exception is the whole process, not the editor.
+            StopRedactPendingTimer();
+            HideRotationPill();
             _dragPreview?.Dispose();
             _dragPreview = null;
             Task sourceOperationsDrained = _sourceLifetime.BeginClose();
@@ -2591,7 +2597,7 @@ public partial class EditorWindow : Window
             if (popup is null) continue;
             popup.Opened += (s, _) =>
             {
-                if (s is not Popup p || p.Child is not FrameworkElement child) return;
+                if (_closed || s is not Popup p || p.Child is not FrameworkElement child) return;
                 // A frozen transform cannot be animated, and a shared one would animate
                 // every popover at once, so each child gets its own.
                 if (child.RenderTransform is not ScaleTransform)
@@ -2599,7 +2605,11 @@ public partial class EditorWindow : Window
                     child.RenderTransform = new ScaleTransform(1, 1);
                     child.RenderTransformOrigin = new Point(0.5, 0);
                 }
-                child.BeginStoryboard((Storyboard)FindResource("PopoverIn"));
+                // A Popup runs on its own HWND, so anything that throws here is thrown from
+                // inside a window procedure, where it is unhandled and takes the process with
+                // it. An entrance animation is never worth that.
+                try { child.BeginStoryboard((Storyboard)FindResource("PopoverIn")); }
+                catch (Exception ex) { Log.Error("Popover entrance failed (non-fatal)", ex); }
             };
         }
     }

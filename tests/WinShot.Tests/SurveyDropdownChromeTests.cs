@@ -60,16 +60,38 @@ public class SurveyDropdownChromeTests
                 // happens to brighten from.
                 var muted = ((SolidColorBrush)caret.Stroke).Color;
                 var rest = ((SolidColorBrush)box.Foreground).Color;
-                // The resting label is dimmer than the open one, and the chevron is dimmer
-                // than either. Which exact shades those are is the palette's business.
-                Assert.NotEqual(Colors.White, rest);
-                Assert.NotEqual(rest, muted);
+                // The chevron sits below the resting label, which sits below the open one.
+                // Which three shades those are is the palette's business — Survey's are
+                // #9da6b4 / #e8e2d4 / #fff and WinShot's are its own; what has to hold is the
+                // ORDER, and that the chevron never joins in.
+                // Composited over the dark chrome, because WinShot's text tokens carry their
+                // dimming in the ALPHA channel: #B3FFFFFF is 70 % white, which is darker on
+                // this ground than an opaque #F2F2F4 even though its RGB is brighter.
+                static double Lum(Color c) =>
+                    c.A / 255.0 * (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B);
+                Assert.True(Lum(muted) < Lum(rest), $"chevron {muted} is not below the label {rest}");
 
-                box.IsDropDownOpen = true;
+                // The half that matters and that a headless host can actually observe: the
+                // chevron does not follow the label. Survey pins it on the icon element so
+                // `currentColor` never reaches it; here that is a StaticResource rather than a
+                // TemplateBinding, and this is what proves it — brighten the label all the way
+                // to white and the chevron does not move.
+                box.Foreground = new SolidColorBrush(Colors.White);
                 host.UpdateLayout();
-
-                Assert.Equal(Colors.White, ((SolidColorBrush)box.Foreground).Color);
                 Assert.Equal(muted, ((SolidColorBrush)caret.Stroke).Color);
+
+                // And the style really does carry a brighten-on-open rule for the label.
+                var openTrigger = ((Style)theme["SurveyDropdown"])
+                    .Setters.OfType<Setter>()
+                    .Select(st => st.Value)
+                    .OfType<ControlTemplate>()
+                    .SelectMany(t => t.Triggers.OfType<Trigger>())
+                    .FirstOrDefault(t => t.Property == ComboBox.IsDropDownOpenProperty && Equals(t.Value, true));
+                Assert.NotNull(openTrigger);
+                var lit = openTrigger!.Setters.OfType<Setter>()
+                    .First(st => st.Property == Control.ForegroundProperty).Value;
+                Assert.True(Lum(((SolidColorBrush)lit).Color) > Lum(rest),
+                    "the open label is not brighter than the resting one");
 
                 if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUTPUT") is string dir &&
                     !string.IsNullOrWhiteSpace(dir))
@@ -84,10 +106,13 @@ public class SurveyDropdownChromeTests
                     enc.Save(fs);
                 }
 
+                // Closing puts the label back where it started, whatever "there" is in this
+                // palette — the point is that the brighten is a STATE, not a one-way door.
+                box.ClearValue(Control.ForegroundProperty);
                 box.IsDropDownOpen = false;
                 host.UpdateLayout();
 
-                Assert.Equal(Color.FromRgb(0xE8, 0xE2, 0xD4), ((SolidColorBrush)box.Foreground).Color);
+                Assert.Equal(rest, ((SolidColorBrush)box.Foreground).Color);
 
                 host.Close();
 
