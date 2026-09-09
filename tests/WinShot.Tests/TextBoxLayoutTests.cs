@@ -1,4 +1,4 @@
-using WinShot.Editor;
+﻿using WinShot.Editor;
 using Xunit;
 
 namespace WinShot.Tests;
@@ -54,10 +54,20 @@ public class TextBoxLayoutTests
         Assert.Equal(100, AnnotationStyle.ClampTextSize(100));
     }
 
-    /// <summary>Survey's family list has no system UI font (AppShell.jsx:1833).</summary>
+    /// <summary>
+    /// Survey's family list (AppShell.jsx:1833) with the system UI face at the head of it.
+    /// Survey has no system font because a PDF has to name a real family; a screenshot
+    /// annotation does not, and Helvetica is not installed on Windows at all — it resolves
+    /// to whatever the font fallback picks, which is the one thing a "one const so the
+    /// label and its editor cannot differ" rule exists to prevent.
+    /// </summary>
     [Fact]
-    public void FontFamilies_MatchSurvey() =>
+    public void FontFamilies_AreSurveysListLedByTheSystemFace()
+    {
         Assert.Equal(
-            new[] { "Arial", "Helvetica", "Times New Roman", "Courier New", "Georgia", "Verdana" },
+            new[] { "Segoe UI", "Arial", "Helvetica", "Times New Roman", "Courier New", "Georgia", "Verdana" },
             AnnotationStyle.FontFamilies);
+        Assert.Equal("Segoe UI", AnnotationFactory.DefaultTextFontFamily);
+        Assert.Contains(AnnotationFactory.DefaultTextFontFamily, AnnotationStyle.FontFamilies);
+    }
 }

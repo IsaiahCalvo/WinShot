@@ -35,7 +35,11 @@
                 TextElement.Foreground="{StaticResource ChromeTextBrush}"
                 SnapsToDevicePixels="True">
             <StackPanel>
-                <Grid x:Name="ToolbarPrimaryRow">
+                <!-- UseLayoutRounding, because the cluster is centred and the merge gave it a
+                     fifth chip: an odd content width puts the centre on a half-DIP, and the
+                     row is supposed to be the one thing in this toolbar that never moves.
+                     Rounding to device pixels makes "never" exact instead of nearly. -->
+                <Grid x:Name="ToolbarPrimaryRow" UseLayoutRounding="True">
                     <!-- Survey: the tool cluster is centred (justify-content: center); undo/redo
                          sit absolutely at the left, tool properties absolutely at the cluster's
                          right (left: 100%). Equal star side columns give the same geometry, so
@@ -145,7 +149,15 @@
                     </StackPanel>
                     </Grid>
 
-                    <StackPanel Grid.Column="2" HorizontalAlignment="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- Survey's props block is `position:absolute; left:100%` — it hangs off the
+                         cluster's right edge and takes part in NO layout, which is what makes
+                         the centred cluster stay put whatever the armed tool asks for. A zero
+                         width host is WPF's spelling of that: the children arrange past it and
+                         paint, and the star column's share stops depending on their width. The
+                         format packer still keeps them from running off the end of the bar; it
+                         just no longer has to be right to the DIP for the row to hold still. -->
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Left" Width="0"
+                                Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
@@ -1123,25 +1135,25 @@
                                      ToolTip="Crop &amp; resize (C)"
                                      AutomationProperties.Name="Crop and resize"
                                      AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut C."/>
-                        <Button x:Name="AddImageBtn" Style="{StaticResource StripToolButton}" Margin="4,0" Content="&#xEE71;"
+                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xEE71;"
                                 Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                 AutomationProperties.Name="Add screenshot or image"
                                 AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
-                        <Button x:Name="AddCaptureBtn" Style="{StaticResource StripToolButton}" Margin="4,0" Content="&#xE722;"
+                        <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE722;"
                                 Click="OnAddCapture" ToolTip="Add capture…"
                                 AutomationProperties.Name="Add capture"
                                 AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
-                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource StripToolButton}" Margin="4,0" Content="&#xE790;"
+                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE790;"
                                 Click="OnAddBackground" ToolTip="Add background (B)"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>
-                        <Button x:Name="OcrRegionBtn" Style="{StaticResource StripToolButton}" Margin="4,0" Content="&#xE8E9;"
+                        <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE8E9;"
                                 Click="OnExtractText" ToolTip="Extract text"
                                 AutomationProperties.Name="Extract text"
                                 AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
                         <!-- Appears only once there is an added image to flip between. A
                              before/after GIF of one frame is a PNG. -->
-                        <Button x:Name="ExportGifBtn" Style="{StaticResource StripToolButton}" Margin="4,0" Content="&#xE786;"
+                        <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE786;"
                                 Click="OnExportGif" ToolTip="Export before/after GIF…"
                                 Visibility="Collapsed"
                                 AutomationProperties.Name="Export before and after GIF"

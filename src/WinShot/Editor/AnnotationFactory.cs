@@ -596,6 +596,12 @@ internal static class AnnotationFactory
             // Survey's floor for the editable box is 8 + 2 * TEXT_PADDING
             // (TextEditOverlay.jsx:164); anything wider would render past the box it commits.
             MinWidth = 8 + 2 * TextPadding,
+            // Survey's box is single-line; WinShot's is not. A caption that runs long used
+            // to march off the edge of the picture with no way to break it, so the box takes
+            // returns and wraps at its own width. Survey's chrome is untouched — this is
+            // what the box can HOLD, not what it looks like.
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
             FontSize = fontSize,
             FontWeight = FontWeights.Normal,
             Foreground = foreground,
@@ -614,7 +620,18 @@ internal static class AnnotationFactory
     /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
     public static TextBlock CreateTextLabel(string text, Brush foreground, double fontSize) =>
         CreateTextLabel(text, foreground, fontSize, DefaultTextFontFamily, bold: false, italic: false,
-            underline: false, strike: false, TextAlignment.Left);
+            underline: false, strike: false, DefaultAlignFor(text));
+
+    /// <summary>
+    /// A one-line caption reads the same centred or left; a paragraph does not, and a
+    /// centred paragraph is the classic screenshot-tool tell. So a label given no explicit
+    /// alignment centres only while it is one line. Callers that DO pass an alignment —
+    /// everything driven by Survey's align control — are untouched.
+    /// </summary>
+    private static TextAlignment DefaultAlignFor(string text) =>
+        text.Contains('\n') || text.Contains('\r')
+            ? TextAlignment.Left
+            : TextAlignment.Center;
 
     public static TextBlock CreateTextLabel(
         string text, Brush foreground, double fontSize, string fontFamily,
@@ -666,7 +683,9 @@ internal static class AnnotationFactory
     /// </summary>
     public static FrameworkElement CreateStyledTextLabel(string text, Brush foreground, double fontSize, TextStyle style) =>
         CreateStyledTextLabel(text, foreground, fontSize, style, DefaultTextFontFamily,
-            bold: style == TextStyle.Bold, italic: false, underline: false, strike: false, TextAlignment.Left);
+            bold: style == TextStyle.Bold, italic: false, underline: false, strike: false,
+            // No alignment was asked for, so it follows the text: see DefaultAlignFor.
+            DefaultAlignFor(text));
 
     public static FrameworkElement CreateStyledTextLabel(
         string text, Brush foreground, double fontSize, TextStyle style,

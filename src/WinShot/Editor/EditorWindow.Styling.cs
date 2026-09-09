@@ -884,7 +884,10 @@ public partial class EditorWindow : Window
 
     private void OnRedactStyleChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_syncingContext) return;
+        // A ComboBox raises SelectionChanged from its own EndInit, which happens DURING
+        // InitializeComponent — before every other control on the row exists. Nothing here
+        // may run until the window is built.
+        if (!IsLoaded || _syncingContext) return;
         if (sender is not ComboBox { SelectedItem: ComboBoxItem item } ||
             item.Tag is not string tag || !Enum.TryParse(tag, out RedactStyle style))
             return;

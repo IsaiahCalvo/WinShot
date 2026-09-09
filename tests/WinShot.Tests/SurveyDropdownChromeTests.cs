@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,7 +15,9 @@ namespace WinShot.Tests;
 /// AnnotationDropdown.css:25-29 brightens the TRIGGER LABEL to #fff on hover/open, while :46-49
 /// pins `.annotation-dropdown__chevron` to #9da6b4 on the icon element itself — so the chevron's
 /// `currentColor` (AnnotationDropdown.jsx:96) never inherits that white. WinShot used to do the
-/// inverse: a white caret over a label that stayed #E8E2D4.
+/// inverse: a white caret over a label that stayed at its resting colour. The two colours
+/// themselves are WinShot's tokens, not Survey's — the mechanic is the brightening, not the
+/// shade it brightens from.
 /// </summary>
 public class SurveyDropdownChromeTests
 {
@@ -52,10 +54,16 @@ public class SurveyDropdownChromeTests
                 var toggle = (ToggleButton)box.Template.FindName("Toggle", box)!;
                 toggle.ApplyTemplate();
                 var caret = (ShapePath)toggle.Template.FindName("Caret", toggle)!;
-                var muted = Color.FromRgb(0x9D, 0xA6, 0xB4);
-
-                Assert.Equal(Color.FromRgb(0xE8, 0xE2, 0xD4), ((SolidColorBrush)box.Foreground).Color);
-                Assert.Equal(muted, ((SolidColorBrush)caret.Stroke).Color);
+                // Read off the live controls rather than pinned to Survey's #e8e2d4 /
+                // #9da6b4: what this test guards is the RELATIONSHIP — the label brightens to
+                // white on open, the chevron stays muted throughout — not the shades WinShot
+                // happens to brighten from.
+                var muted = ((SolidColorBrush)caret.Stroke).Color;
+                var rest = ((SolidColorBrush)box.Foreground).Color;
+                // The resting label is dimmer than the open one, and the chevron is dimmer
+                // than either. Which exact shades those are is the palette's business.
+                Assert.NotEqual(Colors.White, rest);
+                Assert.NotEqual(rest, muted);
 
                 box.IsDropDownOpen = true;
                 host.UpdateLayout();

@@ -1453,24 +1453,35 @@ public class ThemedWindowTests
         Assert.Equal("17", sizeInput.Text);
         Assert.Equal(
             AnnotationSize.Presets,
-            sizePresets.Children.OfType<Button>().Select(b => (int)(double)b.Tag!).ToArray());
+            sizePresets.Children.OfType<ButtonBase>().Select(b => (int)(double)b.Tag!).ToArray());
 
         // Out-of-range input is clamped to the stored value rather than rejected. The box
         // keeps the raw text while the user is mid-type and normalises on commit, so the
         // clamp shows up the next time the field is re-synced.
+        // Survey's field commits on Enter or blur, not on every keystroke, so the clamp is
+        // what the COMMIT does — typing 999 and walking away leaves 50, not a rejection and
+        // not a 999-wide stroke.
         sizeInput.Text = "999";
+        typeof(EditorWindow).GetMethod("CommitSizeInput",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(editor, null);
         ((RadioButton)editor.FindName("LineToolBtn")!).IsChecked = true;
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
         Assert.Equal("50", sizeInput.Text);
         sizeInput.Text = "7";
 
-        // Each tool keeps its own size: Text is independent of Arrow. The word "Width" /
-        // "Size" left the toolbar with the other labels and lives on the preset popover.
+        // The pen keeps a size of its own; text does NOT. Survey's Width box for text is the
+        // shared STROKE width (AppShell.jsx:2464-2482) — the same number the shapes use —
+        // which is why the assertion two dozen lines below expects the stroke presets there
+        // and not the font-size list. So Text reads back what Arrow left, and Freehand is the
+        // tool that proves the sizes are still kept apart.
+        ((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked = true;
+        Assert.Equal("3", sizeInput.Text);
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
         editor.UpdateLayout();
         PackEditorFormat(editor);
-        Assert.Equal("4", sizeInput.Text);
+        Assert.Equal("50", sizeInput.Text);
         var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
         Assert.True(primaryRow.ActualHeight <= 48,
             $"Primary row grew instead of staying one line: {primaryRow.ActualHeight}");
@@ -1482,8 +1493,8 @@ public class ThemedWindowTests
         // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), so the
         // shared size box keeps the stroke presets; the font size lives in FontSizeBox, which
         // — like Survey's rich-text row — is only up while an editor is mounted.
-        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 16);
-        Assert.DoesNotContain(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 72);
+        Assert.Contains(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 16);
+        Assert.DoesNotContain(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 72);
         Assert.False(string.IsNullOrEmpty(sizeInput.Text));
         var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
@@ -1521,15 +1532,18 @@ public class ThemedWindowTests
         Assert.True(textSec.X + secondary.ActualWidth <= textSave.X + 0.5,
             $"Text secondary runs off the top bar: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
 
+        // Back on the arrow, and the "7" typed into the field earlier is GONE: Survey's size
+        // field commits on Enter or blur, so a keystroke walked away from is discarded, not
+        // silently applied to the next mark.
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
-        Assert.Equal("7", sizeInput.Text);
+        Assert.Equal("50", sizeInput.Text);
 
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
         PackEditorFormat(editor);
-        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 1);
-        Assert.Contains(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 50);
-        Assert.DoesNotContain(sizePresets.Children.OfType<Button>(), b => (double?)b.Tag == 72);
+        Assert.Contains(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 1);
+        Assert.Contains(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 50);
+        Assert.DoesNotContain(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 72);
         // Same rule for callouts: Survey's font-size dropdown belongs to the rich-text row,
         // which only exists while an editor is mounted (TextEditOverlay.jsx:278-318).
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
@@ -1824,16 +1838,17 @@ public class ThemedWindowTests
     /// <summary>
     /// Below 1152 DIP the window's minimum is lowered to whatever the display holds, so the
     /// props block is given less than it needs, and its controls used to be arranged from
-    /// x=0 outward straight across the Save as… / Done pair to its right. Two facts hold
-    /// instead: the overflow is packed into the flyout rather than gone, and the finish pair
-    /// is never painted over. (Survey's format packer replaced the sweep's ContextScroll, so
-    /// the "is it scrollable" half of this is now "did anything actually get packed".)
+    /// x=0 outward straight past the end of the bar. Two facts hold instead: the overflow is
+    /// packed into the flyout rather than clipped away in silence, and the block never paints
+    /// past the bar's own right edge. (Survey's format packer replaced the sweep's
+    /// ContextScroll, so the "is it scrollable" half of this is now "did anything actually
+    /// get packed"; and Save as… / Done moved to the bottom bar, so the bar's edge is what
+    /// the block can now overrun.)
     /// </summary>
     private static void ContextRowNeverCoversTheFinishPair(EditorWindow editor)
     {
         var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
         var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
-        var save = (Button)editor.FindName("BtnSave")!;
         var check = typeof(EditorWindow).GetMethod("CheckToolButton",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
@@ -1851,12 +1866,14 @@ public class ThemedWindowTests
                 PackEditorFormat(editor);
                 if (secondary.Visibility != Visibility.Visible) continue;
 
-                // The props block's painted extent stops before the finish pair. A block
-                // that overran would put these the other way round.
+                // The props block's painted extent stops inside the bar. Save as… / Done
+                // are on the BOTTOM bar in Survey's chrome, so the thing the props block can
+                // overrun is the bar's own right edge — and a DockPanel does not wrap, it
+                // clips the right-hand end away in silence.
                 Point rowRight = secondary.TranslatePoint(new Point(secondary.ActualWidth, 0), editor);
-                Point saveLeft = save.TranslatePoint(new Point(0, 0), editor);
-                Assert.True(rowRight.X <= saveLeft.X + 0.5,
-                    $"{tool}: the props block reaches {rowRight.X:0} DIP, past Save as… at {saveLeft.X:0}.");
+                Point barRight = BarRightEdge(editor);
+                Assert.True(rowRight.X <= barRight.X + 0.5,
+                    $"{tool}: the props block reaches {rowRight.X:0} DIP, past the bar's edge at {barRight.X:0}.");
                 if (overflowPanel.Children.Count > 0) overflowed++;
             }
 
@@ -1930,7 +1947,7 @@ public class ThemedWindowTests
         canvas.Children.Add(mark);
         type.GetMethod("UpdateRedactionPreview", NP)!.Invoke(editor, new object[] { mark, area, true });
         mark.Tag = AnnotationData.ForRedaction(area, RedactStyle.Pixelate, 45, seed: 7);
-        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { mark });
+        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { mark, true });
 
         Assert.Single(canvas.Children);
         // The whole point: nothing was baked into the picture.
@@ -2009,7 +2026,7 @@ public class ThemedWindowTests
         canvas.Children.Add(bubble);
         bubble.Tag = AnnotationData.ForMagnifier(
             area, MagnifierLayout.DefaultFocus(area), MagnifierLayout.DefaultScale, Colors.White, 3);
-        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { bubble });
+        type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { bubble, true });
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { bubble });
 
         var slider = (Slider)editor.FindName("MagnifySlider")!;
@@ -2100,6 +2117,12 @@ public class ThemedWindowTests
     /// </summary>
     private static readonly string LineBreak = ((char)10).ToString();
 
+    /// <summary>The glyph TextBlock inside Survey's text box, or the label itself if it is bare.</summary>
+    private static TextBlock GlyphsOf(FrameworkElement label) =>
+        label as TextBlock
+        ?? (label as Panel)?.Children.OfType<TextBlock>().First()
+        ?? throw new InvalidOperationException($"no glyphs in {label.GetType().Name}");
+
     private static void TextAndCounterSmoke(EditorWindow editor)
     {
         const System.Reflection.BindingFlags NP =
@@ -2113,12 +2136,14 @@ public class ThemedWindowTests
         Assert.True(box.AcceptsReturn);
         Assert.Equal(TextWrapping.Wrap, box.TextWrapping);
 
-        // One line reads the same centred or left; a paragraph does not.
-        var oneLine = (TextBlock)AnnotationFactory.CreateStyledTextLabel(
-            "Caption", Brushes.White, 20, TextStyle.Plain);
+        // One line reads the same centred or left; a paragraph does not. Survey wraps the
+        // glyphs in a box (a chrome Rectangle plus the TextBlock), so the label to read is
+        // the one inside it.
+        var oneLine = GlyphsOf(AnnotationFactory.CreateStyledTextLabel(
+            "Caption", Brushes.White, 20, TextStyle.Plain));
         Assert.Equal(TextAlignment.Center, oneLine.TextAlignment);
-        var paragraph = (TextBlock)AnnotationFactory.CreateStyledTextLabel(
-            string.Join(LineBreak, "one", "two", "three"), Brushes.White, 20, TextStyle.Plain);
+        var paragraph = GlyphsOf(AnnotationFactory.CreateStyledTextLabel(
+            string.Join(LineBreak, "one", "two", "three"), Brushes.White, 20, TextStyle.Plain));
         Assert.Equal(TextAlignment.Left, paragraph.TextAlignment);
 
         canvas.Children.Clear();

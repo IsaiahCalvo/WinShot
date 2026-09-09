@@ -764,7 +764,14 @@ public partial class EditorWindow : Window
             case "FitHeight": FitToHeight(); break;
             case "Free":
                 FitToView(); // establishes a sane translation before the stored scale is applied
-                ZoomAt(ViewportCentre(), _settings.Current.EditorManualZoom);
+                // A remembered zoom is a preference, not an instruction to show a sliver. If
+                // the stored scale is bigger than what this capture fits at, the capture wins:
+                // a 1000x4000 scroll capture opened at the 200 % left over from the last small
+                // screenshot showed a hand's width of it and no way to know that was the whole
+                // picture. Zooming back in is one gesture; realising you are looking at 5 % of
+                // an image is not.
+                if (_settings.Current.EditorManualZoom <= _zoom)
+                    ZoomAt(ViewportCentre(), _settings.Current.EditorManualZoom);
                 break;
             default: FitToView(); break;
         }
@@ -1437,10 +1444,20 @@ public partial class EditorWindow : Window
                 if (inner is Popup) continue;
                 yield return inner;
             }
+        // Packed in the order they can be given up: the qualifiers first (a hand-drawn
+        // toggle and a redaction's strength are refinements of a choice made elsewhere on
+        // the row), then the choices themselves. The two the merge ADDED to this row —
+        // the hand-drawn checkbox and the redaction pair — have to be in here, or the row
+        // they widened is the one that runs off the end of the bar.
+        if (StrokePanel is not null) yield return StrokePanel;
+        if (RedactStrengthPanel is not null) yield return RedactStrengthPanel;
+        if (MagnifyPanel is not null) yield return MagnifyPanel;
         if (LineStylePanel is not null) yield return LineStylePanel;
         if (ArrowStylePanel is not null) yield return ArrowStylePanel;
+        if (RedactStylePanel is not null) yield return RedactStylePanel;
         if (StepModePanel is not null) yield return StepModePanel;
         if (CropRatioPanel is not null) yield return CropRatioPanel;
+        if (CropToolsPanel is not null) yield return CropToolsPanel;
         if (CropPanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) != "Apply crop")
@@ -1650,18 +1667,18 @@ public partial class EditorWindow : Window
             Grid.SetColumn(numeral, 1);
             row.Children.Add(numeral);
 
-            var button = new Button
+            // Survey builds these rows as plain buttons and paints the active one with two
+            // literal greys. WinShot already has a row style for exactly this menu, and it
+            // carries the accent chip and its cross-fade, so the row is the RadioButton that
+            // style was written for and "active" is IsChecked rather than two hardcoded colours.
+            var button = new RadioButton
             {
                 Style = (Style)FindResource("SizePresetRow"),
+                GroupName = "SizePreset",
                 Content = row,
                 Tag = (double)preset,
+                IsChecked = preset == current,
             };
-            // `.is-active`: #f4f6f8 on #2b313a, persisting under the hover wash.
-            if (preset == current)
-            {
-                button.Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x31, 0x3A));
-                button.Foreground = new SolidColorBrush(Color.FromRgb(0xF4, 0xF6, 0xF8));
-            }
             // The bar is `background: currentColor`, so it tracks the row foreground.
             bar.SetBinding(Shape.FillProperty,
                 new Binding(nameof(Control.Foreground)) { Source = button });
@@ -1687,7 +1704,7 @@ public partial class EditorWindow : Window
 
     private void OnSizePresetClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button b || b.Tag is not double size) return;
+        if (sender is not ButtonBase b || b.Tag is not double size) return;
         if (SizePresetsBtn is not null) SizePresetsBtn.IsChecked = false;
         ApplySize(size);
     }
@@ -1812,6 +1829,10 @@ public partial class EditorWindow : Window
     /// <summary>Re-checks the toolbar radio for a tool (used by the eyedropper to restore the prior tool).</summary>
     private void CheckToolButton(EditorTool tool)
     {
+        // Arming anything that is not the eyedropper cancels the picker's pending return:
+        // the user went somewhere else, so the picker must not spring back open over the
+        // canvas the moment the NEXT sample happens to be taken.
+        if (tool != EditorTool.Eyedropper) _reopenPickerAfterSample = false;
         if (tool == EditorTool.Crop)
         {
             OnCropClick(this, new RoutedEventArgs());

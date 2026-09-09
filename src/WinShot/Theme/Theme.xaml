@@ -1788,25 +1788,34 @@
                     BorderBrush="Transparent" Background="Transparent"/>
             <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6"
                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                    Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                  TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                  TextElement.FontSize="{TemplateBinding FontSize}"
-                                  TextElement.Foreground="{TemplateBinding Foreground}"/>
-            </Border>
+                    RenderTransformOrigin="0.5,0.5"/>
+            <!-- Wave 0: hover and press are washes that CROSS-FADE, not bare Background
+                 setters that snap. Survey's lift/press geometry rides on top of them, so the
+                 button keeps its motion and gains the app's. -->
+            <Border x:Name="Hover" Opacity="0" CornerRadius="6"
+                    Background="{StaticResource HoverFillBrush}" IsHitTestVisible="False"/>
+            <Border x:Name="Press" Opacity="0" CornerRadius="6"
+                    Background="{StaticResource PressedShadeBrush}" IsHitTestVisible="False"/>
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Margin="{TemplateBinding Padding}"
+                              TextElement.FontFamily="{TemplateBinding FontFamily}"
+                              TextElement.FontSize="{TemplateBinding FontSize}"
+                              TextElement.Foreground="{TemplateBinding Foreground}"/>
         </Grid>
         <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                 <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
                 <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
                 <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1"/></Setter.Value></Setter>
                 <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
+                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PressedShadeBrush}"/>
                 <Setter TargetName="Bd" Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
                 <Setter TargetName="Bd" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
+                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True">
                 <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
@@ -1932,7 +1941,10 @@
                             <Grid>
                                 <!-- Chip underneath, washes over it — the same stacking
                                      ToolButton uses, so a hover on a CHECKED button tints
-                                     the chip instead of replacing it. -->
+                                     the chip instead of replacing it. The chip is its own
+                                     layer so arming a tool CROSS-FADES rather than snapping. -->
+                                <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                                        Background="{StaticResource ToolChipBrush}"/>
                                 <Border x:Name="Hover" Opacity="0" CornerRadius="5"
                                         Background="{StaticResource HoverFillBrush}"/>
                                 <Border x:Name="Press" Opacity="0" CornerRadius="5"
@@ -1949,8 +1961,9 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource ToolChipBrush}"/>
                             <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource ToolChipRingBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -1996,6 +2009,8 @@
                             BorderBrush="Transparent" BorderThickness="1">
                         <Grid>
                             <!-- Chip under, washes over: see SurveyIconToggle. -->
+                            <Border x:Name="Chip" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource ToolChipBrush}"/>
                             <Border x:Name="Hover" Opacity="0" CornerRadius="5"
                                     Background="{StaticResource HoverFillBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="5"
@@ -2008,8 +2023,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource ToolChipBrush}"/>
                             <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource ToolChipRingBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <!-- The sub-row cancels `.btn`'s translateY lift but keeps its shadow. -->
                         <Trigger Property="IsMouseOver" Value="True">
@@ -2129,14 +2145,21 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                            Padding="{TemplateBinding Padding}">
+                    <Grid>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"/>
+                        <!-- Wave 0: the hover wash cross-fades like every other row in the
+                             app rather than snapping, so this menu does not read as a
+                             different control from the ones beside it. -->
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="4"
+                                Background="{StaticResource HoverFillBrush}"/>
                         <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
+                                          Margin="{TemplateBinding Padding}"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverFillBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

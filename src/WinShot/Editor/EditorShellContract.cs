@@ -1,4 +1,4 @@
-namespace WinShot.Editor;
+﻿namespace WinShot.Editor;
 
 [Flags]
 internal enum EditorContextControls
@@ -267,12 +267,15 @@ internal static class EditorShellContract
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Fill | EditorContextControls.Opacity |
             EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
-        EditorTool.Line or EditorTool.CurvedArrow =>
+        EditorTool.Line =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Opacity | EditorContextControls.LineStyle,
         EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
-        EditorTool.Arrow =>
+        // The curved arrow wears the straight arrow's controls, style menu included: Curved
+        // is a ROW of that menu, so hiding the menu while a curved arrow is armed would take
+        // away the only control that can turn it back into a straight one.
+        EditorTool.Arrow or EditorTool.CurvedArrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
             EditorContextControls.LineStyle,
