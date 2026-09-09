@@ -3,8 +3,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using WinShot.Core;
 using System.Windows.Shapes;
+using WinShot.Core;
 using SD = System.Drawing;
 
 namespace WinShot.Editor;
@@ -41,9 +41,11 @@ internal enum ArrowStyle
     Curved,
 }
 
+
 /// <summary>Builds the WPF elements used as canvas annotations.</summary>
 internal static class AnnotationFactory
 {
+
     /// <summary>
     /// Fills a redaction rectangle with the effected pixels it covers, sized 1:1 so the
     /// flattened export is pixel-exact. Anything that cannot be rendered — no source, a
@@ -90,85 +92,6 @@ internal static class AnnotationFactory
     }
 
     /// <summary>
-    /// The element for a rectangle or ellipse annotation, in whichever line quality is
-    /// asked for. Clean is the plain WPF shape it has always been; Sketchy is a
-    /// <see cref="Path"/> whose data is the same outline drawn by a shaky hand.
-    ///
-    /// The Path is <see cref="Stretch.Fill"/>ed into its Width/Height, so it sizes and
-    /// resizes exactly the way the plain shapes do — every caller that sets
-    /// Canvas.Left/Top and Width/Height keeps working, and the stroke stays the asked-for
-    /// thickness rather than being scaled by the fit. The seed lives on the annotation, so
-    /// a sketchy mark redraws identically after a move, an undo or a project reload.
-    /// </summary>
-    public static Shape CreateShape(bool ellipse, StrokeRender render, int seed)
-    {
-        if (render != StrokeRender.Sketchy)
-            return ellipse ? new Ellipse() : new Rectangle { RadiusX = 2, RadiusY = 2 };
-
-        // Jitter is generated in a fixed unit box and stretched to the mark's real size:
-        // sizing the wobble with the mark would make a big rectangle wildly shaky and a
-        // small one perfectly straight.
-        var box = new Rect(0, 0, SketchUnitBox, SketchUnitBox);
-        var outline = ellipse
-            ? StrokeStyles.SketchPolygon(StrokeStyles.EllipsePoints(box), seed)
-            : StrokeStyles.SketchPolygon(StrokeStyles.RectCorners(box), seed);
-
-        var figure = new PathFigure { StartPoint = outline[0], IsClosed = true, IsFilled = true };
-        for (int i = 1; i < outline.Count; i++)
-            figure.Segments.Add(new LineSegment(outline[i], isStroked: true));
-        var geometry = new PathGeometry();
-        geometry.Figures.Add(figure);
-        geometry.Freeze();
-
-        return new Path { Data = geometry, Stretch = Stretch.Fill };
-    }
-
-    /// <summary>
-    /// The box a sketchy outline is generated in. 100 units keeps
-    /// <see cref="StrokeStyles.SketchAmplitude"/> reading as a percentage of the mark,
-    /// which is what makes the wobble look the same at every size.
-    /// </summary>
-    private const double SketchUnitBox = 100;
-
-    /// <summary>
-    /// Applies a dash pattern to a shape's outline. Called on create and on restyle, so a
-    /// mark drawn solid can become dotted without being redrawn.
-    /// </summary>
-    public static void ApplyDash(Shape shape, StrokeDash dash)
-    {
-        shape.StrokeDashArray = StrokeStyles.DashArray(dash);
-        var cap = StrokeStyles.CapFor(dash);
-        shape.StrokeDashCap = cap;
-        // A dotted OUTLINE needs round ends on every dash; a solid one keeps whatever the
-        // caller set, because a line and an arrow already choose their own caps.
-        if (dash != StrokeDash.Solid)
-        {
-            shape.StrokeStartLineCap = cap;
-            shape.StrokeEndLineCap = cap;
-        }
-    }
-
-    /// <summary>
-    /// Which end of a drag the head lands on. Two inputs, both of which flip it: the
-    /// "Inverse arrow direction" preference, and the Alt key held for one arrow. Holding
-    /// Alt with the preference already on puts the head back where the drag ended, which
-    /// is the point of a per-drag override.
-    /// </summary>
-    public static (Point Tail, Point Head) ArrowEnds(Point from, Point to, bool inverted, bool altHeld) =>
-        inverted ^ altHeld ? (to, from) : (from, to);
-
-    /// <summary>
-    /// The next style in the double-click cycle. Curved is in it because it is a row in
-    /// the same style menu, and the cycle wraps so repeated double-clicks never dead-end.
-    /// </summary>
-    public static ArrowStyle NextArrowStyle(ArrowStyle current)
-    {
-        var all = Enum.GetValues<ArrowStyle>();
-        int i = Array.IndexOf(all, current);
-        return all[(i < 0 ? 0 : i + 1) % all.Length];
-    }
-
-    /// <summary>
     /// Fills a magnifier callout with the piece of the picture it is looking at, blown up.
     /// Nearest-neighbour scaling on purpose: the point of a callout is usually to show
     /// exactly which pixels are there, and a smoothed blow-up hides that.
@@ -209,57 +132,49 @@ internal static class AnnotationFactory
         }
     }
 
-    /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
-    public static ArrowStyle ParseArrowStyle(string? name) =>
-        Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
+    /// <summary>The rounded bubble of a magnifier callout, already filled from the source.</summary>
+    public static Rectangle CreateMagnifier(
+        Rect bounds, Point focus, double scale, Color border, double thickness, SD.Bitmap? source)
+    {
+        var bubble = new Rectangle
+        {
+            RadiusX = 6,
+            RadiusY = 6,
+            Stroke = new SolidColorBrush(border),
+            StrokeThickness = thickness,
+        };
+        PaintMagnifier(bubble, source, bounds, focus, MagnifierLayout.ClampScale(scale));
+        Canvas.SetLeft(bubble, bounds.X);
+        Canvas.SetTop(bubble, bounds.Y);
+        return bubble;
+    }
 
     /// <summary>
-    /// Straight arrow in one of the <see cref="ArrowStyle"/> variants:
-    /// Straight (one filled head), Double (filled head at both ends), or Thin (a slimmer,
-    /// tapered head). All heads scale with stroke thickness so they read well at any size.
-    ///
-    /// <paramref name="render"/> is the same line quality the shapes carry: Sketchy runs the
-    /// shaft and every head through <see cref="StrokeStyles.SketchPath"/>, so a hand-drawn
-    /// rectangle and a hand-drawn arrow look like they were drawn by the same hand. The seed
-    /// lives on the annotation, so the wobble is identical after a move, an undo or a reload.
+    /// Which end of a drag the head lands on. Two inputs, both of which flip it: the
+    /// "Inverse arrow direction" preference, and the Alt key held for one arrow. Holding
+    /// Alt with the preference already on puts the head back where the drag ended, which
+    /// is the point of a per-drag override.
     /// </summary>
-    public static Geometry ArrowGeometry(
-        Point from, Point to, double thickness, ArrowStyle style,
-        StrokeRender render = StrokeRender.Clean, int seed = 0)
+    public static (Point Tail, Point Head) ArrowEnds(Point from, Point to, bool inverted, bool altHeld) =>
+        inverted ^ altHeld ? (to, from) : (from, to);
+
+    /// <summary>
+    /// The next style in the double-click cycle. Curved is in it because it is a row in
+    /// the same style menu, and the cycle wraps so repeated double-clicks never dead-end.
+    /// </summary>
+    public static ArrowStyle NextArrowStyle(ArrowStyle current)
     {
-        var v = to - from;
-        if (v.Length < 0.5) v = new Vector(0.5, 0);
-        var dir = v;
-        dir.Normalize();
-
-        bool sketchy = render == StrokeRender.Sketchy;
-        if (style == ArrowStyle.Fancy)
-            return FancyArrowGeometry(from, to, dir, thickness, sketchy, seed);
-
-        // Thin arrows use a smaller, narrower head so the whole mark looks slimmer.
-        double headScale = style == ArrowStyle.Thin ? 2.6 : 3.5;
-        double headWidth = style == ArrowStyle.Thin ? 0.34 : 0.45;
-        double head = Math.Clamp(thickness * headScale, style == ArrowStyle.Thin ? 8 : 10, 30);
-        var perp = new Vector(-dir.Y, dir.X) * head * headWidth;
-
-        // The shaft stops short of each head so the stroked line never pokes through the
-        // filled triangle. A double-headed arrow trims both ends.
-        Point endBase = to - dir * head;
-        Point startBase = style == ArrowStyle.Double ? from + dir * head : from;
-
-        var geometry = new PathGeometry();
-
-        Point[] shaftRun = { startBase, endBase };
-        geometry.Figures.Add(PolyFigure(
-            sketchy ? StrokeStyles.SketchPath(shaftRun, seed, closed: false) : shaftRun,
-            closed: false, filled: false));
-
-        geometry.Figures.Add(HeadFigure(to, endBase, perp, sketchy, unchecked(seed + 1)));
-        if (style == ArrowStyle.Double)
-            geometry.Figures.Add(HeadFigure(from, startBase, perp, sketchy, unchecked(seed + 2)));
-
-        return geometry;
+        var all = Enum.GetValues<ArrowStyle>();
+        int i = Array.IndexOf(all, current);
+        return all[(i < 0 ? 0 : i + 1) % all.Length];
     }
+
+    /// <summary>
+    /// The box a sketchy outline is generated in. 100 units keeps
+    /// <see cref="StrokeStyles.SketchAmplitude"/> reading as a percentage of the mark,
+    /// which is what makes the wobble look the same at every size.
+    /// </summary>
+    private const double SketchUnitBox = 100;
 
     /// <summary>
     /// One figure from a run of points, sketched or ruled — the shared spelling of "draw
@@ -304,14 +219,207 @@ internal static class AnnotationFactory
         return geometry;
     }
 
-    /// <summary>One filled triangular arrowhead: tip at <paramref name="tip"/>, base centered at <paramref name="baseCenter"/>.</summary>
-    private static PathFigure HeadFigure(
-        Point tip, Point baseCenter, Vector perp, bool sketchy = false, int seed = 0)
+    /// <summary>
+    /// A line or arrow SHAFT, straight or curved, in whichever line quality is asked for.
+    /// Clean hands straight back to <see cref="LineCurve.Stroke"/>; Sketchy flattens the
+    /// curve first so the wobble follows it instead of cutting the corner.
+    /// </summary>
+    public static PathGeometry LineGeometry(
+        Point from, Point to, Point? mid, StrokeRender render = StrokeRender.Clean, int seed = 0)
     {
-        Point[] triangle = { tip, baseCenter + perp, baseCenter - perp };
-        return PolyFigure(
-            sketchy ? StrokeStyles.SketchPath(triangle, seed, closed: true) : triangle,
-            closed: true, filled: true);
+        if (render != StrokeRender.Sketchy) return LineCurve.Stroke(from, to, mid);
+
+        IReadOnlyList<Point> run = LineCurve.IsCurved(mid, from, to)
+            ? StrokeStyles.FlattenQuadratic(from, LineCurve.ControlThroughMid(from, to, mid!.Value), to)
+            : new[] { from, to };
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(PolyFigure(
+            StrokeStyles.SketchPath(run, seed, closed: false), closed: false, filled: false));
+        return geometry;
+    }
+
+    /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
+    public static ArrowStyle ParseArrowStyle(string? name) =>
+        Enum.TryParse(name, out ArrowStyle s) ? s : ArrowStyle.Straight;
+
+    /// <summary>
+    /// Legacy CleanShot-style arrows (Straight / Double / Thin) mapped onto Survey's
+    /// six-head vocabulary so old .winshot files keep their look.
+    /// </summary>
+    public static Geometry ArrowGeometry(
+        Point from, Point to, double thickness, ArrowStyle style,
+        StrokeRender render = StrokeRender.Clean, int seed = 0)
+    {
+        // Fancy is not a head choice at all: it is one closed silhouette, so it never
+        // reaches the head vocabulary below.
+        if (style == ArrowStyle.Fancy)
+        {
+            var v = to - from;
+            if (v.Length < 0.5) v = new Vector(0.5, 0);
+            var dir = v;
+            dir.Normalize();
+            return FancyArrowGeometry(from, to, dir, thickness, render == StrokeRender.Sketchy, seed);
+        }
+
+        var end = AnnotationStyle.ParseArrowhead(style.ToString(), out var start);
+        return ArrowGeometry(from, to, thickness, end, start, thin: style == ArrowStyle.Thin,
+            mid: null, render: render, seed: seed);
+    }
+
+    /// <summary>
+    /// Survey arrow: a stroked shaft plus optional start/end heads. Head size is
+    /// <c>max(8, thickness * 3)</c> (Survey Phase 15). Solid triangles are filled;
+    /// the other five heads are stroked.
+    /// </summary>
+    public static Geometry ArrowGeometry(
+        Point from, Point to, double thickness, ArrowheadStyle end,
+        ArrowheadStyle start = ArrowheadStyle.None, bool thin = false, Point? mid = null,
+        StrokeRender render = StrokeRender.Clean, int seed = 0)
+    {
+        double headSize = Math.Max(8, thickness * (thin ? 2.6 : 3));
+        bool curved = LineCurve.IsCurved(mid, from, to);
+        double endAngle = curved
+            ? LineCurve.EndAngleRadians(from, to, mid!.Value)
+            : Math.Atan2(to.Y - from.Y, to.X - from.X);
+        double startAngle = curved
+            ? Math.Atan2(
+                LineCurve.ControlThroughMid(from, to, mid!.Value).Y - from.Y,
+                LineCurve.ControlThroughMid(from, to, mid!.Value).X - from.X)
+            : endAngle;
+
+        var endDir = new Vector(Math.Cos(endAngle), Math.Sin(endAngle));
+        var startDir = new Vector(Math.Cos(startAngle), Math.Sin(startAngle));
+        Point endBase = end == ArrowheadStyle.None || end == ArrowheadStyle.HorizontalLine
+            ? to
+            : to - endDir * ShaftTrim(end, headSize);
+        Point startBase = start == ArrowheadStyle.None || start == ArrowheadStyle.HorizontalLine
+            ? from
+            : from + startDir * ShaftTrim(start, headSize);
+
+        var geometry = LineGeometry(startBase, endBase, curved ? mid : null, render, seed);
+        AppendHead(geometry, to, endAngle, headSize, thickness, end);
+        if (start != ArrowheadStyle.None)
+            AppendHead(geometry, from, startAngle + Math.PI, headSize, thickness, start);
+        return geometry;
+    }
+
+    /// <summary>
+    /// Survey shortens the shaft for the two triangle heads ONLY, by headSize/3
+    /// (lineRenderHelpers.js:261-268). The open circle is centred on the tip, so the shaft
+    /// runs into its centre rather than stopping at the rim like a lollipop stick.
+    /// </summary>
+    private static double ShaftTrim(ArrowheadStyle style, double headSize) => style switch
+    {
+        ArrowheadStyle.SolidTriangle or ArrowheadStyle.OpenTriangle => headSize / 3,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Survey strokes the five non-solid-triangle heads at <c>max(2, strokeWidth)</c> so they
+    /// stay visible on a 1px line, with round joins/caps and no dash
+    /// (lineRenderHelpers.js:110-176). WPF gives one Path a single StrokeThickness and a
+    /// single dash array, so the head cannot simply share the shaft's pen. Instead the head
+    /// outline is WIDENED by that pen and appended as a FILLED figure: it paints at the 2px
+    /// floor, keeps the round join/cap shape, and — being a fill — is immune to the shaft's
+    /// dash pattern, all without a second Path threaded through nine call sites.
+    /// </summary>
+    private static void AppendHead(
+        PathGeometry geometry, Point tip, double angle, double headSize, double thickness, ArrowheadStyle style)
+    {
+        if (style == ArrowheadStyle.None) return;
+        if (style == ArrowheadStyle.SolidTriangle)
+        {
+            double back = headSize / 3;
+            double half = headSize / 2;
+            Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
+            Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
+            var solid = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = true };
+            solid.Segments.Add(new LineSegment(tip, isStroked: false));
+            solid.Segments.Add(new LineSegment(right, isStroked: false));
+            geometry.Figures.Add(solid);
+            return;
+        }
+
+        var outline = new PathGeometry();
+        switch (style)
+        {
+            case ArrowheadStyle.OpenTriangle:
+            {
+                double back = headSize / 3;
+                double half = headSize / 2;
+                Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
+                Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
+                var fig = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip, isStroked: true));
+                fig.Segments.Add(new LineSegment(right, isStroked: true));
+                outline.Figures.Add(fig);
+                break;
+            }
+            case ArrowheadStyle.VShape:
+            {
+                const double spread = Math.PI / 6;
+                Point arm1 = tip - new Vector(Math.Cos(angle - spread), Math.Sin(angle - spread)) * headSize;
+                Point arm2 = tip - new Vector(Math.Cos(angle + spread), Math.Sin(angle + spread)) * headSize;
+                var fig = new PathFigure { StartPoint = arm1, IsClosed = false, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip, isStroked: true));
+                fig.Segments.Add(new LineSegment(arm2, isStroked: true));
+                outline.Figures.Add(fig);
+                break;
+            }
+            case ArrowheadStyle.OpenCircle:
+            {
+                double r = headSize / 2;
+                Point start = tip + new Vector(r, 0);
+                var fig = new PathFigure { StartPoint = start, IsClosed = true, IsFilled = false };
+                fig.Segments.Add(new ArcSegment(
+                    tip + new Vector(-r, 0), new Size(r, r), 0, false, SweepDirection.Clockwise, true));
+                fig.Segments.Add(new ArcSegment(
+                    start, new Size(r, r), 0, false, SweepDirection.Clockwise, true));
+                outline.Figures.Add(fig);
+                break;
+            }
+            case ArrowheadStyle.HorizontalLine:
+            {
+                double half = headSize / 2;
+                var perp = new Vector(-Math.Sin(angle), Math.Cos(angle)) * half;
+                var fig = new PathFigure { StartPoint = tip + perp, IsClosed = false, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip - perp, isStroked: true));
+                outline.Figures.Add(fig);
+                break;
+            }
+            default:
+                return;
+        }
+
+        var pen = new Pen(Brushes.Black, Math.Max(2, thickness))
+        {
+            LineJoin = PenLineJoin.Round,
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+        };
+        var widened = outline.GetWidenedPathGeometry(pen);
+        foreach (var fig in widened.Figures)
+        {
+            var copy = fig.Clone();
+            copy.IsFilled = true;
+            // The head shares the arrow's Path, whose Stroke paints the SHAFT. Leaving the
+            // outline stroked as well would re-widen it by the shaft pen and fill the open
+            // circle's / open triangle's hole back in, so the outline is fill-only.
+            foreach (var seg in copy.Segments) seg.IsStroked = false;
+            geometry.Figures.Add(copy);
+        }
+    }
+
+    private static Vector Polar(double angle, double length) =>
+        new(Math.Cos(angle) * length, Math.Sin(angle) * length);
+
+    /// <summary>One filled triangular arrowhead: tip at <paramref name="tip"/>, base centered at <paramref name="baseCenter"/>.</summary>
+    private static PathFigure HeadFigure(Point tip, Point baseCenter, Vector perp)
+    {
+        var head = new PathFigure { StartPoint = tip, IsClosed = true, IsFilled = true };
+        head.Segments.Add(new LineSegment(baseCenter + perp, isStroked: true));
+        head.Segments.Add(new LineSegment(baseCenter - perp, isStroked: true));
+        return head;
     }
 
     /// <summary>
@@ -332,13 +440,10 @@ internal static class AnnotationFactory
         Point headBase = to - dir * head;
         var perp = new Vector(-dir.Y, dir.X) * head * 0.45;
 
-        bool sketchy = render == StrokeRender.Sketchy;
         var geometry = new PathGeometry();
 
-        if (sketchy)
+        if (render == StrokeRender.Sketchy)
         {
-            // A Bezier cannot be perturbed in place, so the shaft is flattened first and the
-            // wobble applied to the run — the same treatment the shapes get.
             geometry.Figures.Add(PolyFigure(
                 StrokeStyles.SketchPath(
                     StrokeStyles.FlattenQuadratic(from, control, headBase), seed, closed: false),
@@ -351,7 +456,13 @@ internal static class AnnotationFactory
             geometry.Figures.Add(shaft);
         }
 
-        geometry.Figures.Add(HeadFigure(to, headBase, perp, sketchy, unchecked(seed + 1)));
+        Point[] triangle = { to, headBase + perp, headBase - perp };
+        geometry.Figures.Add(PolyFigure(
+            render == StrokeRender.Sketchy
+                ? StrokeStyles.SketchPath(triangle, unchecked(seed + 1), closed: true)
+                : triangle,
+            closed: true, filled: true));
+
         return geometry;
     }
 
@@ -376,10 +487,7 @@ internal static class AnnotationFactory
     /// </summary>
     public static PointCollection SmoothFreehandPoints(IList<Point> raw)
     {
-        // Simplify first: RDP throws away the points the pointer contributed and the hand
-        // did not, so the Catmull-Rom below interpolates the stroke's actual shape rather
-        // than smoothing a recording of the mouse's own jitter.
-        var pts = MovingAverage(StrokeStyles.Simplify(AsList(raw), FreehandSimplifyEpsilon), window: 2);
+        var pts = MovingAverage(raw, window: 2);
         var result = new PointCollection();
         if (pts.Count < 3)
         {
@@ -405,16 +513,6 @@ internal static class AnnotationFactory
         }
         return result;
     }
-
-    /// <summary>
-    /// How far a sampled point may sit off the line its neighbours describe before it is
-    /// worth keeping. 1.2 px removes the pointer's own noise while leaving every
-    /// deliberate change of direction — a scribble that reads as drawn, not as recorded.
-    /// </summary>
-    private const double FreehandSimplifyEpsilon = 1.2;
-
-    private static IReadOnlyList<Point> AsList(IList<Point> raw) =>
-        raw as IReadOnlyList<Point> ?? raw.ToList();
 
     /// <summary>Catmull-Rom interpolation (tension 0.5) between p1 and p2 at parameter t∈[0,1].</summary>
     private static Point CatmullRom(Point p0, Point p1, Point p2, Point p3, double t)
@@ -493,54 +591,89 @@ internal static class AnnotationFactory
 
     /// <summary>Takes the foreground brush and font size directly so re-editing a committed label can reproduce its look.</summary>
     public static TextBox CreateTextEditor(Brush foreground, double fontSize) =>
-        new()
+        new TextBox
         {
-            MinWidth = 48,
-            // A caption that runs long used to march off the edge of the picture with no
-            // way to break it. Enter still commits (that is the muscle memory); Shift+Enter
-            // is the newline, and the box wraps once it reaches its own width.
+            // Survey's floor for the editable box is 8 + 2 * TEXT_PADDING
+            // (TextEditOverlay.jsx:164); anything wider would render past the box it commits.
+            MinWidth = 8 + 2 * TextPadding,
+            // Survey's box is single-line; WinShot's is not. A caption that runs long used
+            // to march off the edge of the picture with no way to break it, so the box takes
+            // returns and wraps at its own width. Survey's chrome is untouched — this is
+            // what the box can HOLD, not what it looks like.
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 640,
             FontSize = fontSize,
-            FontWeight = FontWeights.SemiBold,
+            FontWeight = FontWeights.Normal,
             Foreground = foreground,
-            CaretBrush = foreground,
-            Background = new SolidColorBrush(Color.FromArgb(0x40, 0x00, 0x00, 0x00)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0xAA, 0x0A, 0x84, 0xFF)),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(2),
-        };
+            // Survey's caret is a fixed iOS blue, independent of the text colour
+            // (TextEditOverlay.jsx:591 caretColor '#007AFF').
+            CaretBrush = new SolidColorBrush(AnnotationStyle.CaretColor),
+            Background = Brushes.Transparent, // Survey edits in place over the page
+            // Chromeless: the box chrome comes from the live preview painted with the
+            // COMMITTED look, so nothing changes appearance on commit
+            // (TextEditOverlay.jsx:563-564).
+            BorderBrush = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(TextPadding),
+        }.WithLineHeight(fontSize * TextLineHeightFactor);
 
     /// <summary>Transparent background keeps the whole text box clickable for the Select tool without rendering anything.</summary>
     public static TextBlock CreateTextLabel(string text, Brush foreground, double fontSize) =>
-        new()
+        CreateTextLabel(text, foreground, fontSize, DefaultTextFontFamily, bold: false, italic: false,
+            underline: false, strike: false, DefaultAlignFor(text));
+
+    /// <summary>
+    /// A one-line caption reads the same centred or left; a paragraph does not, and a
+    /// centred paragraph is the classic screenshot-tool tell. So a label given no explicit
+    /// alignment centres only while it is one line. Callers that DO pass an alignment —
+    /// everything driven by Survey's align control — are untouched.
+    /// </summary>
+    private static TextAlignment DefaultAlignFor(string text) =>
+        text.Contains('\n') || text.Contains('\r')
+            ? TextAlignment.Left
+            : TextAlignment.Center;
+
+    public static TextBlock CreateTextLabel(
+        string text, Brush foreground, double fontSize, string fontFamily,
+        bool bold, bool italic, bool underline, bool strike, TextAlignment align)
+    {
+        var tb = new TextBlock
         {
             Text = text,
             FontSize = fontSize,
-            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily(string.IsNullOrWhiteSpace(fontFamily) ? DefaultTextFontFamily : fontFamily),
+            FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
+            FontStyle = italic ? FontStyles.Italic : FontStyles.Normal,
             Foreground = foreground,
             Background = Brushes.Transparent,
-            // A one-line caption reads the same centred or left; a paragraph does not, and
-            // ragged-centre body text is the tell that a label became a note.
-            TextAlignment = LineCount(text) >= MultiLineThreshold
-                ? TextAlignment.Left
-                : TextAlignment.Center,
+            TextAlignment = align,
+            TextWrapping = TextWrapping.Wrap,
+            // Same line-height contract the editor uses, so nothing reflows on commit.
+            LineHeight = fontSize * TextLineHeightFactor,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
         };
-
-    /// <summary>Lines above which a text annotation stops being a caption and starts being a note.</summary>
-    private const int MultiLineThreshold = 3;
-
-    private const char LineFeed = (char)10;
-    private const char CarriageReturn = (char)13;
-
-    private static int LineCount(string text)
-    {
-        int lines = 1;
-        foreach (char c in text)
-            if (c == LineFeed) lines++;
-        return lines;
+        if (underline || strike)
+        {
+            tb.TextDecorations = new TextDecorationCollection();
+            if (underline) tb.TextDecorations.Add(TextDecorations.Underline);
+            if (strike) tb.TextDecorations.Add(TextDecorations.Strikethrough);
+        }
+        return tb;
     }
+
+    public static TextAlignment ParseAlign(string? name) => name switch
+    {
+        "center" => TextAlignment.Center,
+        "right" => TextAlignment.Right,
+        _ => TextAlignment.Left,
+    };
+
+    public static string AlignName(TextAlignment align) => align switch
+    {
+        TextAlignment.Center => "center",
+        TextAlignment.Right => "right",
+        _ => "left",
+    };
 
     /// <summary>
     /// Builds the committed annotation element for a text style. Plain/Bold/Huge return
@@ -548,50 +681,96 @@ internal static class AnnotationFactory
     /// glyph Path with a white stroke; Pill wraps the text in a rounded dark Border.
     /// Huge's enlarged font size is applied by the caller before committing.
     /// </summary>
-    public static FrameworkElement CreateStyledTextLabel(string text, Brush foreground, double fontSize, TextStyle style)
+    public static FrameworkElement CreateStyledTextLabel(string text, Brush foreground, double fontSize, TextStyle style) =>
+        CreateStyledTextLabel(text, foreground, fontSize, style, DefaultTextFontFamily,
+            bold: style == TextStyle.Bold, italic: false, underline: false, strike: false,
+            // No alignment was asked for, so it follows the text: see DefaultAlignFor.
+            DefaultAlignFor(text));
+
+    public static FrameworkElement CreateStyledTextLabel(
+        string text, Brush foreground, double fontSize, TextStyle style,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align) =>
+        CreateStyledTextLabel(text, foreground, fontSize, style, fontFamily, bold, italic, underline, strike, align,
+            verticalAlign: "top", boxWidth: null, boxHeight: null);
+
+    public static FrameworkElement CreateStyledTextLabel(
+        string text, Brush foreground, double fontSize, TextStyle style,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
+        string? verticalAlign, double? boxWidth, double? boxHeight) =>
+        CreateStyledTextLabel(text, foreground, fontSize, style, fontFamily, bold, italic, underline, strike, align,
+            verticalAlign, boxWidth, boxHeight, fill: Colors.Transparent, strokeThickness: 0, LineBorderStyle.Solid);
+
+    public const double DefaultTextBoxWidth = 160;
+
+    public static FrameworkElement CreateStyledTextLabel(
+        string text, Brush foreground, double fontSize, TextStyle style,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
+        string? verticalAlign, double? boxWidth, double? boxHeight,
+        Color fill, double strokeThickness, LineBorderStyle lineStyle, Brush? chromeStroke = null)
     {
-        switch (style)
+        // Survey has no `style` pseudo-property on a Textbox and nothing ORs boldness in from
+        // one: bold is exactly fontWeight === 'bold' (textEditCommit.js:26-62, :91-104).
+        bool useBold = bold;
+        FrameworkElement inner = style switch
         {
-            case TextStyle.Bold:
-                var bold = CreateTextLabel(text, foreground, fontSize);
-                bold.FontWeight = FontWeights.Bold;
-                return bold;
+            TextStyle.Outline => CreateOutlineGlyph(text, foreground, fontSize, fontFamily, useBold, italic),
+            TextStyle.Pill => CreatePillLabel(text, foreground, fontSize),
+            _ => CreateTextLabel(text, foreground, fontSize, fontFamily, useBold, italic, underline, strike, align),
+        };
 
-            case TextStyle.Outline:
-                var typeface = new Typeface(new FontFamily("Segoe UI"),
-                    FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-                // FormattedText draws a carriage return as a glyph rather than a break,
-                // so a multi-line outline label would otherwise come out with boxes in it.
-                var formatted = new FormattedText(
-                    text.Replace(CarriageReturn.ToString() + LineFeed, LineFeed.ToString())
-                        .Replace(CarriageReturn, LineFeed),
-                    CultureInfo.CurrentUICulture,
-                    FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
-                return new Path
-                {
-                    Data = formatted.BuildGeometry(new Point(0, 0)),
-                    Fill = foreground,
-                    Stroke = Brushes.White,
-                    StrokeThickness = Math.Max(1.2, fontSize / 14),
-                    StrokeLineJoin = PenLineJoin.Round,
-                };
+        if (style is TextStyle.Outline or TextStyle.Pill)
+            return inner;
 
-            case TextStyle.Pill:
-                return CreatePillLabel(text, foreground, fontSize);
-
-            default: // Plain; Huge is Plain at a size the caller already doubled
-                return CreateTextLabel(text, foreground, fontSize);
+        double width = boxWidth is > 1 ? boxWidth.Value : DefaultTextBoxWidth;
+        double height = boxHeight is > 1 ? boxHeight.Value : SingleLineBoxHeight(fontSize, fontFamily);
+        if (inner is TextBlock tb)
+        {
+            tb.Width = Math.Max(1, width - 2 * TextPadding);
+            tb.TextWrapping = TextWrapping.Wrap;
+            tb.VerticalAlignment = ParseVerticalAlign(verticalAlign);
         }
+
+        var box = new Grid { Width = width, Height = height };
+        var chrome = new Rectangle
+        {
+            Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill),
+            // Survey's textbox border is a plain <rect> with no rx/ry, stroked in the
+            // stored `stroke` — hardcoded '#000000' for user-created text, never the
+            // picker colour (svgAnnotationRenderers.jsx:1231-1246, TextEditOverlay.jsx:140-142).
+            // Survey's textbox border rect is stroked in the stored `stroke`, a field of its
+            // own — '#000000' for user-created text, repainted only by the top-bar stroke
+            // swatch. The GLYPHS are `fill` (svgAnnotationRenderers.jsx:1236-1246, :1276).
+            Stroke = strokeThickness > 0 ? (chromeStroke ?? Brushes.Black) : Brushes.Transparent,
+            StrokeThickness = Math.Max(0, strokeThickness),
+        };
+        ApplyDash(chrome, lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : lineStyle);
+        box.Children.Add(chrome);
+        // Survey gives the content area fontSize * 0.35 of extra bottom room for descenders
+        // (svgAnnotationRenderers.jsx:1191) rather than growing the box itself.
+        inner.Margin = new Thickness(
+            TextPadding, TextPadding, TextPadding, TextPadding - fontSize * TextDescenderRatio);
+        box.Children.Add(inner);
+        return box;
     }
 
-    /// <summary>
-    /// A pill's plate colour and the ink that goes on it. The plate is the TOOL's colour —
-    /// the colour control has to mean something on a pill, and a fixed dark plate made it
-    /// mean nothing — and the ink is black or white by luminance, never the raw pick. The
-    /// plate is fully opaque: at 85 % the effective backdrop moved with the screenshot
-    /// underneath, so the same label passed 4.5:1 over a dark region and failed over a
-    /// light one. Opaque + <see cref="ColorMath.TextOn"/> is >= 4.58:1 for every colour in
-    /// the picker, black and #3A3A3C included.
+    private static Path CreateOutlineGlyph(
+        string text, Brush foreground, double fontSize, string fontFamily, bool bold, bool italic)
+    {
+        var typeface = new Typeface(new FontFamily(fontFamily),
+            italic ? FontStyles.Italic : FontStyles.Normal,
+            bold ? FontWeights.Bold : FontWeights.Normal, FontStretches.Normal);
+        var formatted = new FormattedText(text, CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight, typeface, fontSize, foreground, pixelsPerDip: 1.0);
+        return new Path
+        {
+            Data = formatted.BuildGeometry(new Point(0, 0)),
+            Fill = foreground,
+            Stroke = Brushes.White,
+            StrokeThickness = Math.Max(1.2, fontSize / 14),
+            StrokeLineJoin = PenLineJoin.Round,
+        };
+    }
+
     /// </summary>
     private static (Brush Plate, Brush Ink) PillBrushes(Brush foreground)
     {
@@ -706,34 +885,234 @@ internal static class AnnotationFactory
         };
 
     /// <summary>
-    /// Circle badge whose caption is either the number (1, 2, …) or a letter sequence
-    /// (A, B, …, Z, AA) when <paramref name="letters"/> is set. Ring and caption color
-    /// flip to black on light fills; the font shrinks for longer captions.
+    /// Survey teardrop pin: circle + nub at 225° (southwest). Caption is the
+    /// number (1, 2, …) or a letter sequence when <paramref name="letters"/> is set.
     /// </summary>
-    public static Grid CreateStepBadge(int number, Color color, double thickness, bool letters)
+    /// <summary>
+    /// Turns a counter's pointer to <paramref name="pointerAngle"/> (0 = east, clockwise) in
+    /// place: only the pin path is regenerated, so the number stays upright — Survey's
+    /// counter rotates the tip, never the label.
+    /// </summary>
+    public static void SetStepPointerAngle(Grid badge, double pointerAngle)
     {
-        double diameter = 22 + thickness * 3;
-        bool lightFill = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B > 160;
-        Color contrast = lightFill ? Colors.Black : Colors.White;
+        if (badge.Children.OfType<Path>().FirstOrDefault() is not { } pin) return;
+        double tipDist = badge.Width / 2;
+        double radius = tipDist / 1.5; // CounterGeometry.TipDistance is radius * 1.5
+        pin.Data = CounterGeometry.Pin(new Point(tipDist, tipDist), radius, pointerAngle);
+    }
 
+    public static Grid CreateStepBadge(int number, Color color, double thickness, bool letters,
+        double pointerAngle = CounterGeometry.DefaultPointerAngle)
+    {
+        double radius = CounterGeometry.RadiusFor(thickness);
+        double tipDist = CounterGeometry.TipDistance(radius);
+        double size = tipDist * 2;
+        Point body = new(tipDist, tipDist);
         string caption = letters ? StepLetterLabel(number) : number.ToString();
 
-        var badge = new Grid { Width = diameter, Height = diameter };
-        badge.Children.Add(new Ellipse
+        double font = CounterGeometry.FontSize(radius, caption);
+        var badge = new Grid { Width = size, Height = size };
+        // Survey renderCounter draws the pin as ONE filled path with stroke="none"
+        // (svgAnnotationRenderers.jsx:1725) — no ring, ever.
+        badge.Children.Add(new Path
         {
+            Data = CounterGeometry.Pin(body, radius, pointerAngle),
             Fill = new SolidColorBrush(color),
-            Stroke = new SolidColorBrush(contrast) { Opacity = 0.85 },
-            StrokeThickness = 2,
         });
+        // Survey's label colour is data.numberColor with a '#ffffff' fallback — per-series and
+        // never derived from the fill's luminance. The badge Grid's exact centre IS the pin
+        // body, so cell-centring lands the glyphs without a per-glyph width guess.
         badge.Children.Add(new TextBlock
         {
             Text = caption,
-            Foreground = new SolidColorBrush(contrast),
+            Foreground = new SolidColorBrush(StepNumberColor),
             FontWeight = FontWeights.Bold,
-            FontSize = diameter * (caption.Length < 2 ? 0.5 : 0.4),
+            FontSize = font,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         });
         return badge;
     }
+
+    /// <summary>Survey's counter label default: '#ffffff' (PDFViewer.jsx:4250, 25614).</summary>
+    public static readonly Color StepNumberColor = Colors.White;
+
+    /// <summary>Rewrites a badge's caption in place after a renumber, refitting the font.</summary>
+    public static void SetStepCaption(Grid badge, int number, bool letters)
+    {
+        if (badge.Children.OfType<TextBlock>().FirstOrDefault() is not { } label) return;
+        string caption = letters ? StepLetterLabel(number) : number.ToString();
+        double radius = badge.Width / 2 / 1.5; // CounterGeometry.TipDistance is radius * 1.5
+        label.Text = caption;
+        label.FontSize = CounterGeometry.FontSize(radius, caption);
+    }
+
+    /// <summary>
+    /// Applies Survey's line-height contract to an in-place editor. TextBox has no LineHeight
+    /// of its own; Block.LineHeight is an inherited attached property its inner paragraph
+    /// picks up, which is how a TextBox is given a fixed line box in WPF.
+    /// </summary>
+    public static TextBox WithLineHeight(this TextBox tb, double lineHeight)
+    {
+        tb.SetValue(System.Windows.Documents.Block.LineHeightProperty, lineHeight);
+        tb.SetValue(System.Windows.Documents.Block.LineStackingStrategyProperty,
+            LineStackingStrategy.BlockLineHeight);
+        return tb;
+    }
+
+    public const double TextPadding = 6;
+
+    /// <summary>
+    /// The face a new text label is drawn in. Survey pins its own DEFAULT_FONT_FAMILY
+    /// 'Helvetica' in both the editor and the measurement context so the committed label and
+    /// its editor can never fall back to different faces (TextEditOverlay.jsx:47,
+    /// textEditCommit.js:154) — that ONE-CONST rule is the mechanic worth keeping. The face
+    /// itself is not: Helvetica is not installed on Windows and resolves to whatever the
+    /// font fallback picks, so the default here is the system UI face, and Helvetica stays
+    /// in the family list for anyone who wants it.
+    /// </summary>
+    public const string DefaultTextFontFamily = "Segoe UI";
+
+    /// <summary>
+    /// Survey's line-height contract: <c>(lineHeight || 1.16) * 1.13</c>
+    /// (svgAnnotationRenderers.jsx:1086) — the same 1.3108 factor the editor and the
+    /// committed SVG both use.
+    /// </summary>
+    public const double TextLineHeightFactor = 1.16 * 1.13;
+
+    /// <summary>
+    /// Survey's descender buffer: the text CONTENT area is <c>fontSize * 0.35</c> taller
+    /// than the box's inner height so j/p/g/q/y are not cut off
+    /// (svgAnnotationRenderers.jsx:1181, TextEditOverlay.jsx:470).
+    /// </summary>
+    public const double TextDescenderRatio = 0.35;
+
+    /// <summary>
+    /// Height of a one-line text box, matching Survey's new-text mount geometry
+    /// (TextEditOverlay.jsx:165): <c>fontSize * 1.16 * 1.13 + 2 * TEXT_PADDING</c>.
+    /// The font family no longer participates — Survey's factor is font-independent.
+    /// </summary>
+    public static double SingleLineBoxHeight(double fontSize, string? fontFamily = null) =>
+        fontSize * TextLineHeightFactor + 2 * TextPadding;
+
+    public static VerticalAlignment ParseVerticalAlign(string? name) => name switch
+    {
+        "middle" => VerticalAlignment.Center,
+        "bottom" => VerticalAlignment.Bottom,
+        _ => VerticalAlignment.Top,
+    };
+
+    public static string VerticalAlignName(VerticalAlignment align) => align switch
+    {
+        VerticalAlignment.Center => "middle",
+        VerticalAlignment.Bottom => "bottom",
+        _ => "top",
+    };
+
+    public static Shape CreateBoxShape(
+        string type, Rect bounds, Color stroke, Color fill, double thickness, LineBorderStyle lineStyle,
+        double cloudIntensity = CloudPath.DefaultIntensity,
+        StrokeRender render = StrokeRender.Clean, int seed = 0)
+    {
+        Shape shape;
+        if (type == AnnotationData.TypeRectangle && lineStyle == LineBorderStyle.Cloud)
+        {
+            shape = new Path
+            {
+                Data = CloudPath.ForRectangle(
+                    new Rect(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)),
+                    cloudIntensity, thickness),
+            };
+        }
+        else if (render == StrokeRender.Sketchy)
+        {
+            // Jitter is generated in a fixed unit box and stretched to the mark's real size:
+            // sizing the wobble with the mark would make a big rectangle wildly shaky and a
+            // small one perfectly straight. Stretch.Fill keeps every caller that sets
+            // Width/Height working, and leaves the stroke at the asked-for thickness.
+            var box = new Rect(0, 0, SketchUnitBox, SketchUnitBox);
+            var outline = type == AnnotationData.TypeEllipse
+                ? StrokeStyles.SketchPolygon(StrokeStyles.EllipsePoints(box), seed)
+                : StrokeStyles.SketchPolygon(StrokeStyles.RectCorners(box), seed);
+            var sketch = new PathGeometry();
+            sketch.Figures.Add(PolyFigure(outline, closed: true, filled: true));
+            sketch.Freeze();
+            shape = new Path { Data = sketch, Stretch = Stretch.Fill };
+        }
+        else
+        {
+            // Survey rects are square-cornered (annotationCreationCommit.js:180-181 emits
+            // rx:0/ry:0; renderRect writes no rx at all).
+            shape = type == AnnotationData.TypeEllipse ? new Ellipse() : new Rectangle();
+        }
+
+        shape.Stroke = new SolidColorBrush(stroke);
+        shape.StrokeThickness = thickness;
+        shape.Fill = fill.A == 0 ? Brushes.Transparent : new SolidColorBrush(fill);
+        shape.Width = Math.Max(1, bounds.Width);
+        shape.Height = Math.Max(1, bounds.Height);
+        if (lineStyle != LineBorderStyle.Cloud)
+            ApplyDash(shape, lineStyle);
+        else
+            shape.StrokeDashArray = null;
+        Canvas.SetLeft(shape, bounds.X);
+        Canvas.SetTop(shape, bounds.Y);
+        return shape;
+    }
+
+    public static Path CreateInk(IList<Point> points, Color color, double width, bool highlighter,
+        double penAspect = 1)
+    {
+        var path = new Path
+        {
+            // Survey has ONE ink geometry for both tools: a constant-width swept disk
+            // (paperAnnotationGeometry.js:1542). No pressure, no taper, either tool - until a
+            // non-uniform resize stretches the pen with the geometry (AnnotationData.PenAspect).
+            Data = PaperInk.Outline(points, width, aspect: penAspect),
+            Fill = new SolidColorBrush(color),
+            Stroke = Brushes.Transparent,
+            StrokeThickness = 0,
+        };
+        // Live canvas is alpha-fill; Flatten multiplies highlighter ink against the screenshot.
+        if (highlighter)
+            path.Opacity = 1;
+        return path;
+    }
+
+    /// <summary>
+    /// Survey's dash pattern is in ABSOLUTE user units — dashed [6,4], dotted [2,4] straight
+    /// onto SVG stroke-dasharray, unaffected by stroke width (annotationCreationCommit.js:92-107).
+    /// WPF multiplies StrokeDashArray by StrokeThickness, so divide it back out here.
+    /// Must run AFTER StrokeThickness is assigned, and again whenever it changes.
+    /// </summary>
+    /// <remarks>
+    /// Cap follows the shape: lines, arrow shafts and callout leaders carry Survey's
+    /// strokeLinecap:'round'; closed-shape borders (rect/ellipse/text-box chrome) use SVG's
+    /// default butt cap, so a dotted [2,4] border reads as square beads, not round ones.
+    /// </remarks>
+    public static void ApplyDash(Shape shape, LineBorderStyle style)
+    {
+        double[]? pattern = style switch
+        {
+            LineBorderStyle.Dashed => AnnotationStyle.DashedPattern,
+            LineBorderStyle.Dotted => AnnotationStyle.DottedPattern,
+            _ => null,
+        };
+        double t = shape.StrokeThickness > 0 ? shape.StrokeThickness : 1;
+        shape.StrokeDashArray = pattern is null
+            ? null
+            : new DoubleCollection(pattern.Select(v => v / t));
+        shape.StrokeDashCap = shape is Rectangle or Ellipse ? PenLineCap.Flat : PenLineCap.Round;
+    }
+
+    public static CalloutAnnotation CreateCallout(
+        CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null,
+        Color? fontColor = null)
+    {
+        var visual = new CalloutAnnotation();
+        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize, fontFamily, fontColor);
+        return visual;
+    }
 }
+

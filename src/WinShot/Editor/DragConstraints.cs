@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 
 namespace WinShot.Editor;
 
@@ -38,8 +38,9 @@ internal static class DragConstraints
     /// <summary>
     /// Quantises a line or arrow to the nearest 45°, keeping the drag's length along that
     /// bearing — so a Shift-drag gives a true horizontal, vertical or diagonal rather than
-    /// a nearly-straight one. Reuses the rotation tool's own 45° snap so "Shift means 45°"
-    /// is one rule in one place.
+    /// a nearly-straight one. The 45° here is its OWN constant, not the rotation grip's:
+    /// that one is Survey's 15° soft snap, and an axis lock that fired every 15° would stop
+    /// being an axis lock.
     /// </summary>
     public static Point QuantizeBearing(Point anchor, Point current)
     {
@@ -47,8 +48,9 @@ internal static class DragConstraints
         double length = v.Length;
         if (length < 0.001) return current;
 
-        double snapped = AnnotationRotation.QuantizeTo45(
-            AnnotationRotation.AngleFromPointer(anchor, current));
+        double snapped = Math.Round(
+            AnnotationRotation.AngleFromPointer(anchor, current) / ShapeConstraint.LineSnapDegrees)
+            * ShapeConstraint.LineSnapDegrees;
         // AngleFromPointer measures 0° as straight UP and clockwise positive; convert back.
         double radians = snapped * Math.PI / 180;
         return new Point(

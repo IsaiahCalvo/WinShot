@@ -36,12 +36,14 @@ internal sealed class AnnotationData
     public const string TypeStep = "step";
     public const string TypeSpotlight = "spotlight";
     public const string TypeImage = "image";
+    public const string TypeCallout = "callout";
 
     /// <summary>
     /// A re-editable redaction: a rectangle filled with the effected crop of the source
     /// underneath. Nothing is baked into the source bitmap — the mark can be moved,
     /// resized, restyled or deleted at any time, and <c>Flatten()</c> bakes it on export
-    /// like every other annotation.
+    /// like every other annotation. It replaces Survey's two separate Pixelate and Blur
+    /// tools: those are two of its four styles.
     /// </summary>
     public const string TypeRedact = "redact";
 
@@ -55,8 +57,7 @@ internal sealed class AnnotationData
     public string Type { get; set; } = "";
 
     /// <summary>Geometry points: arrow/line = [from, to]; curved arrow = [from, control, to];
-    /// freehand/highlighter = the polyline points; text/emoji/step = [topLeft], and a pill
-    /// label adds [tailTip] in its OWN coordinates; magnifier = [focus].</summary>
+    /// freehand/highlighter = the polyline points; text/emoji/step = [topLeft].</summary>
     public double[][]? Points { get; set; }
 
     /// <summary>[x, y, w, h] for rectangles, ellipses, the spotlight hole and image annotations.</summary>
@@ -70,49 +71,71 @@ internal sealed class AnnotationData
 
     public double? Thickness { get; set; }
 
+    /// <summary>
+    /// Freehand / highlighter only: the ink pen's height:width ratio, 1 = round.
+    /// Survey commits an ink resize as a SIGNED scaleX/scaleY on the path with
+    /// <c>vectorEffect:'none'</c> (svgAnnotationRenderers.jsx:300-318), so a non-uniform drag
+    /// makes the stroke genuinely elliptical — wider across than along. WinShot stores the
+    /// SCALED points, so without this the anisotropy lived only in the live drag's transform
+    /// and every rebuild (re-grab, undo/redo, restyle, reload) snapped the stroke back round.
+    /// Null in projects written before it existed, which read as 1.
+    /// </summary>
+    public double? PenAspect { get; set; }
+
     /// <summary><see cref="ShapeFillMode"/> name for rectangles/ellipses (None | Quarter | Solid).</summary>
     public string? Fill { get; set; }
 
-    /// <summary>
-    /// The shape's own fill colour, "#AARRGGBB". Absent means "derive it from the stroke",
-    /// which is how every shape drawn before the picker grew a Fill tab was saved.
-    /// </summary>
+    /// <summary>Independent fill color "#AARRGGBB". When set, overrides Fill-mode derivation from stroke.</summary>
     public string? FillColor { get; set; }
 
+    /// <summary>Survey line style: solid | dashed | dotted | cloud.</summary>
+    public string? LineStyle { get; set; }
+
+    /// <summary>Survey arrowhead at the end: none | solidTriangle | vShape | openCircle | openTriangle | horizontalLine.</summary>
+    public string? Head { get; set; }
+
+    /// <summary>Optional arrowhead at the start (legacy Double arrows).</summary>
+    public string? StartHead { get; set; }
+
+    /// <summary>Survey line/arrow midpoint (point on the curve). Absent = straight.</summary>
+    public double[]? Mid { get; set; }
+
+    /// <summary>
+    /// Survey's cloud `Bump` value (AppShell.jsx:2593-2624), 1..20. Only meaningful on a
+    /// rectangle with lineStyle 'cloud'; absent means the 2 default, so a legacy project
+    /// reloads exactly as it was saved.
+    /// </summary>
+    public double? CloudIntensity { get; set; }
+
     public string? Text { get; set; }
+
+    public string? FontFamily { get; set; }
+
+    /// <summary>Survey callout style.fontColor "#AARRGGBB" - independent of the border colour.</summary>
+    public string? FontColor { get; set; }
+    public bool? Bold { get; set; }
+    public bool? Italic { get; set; }
+    public bool? Underline { get; set; }
+    public bool? Strike { get; set; }
+    public string? Align { get; set; }
+
+    /// <summary>Survey text box vertical align: top | middle | bottom.</summary>
+    public string? VerticalAlign { get; set; }
 
     /// <summary><see cref="TextStyle"/> name for text annotations (Plain | Bold | Outline | Pill | Huge).</summary>
     public string? Style { get; set; }
 
     public double? FontSize { get; set; }
 
-    /// <summary>Step badge number.</summary>
+    /// <summary>Step badge number. DERIVED — recomputed from creation order after every edit.</summary>
     public int? Number { get; set; }
 
-    /// <summary>Redaction intensity, 1–100. Meaningless for the Black Out style.</summary>
-    public int? Strength { get; set; }
-
-    /// <summary>Magnification of a callout, 1.5-8.</summary>
-    public double? Zoom { get; set; }
-
     /// <summary>
-    /// Element opacity, 0-1, for an image annotation. Every other kind carries its
-    /// transparency in the alpha channel of its colour; an image has no colour to put it in.
+    /// Creation order for counters. Survey numbers a series by sorting on data.createdAt and
+    /// assigning seriesStart + index (counterNumbering.js:25-65), so deleting a pin renumbers
+    /// the rest. Z-order is not creation order here, hence a stamp of its own.
     /// </summary>
-    public double? Alpha { get; set; }
-
-    /// <summary><see cref="StrokeDash"/> name for shape outlines. Absent reads as Solid,
-    /// which is how every shape drawn before dashes existed was saved.</summary>
-    public string? Dash { get; set; }
-
-    /// <summary><see cref="StrokeRender"/> name. Absent reads as Clean.</summary>
-    public string? Sketch { get; set; }
-
-    /// <summary>
-    /// Mosaic jitter seed. Stored so a redaction redraws identically after a move, an undo
-    /// or a project reload instead of reshuffling its blocks every time it is recomputed.
-    /// </summary>
-    public int? Seed { get; set; }
+    public long? CreatedAt { get; set; }
 
     /// <summary>Index into the project's embedded images/{n}.png entries.</summary>
     [JsonPropertyName("image")]
@@ -132,21 +155,86 @@ internal sealed class AnnotationData
     /// </summary>
     public double Angle { get; set; }
 
+    /// <summary>
+    /// Counter (Step) only: which way the pin's pointer aims, degrees, 0 = east, clockwise.
+    /// Survey's counter rotates by turning this tip, not the badge — the number stays
+    /// upright. Null in older projects, which read as the 225° default.
+    /// </summary>
+    public double? PointerAngle { get; set; }
+
+    /// <summary>Redaction intensity, 1–100. Meaningless for the Black Out style.</summary>
+    public int? Strength { get; set; }
+
+    /// <summary>Magnification of a magnifier callout, 1.5-8.</summary>
+    public double? Zoom { get; set; }
+
+    /// <summary>
+    /// Element opacity, 0-1, for an image annotation. Every other kind carries its
+    /// transparency in the alpha channel of its colour; an image has no colour to put it in.
+    /// </summary>
+    public double? Alpha { get; set; }
+
+    /// <summary>
+    /// <see cref="StrokeRender"/> name — the hand-drawn line quality, which is ORTHOGONAL to
+    /// <see cref="LineStyle"/>: a sketchy outline can still be dashed. Absent reads as Clean.
+    /// </summary>
+    public string? Sketch { get; set; }
+
+    /// <summary>
+    /// Jitter seed. One field, two users: a redaction's mosaic and a sketchy outline's wobble
+    /// both have to redraw identically after a move, an undo or a project reload instead of
+    /// reshuffling every time they are recomputed.
+    /// </summary>
+    public int? Seed { get; set; }
+
+    /// <summary>
+    /// Schema v1's separate dash field, kept for READING only. Survey's <see cref="LineStyle"/>
+    /// is a superset of it (it adds cloud), so a project saved with a Dash is folded into
+    /// LineStyle on load by <see cref="MigrateLegacyDash"/> and never written again.
+    /// </summary>
+    public string? Dash { get; set; }
+
+    /// <summary>
+    /// Folds a schema-v1 Dash into Survey's LineStyle, once, on load. Idempotent: it clears
+    /// the old field, and it never overwrites a LineStyle that is already set.
+    /// </summary>
+    internal static void MigrateLegacyDash(AnnotationData a)
+    {
+        if (a.Dash is null) return;
+        a.LineStyle ??= string.Equals(a.Dash, nameof(StrokeDash.Dashed), StringComparison.Ordinal)
+            ? AnnotationStyle.ToStorageName(LineBorderStyle.Dashed)
+            : string.Equals(a.Dash, nameof(StrokeDash.Dotted), StringComparison.Ordinal)
+                ? AnnotationStyle.ToStorageName(LineBorderStyle.Dotted)
+                : null;
+        a.Dash = null;
+    }
+
     public AnnotationData Clone() => (AnnotationData)MemberwiseClone();
 
     // ------------------------------ factory helpers used at commit time
 
-    public static AnnotationData ForStroke(string type, IEnumerable<Point> points, Color color, double thickness) => new()
+    public static AnnotationData ForStroke(string type, IEnumerable<Point> points, Color color, double thickness) =>
+        ForStroke(type, points, color, thickness, LineBorderStyle.Solid, ArrowheadStyle.None, ArrowheadStyle.None);
+
+    public static AnnotationData ForStroke(
+        string type, IEnumerable<Point> points, Color color, double thickness,
+        LineBorderStyle lineStyle, ArrowheadStyle head, ArrowheadStyle startHead) => new()
     {
         Type = type,
         Points = ToArray(points),
         Color = ToHex(color),
         Thickness = thickness,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+        Head = head == ArrowheadStyle.None && type != TypeArrow ? null : AnnotationStyle.ToStorageName(head),
+        StartHead = startHead == ArrowheadStyle.None ? null : AnnotationStyle.ToStorageName(startHead),
     };
+
+    public static AnnotationData ForShape(string type, Rect bounds, Color color, double thickness, ShapeFillMode fill) =>
+        ForShape(type, bounds, color, thickness, fill, fillColor: null, lineStyle: LineBorderStyle.Solid);
 
     public static AnnotationData ForShape(
         string type, Rect bounds, Color color, double thickness, ShapeFillMode fill,
-        Color? fillColor = null) => new()
+        Color? fillColor, LineBorderStyle lineStyle, double? cloudIntensity = null) => new()
     {
         Type = type,
         Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
@@ -154,32 +242,82 @@ internal sealed class AnnotationData
         Thickness = thickness,
         Fill = fill.ToString(),
         FillColor = fillColor is Color fc ? ToHex(fc) : null,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+        CloudIntensity = lineStyle == LineBorderStyle.Cloud ? cloudIntensity : null,
     };
 
-    /// <summary>A zoomed callout over <paramref name="focus"/>, drawn inside <paramref name="bounds"/>.</summary>
-    public static AnnotationData ForMagnifier(
-        Rect bounds, Point focus, double scale, Color border, double thickness) => new()
+    public static AnnotationData ForCallout(
+        CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
+        ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null,
+        Color? fontColor = null) => new()
     {
-        Type = TypeMagnifier,
-        Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
-        Points = ToArray(new[] { focus }),
-        Zoom = MagnifierLayout.ClampScale(scale),
-        Color = ToHex(border),
+        Type = TypeCallout,
+        Points = new[]
+        {
+            new[] { layout.Tip.X, layout.Tip.Y },
+            new[] { layout.Knee.X, layout.Knee.Y },
+            new[] { layout.Box.X, layout.Box.Y },
+        },
+        Rect = new[] { layout.Box.X, layout.Box.Y, layout.Box.Width, layout.Box.Height },
+        Color = ToHex(stroke),
+        FillColor = ToHex(fill),
         Thickness = thickness,
+        Head = AnnotationStyle.ToStorageName(head),
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+        Text = text,
+        FontSize = fontSize,
+        FontFamily = fontFamily,
+        FontColor = fontColor is Color fcol ? ToHex(fcol) : null,
     };
+
+    /// <summary>
+    /// Drops the vestigial TextStyle marker from a loaded text row, keeping its effect:
+    /// "Bold" becomes the Bold flag. Idempotent.
+    /// </summary>
+    internal static void MigrateLegacyTextStyle(AnnotationData a)
+    {
+        if (string.Equals(a.Style, nameof(TextStyle.Bold), StringComparison.Ordinal))
+        {
+            a.Bold = true;
+            a.Style = nameof(TextStyle.Plain);
+        }
+        else if (string.Equals(a.Style, nameof(TextStyle.Huge), StringComparison.Ordinal))
+            a.Style = nameof(TextStyle.Plain);
+    }
+
+    public static AnnotationData ForText(Point topLeft, string text, TextStyle style, double fontSize, Color color) =>
+        ForText(topLeft, text, style, fontSize, color, AnnotationFactory.DefaultTextFontFamily,
+            bold: style == TextStyle.Bold, italic: false, underline: false, strike: false, align: "left");
 
     public static AnnotationData ForText(
         Point topLeft, string text, TextStyle style, double fontSize, Color color,
-        Point? tailTip = null) => new()
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, string align) =>
+        ForText(topLeft, text, style, fontSize, color, fontFamily, bold, italic, underline, strike, align,
+            verticalAlign: "top", box: null);
+
+    public static AnnotationData ForText(
+        Point topLeft, string text, TextStyle style, double fontSize, Color color,
+        string fontFamily, bool bold, bool italic, bool underline, bool strike, string align,
+        string verticalAlign, Rect? box,
+        Color fill = default, double strokeThickness = 0, LineBorderStyle lineStyle = LineBorderStyle.Solid) => new()
     {
         Type = TypeText,
-        Points = tailTip is Point tip
-            ? ToArray(new[] { topLeft, tip })
-            : ToArray(new[] { topLeft }),
+        Points = ToArray(new[] { topLeft }),
+        Rect = box is Rect r ? new[] { r.X, r.Y, r.Width, r.Height } : null,
         Text = text,
         Style = style.ToString(),
         FontSize = fontSize,
         Color = ToHex(color),
+        FontFamily = fontFamily,
+        Bold = bold,
+        Italic = italic,
+        Underline = underline,
+        Strike = strike,
+        Align = align,
+        VerticalAlign = verticalAlign == "top" ? null : verticalAlign,
+        FillColor = fill.A != 0 ? ToHex(fill) : null,
+        Thickness = strokeThickness > 0 ? strokeThickness : null,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
     };
 
     public static AnnotationData ForEmoji(Point topLeft, string emoji) => new()
@@ -189,13 +327,16 @@ internal sealed class AnnotationData
         Text = emoji,
     };
 
-    public static AnnotationData ForStep(Point topLeft, int number, Color color, double thickness) => new()
+    public static AnnotationData ForStep(
+        Point topLeft, int number, Color color, double thickness, long createdAt = 0) => new()
     {
         Type = TypeStep,
         Points = ToArray(new[] { topLeft }),
         Number = number,
+        CreatedAt = createdAt,
         Color = ToHex(color),
         Thickness = thickness,
+        PointerAngle = CounterGeometry.DefaultPointerAngle,
     };
 
     public static AnnotationData ForSpotlight(Size outer, Rect hole)
@@ -209,6 +350,12 @@ internal sealed class AnnotationData
         };
     }
 
+    public static AnnotationData ForImage(Rect bounds) => new()
+    {
+        Type = TypeImage,
+        Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
+    };
+
     public static AnnotationData ForRedaction(Rect bounds, RedactStyle style, int strength, int seed) => new()
     {
         Type = TypeRedact,
@@ -218,10 +365,16 @@ internal sealed class AnnotationData
         Seed = seed,
     };
 
-    public static AnnotationData ForImage(Rect bounds) => new()
+    /// <summary>A zoomed callout over <paramref name="focus"/>, drawn inside <paramref name="bounds"/>.</summary>
+    public static AnnotationData ForMagnifier(
+        Rect bounds, Point focus, double scale, Color border, double thickness) => new()
     {
-        Type = TypeImage,
+        Type = TypeMagnifier,
         Rect = new[] { bounds.X, bounds.Y, bounds.Width, bounds.Height },
+        Points = ToArray(new[] { focus }),
+        Zoom = MagnifierLayout.ClampScale(scale),
+        Color = ToHex(border),
+        Thickness = thickness,
     };
 
     private static double[][] ToArray(IEnumerable<Point> points) =>
@@ -351,13 +504,17 @@ internal static class ProjectSerializer
     /// Throws InvalidDataException on malformed or unknown entries.
     /// </summary>
     /// <param name="source">
-    /// The current source bitmap, needed only to repaint a redaction from the pixels it
-    /// covers. Null yields a flat black redaction, which is the safe failure: a redaction
-    /// that cannot find its pixels must never come back transparent.
+    /// The current source bitmap, needed only to repaint a redaction or a magnifier from the
+    /// pixels it covers. Null yields a flat black redaction, which is the safe failure: a
+    /// redaction that cannot find its pixels must never come back transparent.
     /// </param>
     public static UIElement CreateElement(
         AnnotationData a, IReadOnlyList<BitmapSource> images, SD.Bitmap? source = null)
     {
+        // Schema v1 wrote the dash as its own field; Survey's LineStyle is a superset of it.
+        AnnotationData.MigrateLegacyDash(a);
+        var render = StrokeStyles.ParseRender(a.Sketch);
+        int seed = a.Seed ?? 0;
         switch (a.Type)
         {
             case AnnotationData.TypeRedact:
@@ -366,8 +523,16 @@ internal static class ProjectSerializer
                 var redaction = new Shapes.Rectangle { Width = bounds.Width, Height = bounds.Height };
                 SetPos(redaction, bounds.TopLeft);
                 AnnotationFactory.PaintRedaction(redaction, source, bounds, Redaction.Parse(a.Style),
-                    a.Strength ?? Redaction.DefaultStrength, a.Seed ?? 0);
+                    a.Strength ?? Redaction.DefaultStrength, seed);
                 return redaction;
+            }
+            case AnnotationData.TypeMagnifier:
+            {
+                var bounds = RequireRect(a);
+                var pts = RequirePoints(a, 1);
+                return AnnotationFactory.CreateMagnifier(
+                    bounds, pts[0], a.Zoom ?? MagnifierLayout.DefaultScale,
+                    RequireColor(a), RequireThickness(a), source);
             }
             case AnnotationData.TypeArrow:
             case AnnotationData.TypeCurvedArrow:
@@ -376,69 +541,84 @@ internal static class ProjectSerializer
                 var pts = RequirePoints(a, curved ? 3 : 2);
                 double t = RequireThickness(a);
                 var brush = new SolidColorBrush(RequireColor(a));
-                bool fancy = !curved && AnnotationFactory.ParseArrowStyle(a.Style) == ArrowStyle.Fancy;
-                var arrow = new Shapes.Path
+                var (end, start) = AnnotationStyle.HeadsFrom(a);
+                bool thin = AnnotationFactory.ParseArrowStyle(a.Style) == ArrowStyle.Thin;
+                var path = new Shapes.Path
                 {
                     Stroke = brush,
                     Fill = brush,
-                    // Fancy is a closed filled silhouette; a stroke would round its tail.
-                    StrokeThickness = fancy ? 0 : t,
+                    StrokeThickness = t,
                     StrokeLineJoin = PenLineJoin.Round,
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(
-                            pts[0], pts[1], pts[2], t, StrokeStyles.ParseRender(a.Sketch), a.Seed ?? 0)
+                        ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t, render, seed)
                         : AnnotationFactory.ArrowGeometry(
-                            pts[0], pts[1], t, AnnotationFactory.ParseArrowStyle(a.Style),
-                            StrokeStyles.ParseRender(a.Sketch), a.Seed ?? 0),
+                            pts[0], pts[1], t, end, start, thin, LineCurve.ParseMid(a.Mid), render, seed),
                 };
-                AnnotationFactory.ApplyDash(arrow, StrokeStyles.ParseDash(a.Dash));
-                return arrow;
+                AnnotationFactory.ApplyDash(path, AnnotationStyle.LineStyleFrom(a));
+                return path;
             }
             case AnnotationData.TypeLine:
             {
                 var pts = RequirePoints(a, 2);
-                return new Shapes.Line
+                var mid = LineCurve.ParseMid(a.Mid);
+                var line = new Shapes.Path
                 {
-                    X1 = pts[0].X, Y1 = pts[0].Y, X2 = pts[1].X, Y2 = pts[1].Y,
                     Stroke = new SolidColorBrush(RequireColor(a)),
                     StrokeThickness = RequireThickness(a),
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    Data = AnnotationFactory.LineGeometry(pts[0], pts[1], mid, render, seed),
                 };
+                AnnotationFactory.ApplyDash(line, AnnotationStyle.LineStyleFrom(a));
+                return line;
             }
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:
             {
                 var bounds = RequireRect(a);
                 var color = RequireColor(a);
-                Shapes.Shape shape = AnnotationFactory.CreateShape(
-                    a.Type == AnnotationData.TypeEllipse,
-                    StrokeStyles.ParseRender(a.Sketch),
-                    a.Seed ?? 0);
-                shape.Stroke = new SolidColorBrush(color);
-                shape.StrokeThickness = RequireThickness(a);
-                shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color, ParseOptionalColor(a.FillColor));
-                AnnotationFactory.ApplyDash(shape, StrokeStyles.ParseDash(a.Dash));
-                shape.Width = bounds.Width;
-                shape.Height = bounds.Height;
-                SetPos(shape, bounds.TopLeft);
+                var fillColor = AnnotationStyle.FillColorFrom(a, color);
+                var lineStyle = AnnotationStyle.LineStyleFrom(a);
+                var shape = AnnotationFactory.CreateBoxShape(
+                    a.Type, bounds, color,
+                    fillColor.A == 0 ? Colors.Transparent : fillColor,
+                    RequireThickness(a), lineStyle,
+                    a.CloudIntensity ?? CloudPath.DefaultIntensity,
+                    render, seed);
+                if (fillColor.A == 0)
+                    shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
                 return shape;
+            }
+            case AnnotationData.TypeCallout:
+            {
+                var pts = RequirePoints(a, 3);
+                var box = RequireRect(a);
+                var layout = CalloutLayout.FromParts(pts[0], pts[1], box);
+                var stroke = RequireColor(a);
+                var fill = a.FillColor is string hex && AnnotationStyle.TryParseHex(hex, out var fc)
+                    ? fc
+                    : Color.FromArgb(0, 255, 255, 255);
+                var (head, _) = AnnotationStyle.HeadsFrom(a);
+                double fontSize = a.FontSize is double fs && fs > 0 ? fs : CalloutLayout.DefaultFontSize;
+                layout = layout.WithDescender(fontSize * CalloutLayout.DescenderRatio);
+                Color? fontColor = a.FontColor is string fch && AnnotationStyle.TryParseHex(fch, out var fcc)
+                    ? fcc
+                    : null;
+                return AnnotationFactory.CreateCallout(
+                    layout, a.Text ?? "", stroke, fill, RequireThickness(a),
+                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily, fontColor);
             }
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
             {
-                var pts = RequirePoints(a, 2);
-                return new Shapes.Polyline
-                {
-                    Stroke = new SolidColorBrush(RequireColor(a)),
-                    StrokeThickness = RequireThickness(a),
-                    StrokeLineJoin = PenLineJoin.Round,
-                    StrokeStartLineCap = PenLineCap.Round,
-                    StrokeEndLineCap = PenLineCap.Round,
-                    Points = new PointCollection(pts),
-                };
+                var pts = RequirePoints(a, 1);
+                return AnnotationFactory.CreateInk(
+                    pts, RequireColor(a), RequireThickness(a),
+                    highlighter: a.Type == AnnotationData.TypeHighlighter,
+                    penAspect: a.PenAspect ?? 1);
             }
             case AnnotationData.TypeText:
             {
@@ -447,14 +627,24 @@ internal static class ProjectSerializer
                     ?? throw new InvalidDataException("Text annotation is missing its text.");
                 if (a.FontSize is not double fontSize || fontSize <= 0)
                     throw new InvalidDataException("Text annotation is missing its font size.");
+                // Legacy rows carry the removed Plain/Bold/Outline/Pill/Huge enum. Survey has
+                // no such field, so fold a stored "Bold" into the real Bold flag once, here,
+                // and nothing downstream ever sees it (a stored "Huge" already carries its
+                // enlarged FontSize, so only the marker has to go).
+                AnnotationData.MigrateLegacyTextStyle(a);
                 Enum.TryParse(a.Style, out TextStyle style); // unknown style → Plain
+                Rect? box = a.Rect is { Length: >= 4 } r
+                    ? new Rect(r[0], r[1], r[2], r[3])
+                    : null;
+                var stroke = RequireColor(a);
+                var fill = AnnotationStyle.FillColorFrom(a, stroke);
                 var label = AnnotationFactory.CreateStyledTextLabel(
-                    text, new SolidColorBrush(RequireColor(a)), fontSize, style);
-                // A pill saved before tails existed has one point and gets the default tail
-                // on its first layout pass, which is where the label finally has a size.
-                if (style == TextStyle.Pill && a.Points is { Length: >= 2 } tp &&
-                    tp[1] is { Length: >= 2 } tail)
-                    AnnotationFactory.SetPillTail(label, new Point(tail[0], tail[1]));
+                    text, new SolidColorBrush(AnnotationStyle.TextGlyphColor(a, stroke)), fontSize, style,
+                    a.FontFamily ?? AnnotationFactory.DefaultTextFontFamily, a.Bold == true,
+                    a.Italic == true, a.Underline == true, a.Strike == true,
+                    AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
+                    box?.Width, box?.Height, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
+                    new SolidColorBrush(stroke));
                 SetPos(label, pts[0]);
                 return label;
             }
@@ -474,27 +664,10 @@ internal static class ProjectSerializer
                     ?? throw new InvalidDataException("Step annotation is missing its number.");
                 bool letters = string.Equals(a.Style, "Letter", StringComparison.Ordinal);
                 var badge = AnnotationFactory.CreateStepBadge(
-                    number, RequireColor(a), RequireThickness(a), letters);
+                    number, RequireColor(a), RequireThickness(a), letters,
+                    a.PointerAngle ?? CounterGeometry.DefaultPointerAngle);
                 SetPos(badge, pts[0]);
                 return badge;
-            }
-            case AnnotationData.TypeMagnifier:
-            {
-                var bounds = RequireRect(a);
-                // The fill is painted by the editor, which owns the source bitmap; from a
-                // project reload the bubble arrives empty and is filled by the refresh pass
-                // that runs after every load, exactly as a redaction is.
-                var bubble = new Shapes.Rectangle
-                {
-                    Width = bounds.Width,
-                    Height = bounds.Height,
-                    RadiusX = 6,
-                    RadiusY = 6,
-                    Stroke = new SolidColorBrush(RequireColor(a)),
-                    StrokeThickness = RequireThickness(a),
-                };
-                SetPos(bubble, bounds.TopLeft);
-                return bubble;
             }
             case AnnotationData.TypeSpotlight:
             {
@@ -518,6 +691,7 @@ internal static class ProjectSerializer
                     Stretch = Stretch.Fill,
                 };
                 RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+                // An image is the one mark with no colour to carry its transparency in.
                 if (a.Alpha is double alpha) img.Opacity = Math.Clamp(alpha, 0, 1);
                 SetPos(img, bounds.TopLeft);
                 return img;
@@ -606,14 +780,6 @@ internal static class ProjectSerializer
         return ColorConverter.ConvertFromString(hex) is Color c
             ? c
             : throw new InvalidDataException($"Annotation '{a.Type}' has an invalid color '{hex}'.");
-    }
-
-    /// <summary>A colour that is allowed to be absent; a malformed one is treated as absent.</summary>
-    internal static Color? ParseOptionalColor(string? hex)
-    {
-        if (string.IsNullOrWhiteSpace(hex)) return null;
-        try { return ColorConverter.ConvertFromString(hex) as Color?; }
-        catch { return null; }
     }
 
     private static double RequireThickness(AnnotationData a) =>

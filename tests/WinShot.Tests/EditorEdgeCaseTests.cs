@@ -32,10 +32,14 @@ public class EditorEdgeCaseTests
             var magnifier = AnnotationData.ForMagnifier(
                 new Rect(10, 12, 60, 60), new Point(33, 44), 3.5, Colors.Red, 2);
             var pill = AnnotationData.ForText(
-                new Point(1, 2), "hello", TextStyle.Pill, 14, Colors.White, new Point(-20, 60));
+                new Point(1, 2), "hello", TextStyle.Pill, 14, Colors.White);
+            // The tail is a second point on the same annotation. ForText no longer takes it
+            // as an argument (Survey's callout is its own type now), but the serializer must
+            // still round-trip a two-point text mark, which is what this file is here for.
+            pill.Points = new[] { new[] { 1d, 2d }, new[] { -20d, 60d } };
             var shape = AnnotationData.ForShape(
                 AnnotationData.TypeRectangle, new Rect(0, 0, 10, 10),
-                Colors.Lime, 3, ShapeFillMode.Solid, Colors.Magenta);
+                Colors.Lime, 3, ShapeFillMode.Solid, Colors.Magenta, LineBorderStyle.Solid);
             shape.Dash = StrokeDash.Dotted.ToString();
             shape.Sketch = StrokeRender.Sketchy.ToString();
             shape.Seed = 99;
@@ -68,7 +72,9 @@ public class EditorEdgeCaseTests
             Assert.Equal("Sketchy", s.Sketch);
             Assert.Equal(99, s.Seed);
             Assert.NotNull(s.FillColor);
-            Assert.Equal(Colors.Magenta, ProjectSerializer.ParseOptionalColor(s.FillColor));
+            // ProjectSerializer's colour parse helper is private now; the stored form is the
+            // #AARRGGBB hex the file actually carries, which is the thing being pinned.
+            Assert.Equal("#FFFF00FF", s.FillColor);
 
             var i = loadedDoc.Annotations[4];
             Assert.Equal(0.42, i.Alpha!.Value, 3);

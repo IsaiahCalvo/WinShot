@@ -29,6 +29,8 @@ public enum EditorTool
     Magnifier,
     CurvedArrow,
     Emoji,
+    Callout,
+    Eraser,
 }
 
 /// <summary>Fill applied to newly drawn rectangles and ellipses.</summary>

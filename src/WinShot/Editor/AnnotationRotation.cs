@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace WinShot.Editor;
@@ -11,11 +11,21 @@ namespace WinShot.Editor;
 /// </summary>
 internal static class AnnotationRotation
 {
-    /// <summary>Degrees within which a free drag snaps onto a 45° multiple. Survey's default.</summary>
+    /// <summary>Degrees within which a free drag latches onto a snap increment. Survey's default.</summary>
     public const double SnapThresholdDegrees = 3;
 
-    /// <summary>Distance (screen px) from the top edge to the rotation handle's centre.</summary>
-    public const double HandleOffsetScreenPx = 22;
+    /// <summary>
+    /// Snap increment. Survey snaps at 45°; Isaiah wants finer control, so 15° — every
+    /// 45° is still a snap point, there are just two more stops in between.
+    /// </summary>
+    public const double SnapIncrementDegrees = 15;
+
+    /// <summary>
+    /// Floor on the distance from the top edge to the rotation handle's centre. Survey:
+    /// <c>Math.max(36, rotationR + topHandleHalfHeight + minGap)</c>
+    /// (selectionHandleVisibility.js:70-71) — the 36 floor is what is in effect at rest.
+    /// </summary>
+    public const double HandleOffsetScreenPx = 36;
 
     /// <summary>Wraps any angle into (-180, 180].</summary>
     public static double Normalize(double degrees)
@@ -29,19 +39,33 @@ internal static class AnnotationRotation
     }
 
     /// <summary>
-    /// Soft snap: inside the threshold the angle latches onto the nearest 45° multiple,
+    /// Soft snap: inside the threshold the angle latches onto the nearest increment,
     /// outside it the angle passes through untouched. Clean angles without having to
     /// fight the drag for them.
     /// </summary>
-    public static double SnapToNearest45(double degrees, double threshold = SnapThresholdDegrees)
+    public static double SnapToNearest(double degrees, double threshold = SnapThresholdDegrees)
     {
         double a = Normalize(degrees);
-        double nearest = Math.Round(a / 45) * 45;
+        double nearest = Math.Round(a / SnapIncrementDegrees) * SnapIncrementDegrees;
         return Math.Abs(a - nearest) <= threshold ? Normalize(nearest) : a;
     }
 
-    /// <summary>Hard snap for Shift-drag: always the nearest 45° multiple.</summary>
-    public static double QuantizeTo45(double degrees) => Normalize(Math.Round(Normalize(degrees) / 45) * 45);
+    /// <summary>
+    /// Hard snap: always the nearest increment. Survey only ever snaps SOFTLY, so this is
+    /// reserved for the counter's bbox-edit rotation grip, whose Survey twin snaps in the
+    /// <c>mtr</c> branch before the counter special-case (useSVGInteraction.js:2357-2380).
+    /// </summary>
+    public static double Quantize(double degrees) =>
+        Normalize(Math.Round(Normalize(degrees) / SnapIncrementDegrees) * SnapIncrementDegrees);
+
+    /// <summary>
+    /// Survey's counter convention: the pin's pointer angle is the plain bearing from the
+    /// badge centre to the cursor, 0° = east, clockwise positive (Math.atan2 in degrees).
+    /// Survey's tip handle applies NO snapping and reads no modifier
+    /// (SVGAnnotationLayer.jsx:5183) — the nub follows the cursor continuously.
+    /// </summary>
+    public static double PointerAngleFromCursor(Point centre, Point cursor) =>
+        Normalize(Math.Atan2(cursor.Y - centre.Y, cursor.X - centre.X) * 180 / Math.PI);
 
     /// <summary>
     /// The angle a rotation-handle drag implies: the bearing from the pivot to the pointer,
@@ -69,15 +93,17 @@ internal static class AnnotationRotation
     }
 
     /// <summary>
-    /// Full drag resolution: bearing, then Shift = hard 45° steps, otherwise the soft snap.
-    /// <paramref name="startAngle"/> is the annotation's angle when the drag began and
-    /// <paramref name="grabOffset"/> the bearing difference at grab time, so the mark does
-    /// not jump when the handle is picked up slightly off-centre.
+    /// Full drag resolution. Survey rotates to the ABSOLUTE bearing from the shape centre to
+    /// the pointer with no grab offset (useSVGInteraction.js:2350-2352), so the mark's top
+    /// faces the cursor from the first pointermove. Survey applies
+    /// <c>snapAngleToNearest45(newAngle, 3)</c> ONLY while Shift is held (:2357-2360) and
+    /// leaves an unmodified drag completely free — so a deliberate 14° tilt stays reachable.
+    /// WinShot keeps its 15° increment rather than Survey's 45°.
     /// </summary>
-    public static double ResolveDrag(double startAngle, double grabOffset, double pointerAngle, bool shift)
+    public static double ResolveDrag(double pointerAngle, bool shift)
     {
-        double raw = Normalize(startAngle + (pointerAngle - grabOffset));
-        return shift ? QuantizeTo45(raw) : SnapToNearest45(raw);
+        double raw = Normalize(pointerAngle);
+        return shift ? SnapToNearest(raw) : raw;
     }
 }
 

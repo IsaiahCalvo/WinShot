@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -43,14 +42,6 @@ public partial class EditorWindow : Window
         ApplySourceTransform(SD.RotateFlipType.RotateNoneFlipY);
     }
 
-    /// <summary>Keeps the crop bar's Image size button reading the real dimensions.</summary>
-    private void SyncImageSizeLabel()
-    {
-        if (ImageSizeLabel is null) return;
-        ImageSizeLabel.Text = string.Create(CultureInfo.InvariantCulture,
-            $"Image size: {_source.Width} × {_source.Height}");
-    }
-
     private void OnResizeImage(object sender, RoutedEventArgs e)
     {
         if (_sourceOperationActive) return;
@@ -82,33 +73,26 @@ public partial class EditorWindow : Window
 
         var annotations = AnnotationCanvas.Children.Cast<UIElement>().ToList();
         if (annotations.Count > 0 &&
-            !ThemedMessageDialog.Confirm(this, "Flatten annotations?",
-                "Your annotations will be baked into the image before this operation. " +
-                "They will no longer be editable as separate objects.",
-                "Flatten"))
+            MessageBox.Show(this,
+                "Your annotations will be flattened into the image before this operation. " +
+                "They will no longer be editable as separate objects. Continue?",
+                "WinShot", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
             return;
 
         Select(null);
         SD.Bitmap before = _source;
-        SD.Bitmap flat = before;
-        SD.Bitmap? after = null;
-        Exception? failed = null;
+        SD.Bitmap flat = annotations.Count > 0 ? Flatten() : before;
+        SD.Bitmap after;
         _sourceOperationActive = true;
         Cursor = Cursors.Wait;
         try
         {
-            // Inside the try: Flatten allocates a RenderTargetBitmap the full size of the
-            // canvas, which Add capture can grow without bound, so it throws on exactly the
-            // picture a rotate is most likely to be asked of. Outside, that throw left an
-            // async void handler and came back as the generic "WinShot error" toast instead
-            // of the "Could not change the image" dialog twenty lines below.
-            if (annotations.Count > 0) flat = Flatten();
             after = await Task.Run(() => transform(flat));
         }
         catch (Exception ex)
         {
             Log.Error("Source transform failed", ex);
-            failed = ex;
+            return;
         }
         finally
         {
@@ -116,15 +100,6 @@ public partial class EditorWindow : Window
             if (!_closed)
                 UpdateCursor();
             if (!ReferenceEquals(flat, before)) flat.Dispose(); // temp flatten only
-        }
-        if (failed is not null || after is null)
-        {
-            // Rotate, flip and Image size are on the crop bar now, so a silent failure is a
-            // button the user presses again on an unchanged picture. Reported after the
-            // finally, so the wait cursor is gone before the dialog takes over.
-            if (!_closed && failed is not null)
-                ThemedMessageDialog.Show(this, "Could not change the image", FriendlyError.For(failed));
-            return;
         }
         if (_closed)
         {
@@ -177,10 +152,9 @@ public partial class EditorWindow : Window
     {
         DragRect.Visibility = Visibility.Collapsed;
         CropDim.Visibility = Visibility.Collapsed;
-        CropGuides.Visibility = Visibility.Collapsed;
     }
 
-    private void ClearCropPreview()
+    private void ClearCropPreview(bool restoreTool = false)
     {
         _pendingCrop = null;
         _adjustingCrop = false;
@@ -189,6 +163,13 @@ public partial class EditorWindow : Window
         HideDragRect();
         HideHandles();
         CropPanel.Visibility = Visibility.Collapsed;
+        if (restoreTool && _tool == EditorTool.Crop)
+        {
+            _tool = _toolBeforeCrop == EditorTool.Crop ? EditorTool.Select : _toolBeforeCrop;
+            UpdateCursor();
+            UpdateContextPanels();
+            UpdateGroupButtonChrome();
+        }
     }
 
     // ------------------------------------------------------------- undo/redo
@@ -196,9 +177,34 @@ public partial class EditorWindow : Window
     private void Push(EditorAction action, bool apply = true)
     {
         if (apply) action.Redo();
-        _undoStack.Push(action);
+        PushUndo(action);
         DiscardRedoStack();
+        // Survey re-derives counter numbers after EVERY mutation, not just creation
+        // (PDFViewer.jsx:24220/24240, annotationEraseCommitPlan.js:173).
+        RenumberCounters();
         UpdateUndoRedoButtons();
+    }
+
+    /// <summary>
+    /// Appends to the undo history, dropping the oldest entries past Survey's 100-deep cap
+    /// (PDFViewer.jsx:23652). Discard() lets a trimmed blur/pixelate step release its backup
+    /// bitmap, which would otherwise be held for the life of the window.
+    /// </summary>
+    private void PushUndo(EditorAction action)
+    {
+        _undoStack.Add(action);
+        while (_undoStack.Count > UndoDepthLimit)
+        {
+            _undoStack[0].Discard();
+            _undoStack.RemoveAt(0);
+        }
+    }
+
+    private EditorAction PopUndo()
+    {
+        var action = _undoStack[^1];
+        _undoStack.RemoveAt(_undoStack.Count - 1);
+        return action;
     }
 
     /// <summary>Clears the redo stack, letting each dropped action release any
@@ -209,7 +215,12 @@ public partial class EditorWindow : Window
             _redoStack.Pop().Discard();
     }
 
-    private void PushAddElement(UIElement element)
+    /// <summary>
+    /// Records a newly drawn annotation. <paramref name="select"/> is false for freehand
+    /// ink: Survey deliberately leaves pen and highlighter strokes unselected so continuous
+    /// drawing is not interrupted (PageAnnotationLayer.jsx:5246-5247).
+    /// </summary>
+    private void PushAddElement(UIElement element, bool select = true)
     {
         Push(new EditorAction(
             undo: () => AnnotationCanvas.Children.Remove(element),
@@ -218,6 +229,7 @@ public partial class EditorWindow : Window
                 if (!AnnotationCanvas.Children.Contains(element))
                     AnnotationCanvas.Children.Add(element);
             }), apply: false);
+        if (select) Select(element);
     }
 
     private async void OnUndo(object sender, RoutedEventArgs e) => await UndoAsync();
@@ -231,8 +243,9 @@ public partial class EditorWindow : Window
         ClearCropPreview();
         Select(null); // the undone action may remove or reshape the selected element
         if (_undoStack.Count == 0) return;
-        var action = _undoStack.Pop();
+        var action = PopUndo();
         await action.UndoAsync();
+        RenumberCounters();
         _redoStack.Push(action);
         UpdateUndoRedoButtons();
     }
@@ -245,7 +258,8 @@ public partial class EditorWindow : Window
         Select(null);
         var action = _redoStack.Pop();
         await action.RedoAsync();
-        _undoStack.Push(action);
+        RenumberCounters();
+        PushUndo(action);
         UpdateUndoRedoButtons();
     }
 
@@ -253,24 +267,25 @@ public partial class EditorWindow : Window
     {
         BtnUndo.IsEnabled = _undoStack.Count > 0;
         BtnRedo.IsEnabled = _redoStack.Count > 0;
-        // An image arriving or leaving is always an action, so this is the one place that
-        // sees every moment the before/after GIF becomes possible or impossible.
-        SyncExportGifButton();
+        // Every undoable mutation funnels through here (Push / UndoAsync / RedoAsync), so
+        // this is where a highlighter's backdrop can have changed underneath it.
+        RefreshHighlighters();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
+        // Survey listens for the counter drag's Shift / Escape on the WINDOW in the capture
+        // phase, ahead of every in-page handler, and only while a drag is live
+        // (PDFViewer.jsx:26202-26257). Escape cancels the placement outright; Shift freezes
+        // the nub tip so the badge orbits it.
+        if (_counterDrag is not null)
+        {
+            if (e.Key == Key.Escape) { CancelCounterDrag(); e.Handled = true; return; }
+            if (e.Key is Key.LeftShift or Key.RightShift) { FreezeCounterTip(); e.Handled = true; return; }
+        }
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
-
-        // An open popover owns Escape: it is the only way out of a menu for a keyboard
-        // user, and it must not also deselect or abort whatever is on the canvas behind it.
-        if (e.Key == Key.Escape && CloseOpenPopover())
-        {
-            e.Handled = true;
-            return;
-        }
 
         if (e.Key == Key.Space)
         {
@@ -280,26 +295,6 @@ public partial class EditorWindow : Window
                 UpdateCursor();
             }
             e.Handled = true; // keep Space from clicking a focused toolbar button
-            return;
-        }
-        // Z arms the zoom gesture for as long as it is held: click a point or drag a
-        // rectangle. It is a held modifier rather than a tool, so it never takes the tool
-        // you were using away from you.
-        if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.None)
-        {
-            if (!_zoomKeyDown)
-            {
-                _zoomKeyDown = true;
-                UpdateCursor();
-            }
-            e.Handled = true;
-            return;
-        }
-        // Q and W: 100 % on the two ends of whatever is selected.
-        if (Keyboard.Modifiers == ModifierKeys.None && e.Key is Key.Q or Key.W)
-        {
-            ZoomToCorner(bottomRight: e.Key == Key.W);
-            e.Handled = true;
             return;
         }
         // Z-order on the selected annotation: Ctrl+] / Ctrl+[ move it one step forward/back;
@@ -322,17 +317,15 @@ public partial class EditorWindow : Window
             {
                 case EditorShortcutCommand.Undo: _ = UndoAsync(); break;
                 case EditorShortcutCommand.Redo: _ = RedoAsync(); break;
-                case EditorShortcutCommand.FitAndCenter: FitToView(); break;
-                case EditorShortcutCommand.ActualSize: ZoomToPercent(1.0); break;
-                case EditorShortcutCommand.ZoomIn: StepZoom(1.2); break;
-                case EditorShortcutCommand.ZoomOut: StepZoom(1 / 1.2); break;
-                // Marks first: Ctrl+C with something selected copies the MARKS, and only
-                // falls through to the picture when nothing is selected.
-                case EditorShortcutCommand.Copy:
-                    if (!CopySelectedAnnotations()) OnCopy(this, new RoutedEventArgs());
-                    break;
+                case EditorShortcutCommand.FitAndCenter: FitToView(); PersistZoomPreference(); break;
+                case EditorShortcutCommand.FitWidth: FitToWidth(); PersistZoomPreference(); break;
+                case EditorShortcutCommand.FitHeight: FitToHeight(); PersistZoomPreference(); break;
+                case EditorShortcutCommand.ZoomIn: ZoomAt(ViewportCentre(), _zoom * ZoomStepFactor); break;
+                case EditorShortcutCommand.ZoomOut: ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor); break;
+                case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
                 case EditorShortcutCommand.Paste: PasteAnnotations(); break;
                 case EditorShortcutCommand.Duplicate: DuplicateSelectedAnnotations(); break;
+                case EditorShortcutCommand.ActualSize: ZoomAt(ViewportCentre(), 1); PersistZoomPreference(); break;
                 case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
             }
             e.Handled = true;
@@ -342,16 +335,18 @@ public partial class EditorWindow : Window
         // Preserve the existing rule that modified letters never activate drawing tools.
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) return;
 
+        // A selected counter takes typed digits as its new number; anything else ends the run
+        // and commits it as one undo entry.
+        if (TryRetypeStepNumber(e.Key)) { e.Handled = true; return; }
+        CommitStepRetype();
+
         // Arrow keys nudge the selection by 1px (10px with Shift). Allowed with a bare
         // Shift modifier only; any other modifier falls through.
         bool onlyShiftOrNone = (Keyboard.Modifiers & ~ModifierKeys.Shift) == ModifierKeys.None;
         if (onlyShiftOrNone && _selected is not null &&
             e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
-            // Same 1 px / 10 px idiom the capture selector uses, from the same helper, so
-            // Shift means one thing across the app.
-            double step = WinShot.Capture.SelectionNudge.StepFor(
-                (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
+            double step = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? 10 : 1;
             (double dx, double dy) = e.Key switch
             {
                 Key.Left => (-step, 0.0),
@@ -364,52 +359,35 @@ public partial class EditorWindow : Window
             return;
         }
 
-        // Typing over a selected counter re-numbers it, before the letter keys get a look
-        // in — a digit is never a tool shortcut, so nothing is shadowed.
-        if (Keyboard.Modifiers == ModifierKeys.None && TryRetypeStepNumber(e.Key))
-        {
-            e.Handled = true;
-            return;
-        }
-        CommitStepRetype(); // any other key ends the run
-
         // Single-letter tool shortcuts (no modifiers). Ignored while a curved arrow is
         // mid-edit so Escape/commit stays the only way out of that transient mode.
-        if (Keyboard.Modifiers == ModifierKeys.None && _pendingCurve is null && TrySelectToolByKey(e.Key))
+        // Survey's only modified tool letter is Shift+E (eraser, forced to partial); every
+        // other letter still requires no modifiers (PDFViewer.jsx:23348-23373).
+        if (onlyShiftOrNone && _pendingCurve is null &&
+            TrySelectToolByKey(e.Key, (Keyboard.Modifiers & ModifierKeys.Shift) != 0))
         {
             e.Handled = true;
             return;
         }
 
-        if (e.Key == Key.Delete)
+        // Survey treats Backspace as an exact synonym for Delete (SVGAnnotationLayer.jsx:839).
+        if (e.Key is Key.Delete or Key.Back)
         {
-            if (_selected is not null || _multiSelected.Count > 1) { DeleteSelected(); e.Handled = true; }
+            if (_selected is not null) { DeleteSelected(); e.Handled = true; }
         }
         else if (e.Key == Key.Escape)
         {
-            if (_zoomKeyDown || _zoomDragging)
+            // Esc leaves Survey's bbox edit mode first, before any other Escape meaning.
+            if (_bboxEditTarget is not null && !_movingSelection && _activeHandle < 0)
             {
-                AbortZoomGesture();
-                _zoomKeyDown = false;
-                _zoomArmedByMenu = false;
-                UpdateCursor();
-                e.Handled = true;
-            }
-            else if (_marqueeActive)
-            {
-                AbortMarquee();
-                Viewport.ReleaseMouseCapture();
+                LeaveBboxEditMode(null);
+                UpdateSelectionVisual();
                 e.Handled = true;
             }
             else if (_movingSelection)
             {
                 AbortMove();
                 Viewport.ReleaseMouseCapture();
-                e.Handled = true;
-            }
-            else if (_multiSelected.Count > 1)
-            {
-                ClearMultiSelection();
                 e.Handled = true;
             }
             else if (_draggingCurveHandle)
@@ -440,22 +418,15 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
         base.OnPreviewKeyUp(e);
-        if (Keyboard.FocusedElement is TextBox) return;
-
-        if (e.Key == Key.Z && _zoomKeyDown)
+        if (_counterDrag is not null && e.Key is Key.LeftShift or Key.RightShift)
         {
-            _zoomKeyDown = false;
-            // Both flags together, or a menu-armed gesture that is pressed and released
-            // without a drag leaves the arming set and disarms the NEXT Z drag mid-gesture.
-            _zoomArmedByMenu = false;
-            // Letting Z go mid-drag abandons the gesture rather than zooming to a
-            // rectangle the user was no longer choosing.
-            AbortZoomGesture();
-            UpdateCursor();
+            // Releasing Shift hands the body back to the cursor with the offset it had at
+            // release, so slide resumes with no jump.
+            ReleaseCounterTip();
             e.Handled = true;
             return;
         }
-        if (e.Key != Key.Space) return;
+        if (e.Key != Key.Space || Keyboard.FocusedElement is TextBox) return;
         if (_spaceDown)
         {
             _spaceDown = false;
@@ -492,12 +463,7 @@ public partial class EditorWindow : Window
         }
         catch (Exception ex)
         {
-            // Flatten can run out of memory on a tall scrolling capture, and B is a keyboard
-            // shortcut: without this the user pressed it and the app did nothing at all,
-            // which is the one action on the Image row with no failure feedback.
             Log.Error("Editor background composer failed", ex);
-            if (!_closed)
-                ThemedMessageDialog.Show(this, "Could not open the background composer", FriendlyError.For(ex));
         }
     }
 
@@ -580,62 +546,6 @@ public partial class EditorWindow : Window
     // ------------------------------------------------------- copy/save/close
 
     /// <summary>
-    /// The composed image, handed over once as the editor closes. The quick-actions card
-    /// the session started from listens so it can update in place instead of being left
-    /// holding the unannotated capture. The handler owns the bitmap it is given.
-    /// </summary>
-    internal event Action<SD.Bitmap>? ImageCommitted;
-
-    /// <summary>
-    /// Raised from the close path rather than from the save dialog. "Done" is the editor's
-    /// primary exit and Copy never touches disk at all, so raising this only after a
-    /// successful "Save as…" left the card holding the pre-annotation pixels on every flow
-    /// people actually use — and every card verb (Copy, Save, drag-out, Pin, Extract text)
-    /// then served the stale bitmap.
-    /// </summary>
-    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
-    {
-        base.OnClosing(e);
-        if (e.Cancel || _closed || ImageCommitted is not { } committed)
-            return;
-        // Nothing was drawn, so nothing to hand back. Flatten() is a full-size WPF render
-        // and the card answers it by re-encoding the on-disk history file — opening the
-        // editor and pressing Done used to cost both, and a JPEG history entry a
-        // generation of quality, for a visit that changed nothing.
-        if (_undoStack.Count == 0)
-            return;
-        // The same guard every other Flatten() call site takes. Flatten reads _source for
-        // the render size, and a crop, resize or background op swaps _source on an async
-        // continuation — closing the editor while one is in flight would hand the card a
-        // canvas rendered at the pre-swap dimensions.
-        if (_sourceOperationActive)
-            return;
-
-        // Cleared first: a handler that reopens or re-closes must not be handed a second copy.
-        ImageCommitted = null;
-        try
-        {
-            committed(Flatten());
-        }
-        catch (Exception ex)
-        {
-            // The card fades back in holding the capture as it was before the editor opened,
-            // so without this the user draws, presses Done, and gets the original back with
-            // nothing on screen saying the annotations did not make it — and Copy, Save,
-            // drag-out and Pin then all serve the un-annotated bitmap.
-            Log.Error("Handing the composed image back to the quick-actions card failed", ex);
-            App.Toast(
-                // What actually failed is the hand-off, not the save: this runs on the close
-                // path whatever the user did in the editor, so after a successful "Save a
-                // copy…" the annotated file is on disk and only the card missed it. Same
-                // wording the card raises for its own half of this failure.
-                "Your annotations didn't reach the card",
-                FriendlyError.For(ex),
-                severity: ToastSeverity.Error);
-        }
-    }
-
-    /// <summary>
     /// Flattens at identity transform: RenderVisual snapshots CanvasHost in its
     /// own coordinate space at the source bitmap's pixel size, so the viewport's
     /// zoom/pan (applied on the EditorSurface ancestor) never affects the output,
@@ -645,11 +555,13 @@ public partial class EditorWindow : Window
     {
         CommitText();
         CommitPendingCurve();
-        // A live gesture may have deferred a redaction repaint; baking it now would put the
-        // pixels the mark USED to cover into the saved file.
+        // A redaction and a magnifier are painted from the pixels they cover, and a live
+        // gesture is allowed to SKIP repaints to stay responsive. This is the last moment
+        // before those pixels are read, so whatever was skipped is paid for here — a flatten
+        // that baked a stale redaction would ship the thing it was drawn to hide.
         FlushRedactionRefresh();
         CanvasHost.UpdateLayout();
-        return BitmapEffects.RenderVisual(CanvasHost, _source.Width, _source.Height);
+        return HighlighterBlend.Flatten(CanvasHost, BaseTiles, AnnotationCanvas, _source.Width, _source.Height);
     }
 
     // ------------------------------------------------- drag-out ("Drag & Drop")
@@ -759,83 +671,304 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         try
         {
-            // A pending crop rectangle means "copy this bit", not "copy the picture" — and
-            // it does NOT close the window, so the crop is still there to adjust afterwards.
-            SD.Bitmap flat = Flatten();
-            if (_pendingCrop is SD.Rectangle region && region.Width > 1 && region.Height > 1)
-            {
-                try
-                {
-                    SD.Bitmap cropped = CaptureService.Crop(flat, region);
-                    flat.Dispose();
-                    flat = cropped;
-                }
-                catch (ArgumentException)
-                {
-                    // Out-of-range crop: fall back to the whole image rather than nothing.
-                }
-            }
+            var flat = Flatten();
             await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
             if (!IsVisible) return;
             // BtnCopy is a round glyph button — flash a checkmark, then restore the copy glyph.
-            ButtonFlash.Show(BtnCopy, "", "");
+            BtnCopy.Content = "";
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
+            timer.Tick += (_, _) => { timer.Stop(); if (!_closed) BtnCopy.Content = ""; };
+            timer.Start();
         }
         catch (Exception ex)
         {
             Log.Error("Editor copy failed", ex);
-            // Without this the glyph simply never becomes a checkmark and the user pastes
-            // whatever was on the clipboard before. The line is FriendlyError's, not a
-            // hand-written one: the fixed clipboard sentence this used to carry blamed
-            // another app for a full disk, an out-of-memory flatten and a GDI+ encode too.
-            // A busy clipboard is exactly the failure slow enough for the user to close the
-            // editor first, and ThemedMessageDialog assigns Owner unconditionally — WPF
-            // throws on a closed one, out of an async void handler with nobody to catch it.
-            if (!_closed)
-                ThemedMessageDialog.Show(this, "Copy failed", FriendlyError.For(ex));
+            ThemedMessageDialog.Show(this, "Couldn't copy",
+                "WinShot could not copy the edited image. Try again or use Save as…");
         }
+    }
+
+    /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>
+    private void OnPin(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        try
+        {
+            // FastPinWindow takes ownership of the bitmap and disposes it on close.
+            var pin = new WinShot.Pin.FastPinWindow(Flatten(), _settings);
+            PerfLog.TrackFirstShown(pin, "editor pin window");
+            pin.Show();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor pin failed", ex);
+        }
+    }
+
+    private async void OnSave(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive) return;
+        try
+        {
+            System.IO.Directory.CreateDirectory(_settings.Current.SaveFolder);
+            SaveFileDialog dialog;
+            if (_projectPath is string proj)
+            {
+                // A session opened from (or saved as) a project defaults back to that file.
+                dialog = new SaveFileDialog
+                {
+                    FileName = System.IO.Path.GetFileName(proj),
+                    InitialDirectory = System.IO.Path.GetDirectoryName(proj) is { Length: > 0 } dir
+                        ? dir : _settings.Current.SaveFolder,
+                    Filter = SaveDialogFilter,
+                    FilterIndex = 4,
+                };
+            }
+            else
+            {
+                dialog = new SaveFileDialog
+                {
+                    FileName = FileNamer.Next(_settings, _settings.Current.ImageFormat),
+                    InitialDirectory = _settings.Current.SaveFolder,
+                    Filter = SaveDialogFilter,
+                    FilterIndex = _settings.Current.ImageFormat switch
+                    {
+                        "jpg" => 2,
+                        "webp" => 3,
+                        _ => 1,
+                    },
+                };
+            }
+            if (dialog.ShowDialog(this) != true) return;
+
+            if (string.Equals(System.IO.Path.GetExtension(dialog.FileName), ".winshot",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await SaveProjectAsync(dialog.FileName);
+                return;
+            }
+
+            var flat = Flatten();
+            await Task.Run(() =>
+            {
+                using (flat)
+                {
+                    ImageSaver.Save(flat, dialog.FileName);
+                    _history.Add(flat);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor save failed", ex);
+        }
+    }
+
+    // ------------------------------------------------------ project (.winshot)
+
+    /// <summary>
+    /// Writes the current session to a .winshot project: a ZIP with the source bitmap
+    /// (including any baked blur/pixelate/crop), annotations.json describing every
+    /// live annotation, and the embedded bitmaps of image annotations. FileMode.Create
+    /// inside the serializer means re-saving overwrites the previous file cleanly.
+    /// </summary>
+    private async Task SaveProjectAsync(string path)
+    {
+        ProjectSnapshot snapshot = CreateProjectSnapshot();
+        try
+        {
+            await Task.Run(() =>
+            {
+                using (snapshot.Source)
+                    ProjectSerializer.Save(path, snapshot.Source, snapshot.Document, snapshot.Images);
+            });
+        }
+        catch
+        {
+            snapshot.Source.Dispose();
+            throw;
+        }
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            _projectPath = path;
+            Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+        });
+    }
+
+    private ProjectSnapshot CreateProjectSnapshot()
+    {
+        CommitText();
+        CommitPendingCurve();
+
+        var doc = new ProjectDocument();
+        var images = new List<BitmapSource>();
+        int z = 0;
+        foreach (UIElement el in AnnotationCanvas.Children)
+        {
+            if (el is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+                continue; // transient editor visuals are not part of the project
+            var data = meta.Clone();
+            data.Z = z++;
+            Vector savedOffset = AnnotationTransform.OffsetOf(el);
+            data.Tx = savedOffset.X;
+            data.Ty = savedOffset.Y;
+            data.Angle = AnnotationTransform.AngleOf(el);
+            if (data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
+            {
+                double l = Canvas.GetLeft(fe); if (double.IsNaN(l)) l = 0;
+                double t0 = Canvas.GetTop(fe); if (double.IsNaN(t0)) t0 = 0;
+                data.Rect = new[] { l, t0, Math.Max(1, fe.Width), Math.Max(1, fe.Height) };
+            }
+            if (data.Type == AnnotationData.TypeImage && el is Image img && img.Source is BitmapSource bs)
+            {
+                data.ImageIndex = images.Count;
+                if (bs.CanFreeze && !bs.IsFrozen)
+                    bs.Freeze();
+                images.Add(bs);
+                data.Rect = new[] { Canvas.GetLeft(img), Canvas.GetTop(img), img.Width, img.Height };
+            }
+            doc.Annotations.Add(data);
+        }
+
+        return new ProjectSnapshot((SD.Bitmap)_source.Clone(), doc, images);
+    }
+
+    private sealed record ProjectSnapshot(
+        SD.Bitmap Source,
+        ProjectDocument Document,
+        IReadOnlyList<BitmapSource> Images);
+
+    /// <summary>
+    /// Reopens a .winshot project file and reconstructs the editing session: the
+    /// source bitmap plus every annotation as a live, editable canvas element.
+    /// Returns null (after Log.Error) when the file cannot be parsed.
+    /// </summary>
+    public static EditorWindow? OpenProject(string path, SettingsService settings, HistoryService history)
+    {
+        SD.Bitmap? source = null;
+        try
+        {
+            var (bitmap, doc, images) = ProjectSerializer.Load(path);
+            source = bitmap;
+
+            // Build (and validate) every element before constructing the window so a
+            // malformed entry can never leak a half-initialized editor.
+            var built = doc.Annotations
+                .OrderBy(a => a.Z)
+                // The source goes in so a saved redaction or magnifier comes back showing the
+                // pixels it covers, not the flat-black safe failure.
+                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images, bitmap)))
+                .ToList();
+
+            var win = new EditorWindow(bitmap, settings, history);
+            source = null; // the window owns the bitmap now (disposed on close)
+            foreach (var (data, element) in built)
+            {
+                if (element is FrameworkElement fe) fe.Tag = data;
+                // Persisted bold/italic/underline/strike/align have to reach the callout's
+                // TextBlock; nothing else on the load path applies them.
+                if (element is CalloutAnnotation loadedCallout) ApplyTextFormat(loadedCallout, data);
+                if (element is FrameworkElement target && (data.Tx != 0 || data.Ty != 0 || data.Angle != 0))
+                    AnnotationTransform.Apply(target, new Vector(data.Tx, data.Ty), data.Angle);
+                win.AnnotationCanvas.Children.Add(element);
+                if (data.Type == AnnotationData.TypeStep && data.Number is int n && n >= win._nextStep)
+                    win._nextStep = n + 1;
+            }
+            win._projectPath = path;
+            win.Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
+            return win;
+        }
+        catch (Exception ex)
+        {
+            source?.Dispose();
+            Log.Error($"Failed to open WinShot project: {path}", ex);
+            return null;
+        }
+    }
+
+    private void OnClose(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>Copy the flattened image, then close — screenshot-editor Done.</summary>
+    private async void OnDone(object sender, RoutedEventArgs e)
+    {
+        if (_sourceOperationActive)
+        {
+            ThemedMessageDialog.Show(this, "Still working",
+                "Wait for the image to finish loading, then click Done.");
+            return;
+        }
+        try
+        {
+            var flat = Flatten();
+            await CaptureService.CopyToClipboardAsync(flat, takeOwnership: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Editor done-copy failed", ex);
+            ThemedMessageDialog.Show(this, "Couldn't copy",
+                "WinShot could not copy the edited image. The editor will stay open so you can save or try again.");
+            return;
+        }
+        Close();
     }
 
     /// <summary>
-    /// The zoom menu. Every row carries its shortcut in the gesture column, which is how
-    /// the editor advertises the keys it now binds instead of hiding them.
+    /// The composed image, handed over once as the editor closes. The quick-actions card
+    /// the session started from listens so it can update in place instead of being left
+    /// holding the unannotated capture. The handler owns the bitmap it is given.
     /// </summary>
-    private void OnZoomMenuClick(object sender, RoutedEventArgs e)
+    internal event Action<SD.Bitmap>? ImageCommitted;
+
+    /// <summary>
+    /// Raised from the close path rather than from the save dialog. "Done" is the editor's
+    /// primary exit and Copy never touches disk at all, so raising this only after a
+    /// successful "Save as…" left the card holding the pre-annotation pixels on every flow
+    /// people actually use — and every card verb (Copy, Save, drag-out, Pin, Extract text)
+    /// then served the stale bitmap.
+    /// </summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        var menu = new ContextMenu
+        base.OnClosing(e);
+        if (e.Cancel || _closed || ImageCommitted is not { } committed)
+            return;
+        // Nothing was drawn, so nothing to hand back. Flatten() is a full-size WPF render
+        // and the card answers it by re-encoding the on-disk history file — opening the
+        // editor and pressing Done used to cost both, and a JPEG history entry a
+        // generation of quality, for a visit that changed nothing.
+        if (_undoStack.Count == 0)
+            return;
+        // The same guard every other Flatten() call site takes. Flatten reads _source for
+        // the render size, and a crop, resize or background op swaps _source on an async
+        // continuation — closing the editor while one is in flight would hand the card a
+        // canvas rendered at the pre-swap dimensions.
+        if (_sourceOperationActive)
+            return;
+
+        // Cleared first: a handler that reopens or re-closes must not be handed a second copy.
+        ImageCommitted = null;
+        try
         {
-            PlacementTarget = ZoomMenuButton,
-            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
-            // Without both styles this pops the Aero2 default — white chrome over the dark
-            // editor, on the control built to replace the dead zoom combo.
-            Style = (Style)FindResource("DarkContextMenu"),
-        };
-        var itemStyle = (Style)FindResource("DarkMenuItem");
-        void Row(string header, string gesture, Action run)
-        {
-            var item = new MenuItem { Header = header, InputGestureText = gesture, Style = itemStyle };
-            item.Click += (_, _) => run();
-            menu.Items.Add(item);
+            committed(Flatten());
         }
-
-        Row("Fit", "Ctrl+1", FitToView);
-        Row("Fit width", "", FitToWidth);
-        menu.Items.Add(new Separator());
-        Row("50%", "", () => ZoomToPercent(0.5));
-        Row("100%", "Ctrl+0", () => ZoomToPercent(1.0));
-        Row("150%", "", () => ZoomToPercent(1.5));
-        Row("200%", "", () => ZoomToPercent(2.0));
-        menu.Items.Add(new Separator());
-        Row("Zoom in", "Ctrl++", () => StepZoom(1.2));
-        Row("Zoom out", "Ctrl+-", () => StepZoom(1 / 1.2));
-        menu.Items.Add(new Separator());
-        Row("Zoom to top left", "Q", () => ZoomToCorner(bottomRight: false));
-        Row("Zoom to bottom right", "W", () => ZoomToCorner(bottomRight: true));
-        Row("Zoom to a region", "Z + drag", ArmZoomGesture);
-
-        menu.IsOpen = true;
+        catch (Exception ex)
+        {
+            // The card fades back in holding the capture as it was before the editor opened,
+            // so without this the user draws, presses Done, and gets the original back with
+            // nothing on screen saying the annotations did not make it — and Copy, Save,
+            // drag-out and Pin then all serve the un-annotated bitmap.
+            Log.Error("Handing the composed image back to the quick-actions card failed", ex);
+            App.Toast(
+                // What actually failed is the hand-off, not the save: this runs on the close
+                // path whatever the user did in the editor, so after a successful "Save a
+                // copy…" the annotated file is on disk and only the card missed it. Same
+                // wording the card raises for its own half of this failure.
+                "Your annotations didn't reach the card",
+                FriendlyError.For(ex),
+                severity: ToastSeverity.Error);
+        }
     }
 
-    // ------------------------------------------------- before/after GIF export
 
     /// <summary>
     /// Two frames: the picture WITHOUT the added images, then with them. Aligning an
@@ -929,7 +1062,8 @@ public partial class EditorWindow : Window
         }
     }
 
-    /// <summary>Set while a before/after GIF is being flattened and encoded.</summary>
+
+    /// <summary>A GIF export is a full re-render twice over; one at a time.</summary>
     private bool _gifExportRunning;
 
     /// <summary>The image annotations on the canvas, bottom to top.</summary>
@@ -943,243 +1077,4 @@ public partial class EditorWindow : Window
         return found;
     }
 
-    /// <summary>
-    /// Shows the GIF button once there is a second picture to flip to, and takes it away
-    /// again when the last one goes. A one-frame before/after animation is a PNG.
-    /// </summary>
-    private void SyncExportGifButton()
-    {
-        if (ExportGifBtn is null) return;
-        Visibility show = ImageAnnotations().Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (ExportGifBtn.Visibility == show) return;
-
-        // Appear only, on the same recipe as the row it sits in. The collapse reflows every
-        // control docked beside it, and there is no softening a layout jump you are also
-        // removing the space for — so the honest trade is to ease the arrival and cut the exit.
-        ExportGifBtn.Visibility = show;
-        if (show == Visibility.Visible)
-            ExportGifBtn.BeginStoryboard((Storyboard)FindResource("ContextSwapIn"));
-    }
-
-    /// <summary>Pin the flattened result to the screen as a floating always-on-top window.</summary>
-    private void OnPin(object sender, RoutedEventArgs e)
-    {
-        if (_sourceOperationActive) return;
-        try
-        {
-            // FastPinWindow takes ownership of the bitmap and disposes it on close.
-            var pin = new WinShot.Pin.FastPinWindow(Flatten(), _settings);
-            PerfLog.TrackFirstShown(pin, "editor pin window");
-            pin.Show();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Editor pin failed", ex);
-            ThemedMessageDialog.Show(this, "Pin failed", "WinShot could not pin this image to the screen.");
-        }
-    }
-
-    private async void OnSave(object sender, RoutedEventArgs e)
-    {
-        if (_sourceOperationActive) return;
-        try
-        {
-            System.IO.Directory.CreateDirectory(_settings.Current.SaveFolder);
-            SaveFileDialog dialog;
-            if (_projectPath is string proj)
-            {
-                // A session opened from (or saved as) a project defaults back to that file.
-                dialog = new SaveFileDialog
-                {
-                    FileName = System.IO.Path.GetFileName(proj),
-                    InitialDirectory = System.IO.Path.GetDirectoryName(proj) is { Length: > 0 } dir
-                        ? dir : _settings.Current.SaveFolder,
-                    Filter = SaveDialogFilter,
-                    FilterIndex = 4,
-                };
-            }
-            else
-            {
-                // A Save-as dialog is the user choosing the format, so "Automatic" only
-                // preselects PNG here — it decides for real where WinShot names the file
-                // itself, rather than flattening the whole canvas twice to guess a filter.
-                string format = ImageFormatChooser.IsAuto(_settings.Current.ImageFormat)
-                    ? "png" : _settings.Current.ImageFormat;
-                dialog = new SaveFileDialog
-                {
-                    FileName = FileNamer.Next(_settings, format),
-                    InitialDirectory = _settings.Current.SaveFolder,
-                    Filter = SaveDialogFilter,
-                    FilterIndex = format switch
-                    {
-                        "jpg" => 2,
-                        "webp" => 3,
-                        _ => 1,
-                    },
-                };
-            }
-            if (dialog.ShowDialog(this) != true) return;
-
-            if (string.Equals(System.IO.Path.GetExtension(dialog.FileName), ".winshot",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                await SaveProjectAsync(dialog.FileName);
-                return;
-            }
-
-            var flat = Flatten();
-            await Task.Run(() =>
-            {
-                using (flat)
-                {
-                    ImageSaver.Save(flat, dialog.FileName);
-                    _history.Add(flat);
-                }
-            });
-            // Two save actions on one toolbar behaved differently: the GIF export
-            // confirmed, Save as… said nothing at all.
-            App.Toast("Saved", System.IO.Path.GetFileName(dialog.FileName),
-                severity: ToastSeverity.Success);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Editor save failed", ex);
-            ThemedMessageDialog.Show(this, "Save failed", ex is UnauthorizedAccessException or System.IO.IOException
-                ? "WinShot could not write to that folder. Check the folder still exists and you have permission to write to it."
-                : "WinShot could not save this image.");
-        }
-    }
-
-    // ------------------------------------------------------ project (.winshot)
-
-    /// <summary>
-    /// Writes the current session to a .winshot project: a ZIP with the source bitmap
-    /// (including any baked blur/pixelate/crop), annotations.json describing every
-    /// live annotation, and the embedded bitmaps of image annotations. FileMode.Create
-    /// inside the serializer means re-saving overwrites the previous file cleanly.
-    /// </summary>
-    private async Task SaveProjectAsync(string path)
-    {
-        ProjectSnapshot snapshot = CreateProjectSnapshot();
-        try
-        {
-            await Task.Run(() =>
-            {
-                using (snapshot.Source)
-                    ProjectSerializer.Save(path, snapshot.Source, snapshot.Document, snapshot.Images);
-            });
-        }
-        catch
-        {
-            snapshot.Source.Dispose();
-            throw;
-        }
-
-        await Dispatcher.InvokeAsync(() =>
-        {
-            _projectPath = path;
-            Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
-        });
-    }
-
-    private ProjectSnapshot CreateProjectSnapshot()
-    {
-        CommitText();
-        CommitPendingCurve();
-
-        var doc = new ProjectDocument();
-        var images = new List<BitmapSource>();
-        int z = 0;
-        foreach (UIElement el in AnnotationCanvas.Children)
-        {
-            if (el is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
-                continue; // transient editor visuals are not part of the project
-            var data = meta.Clone();
-            data.Z = z++;
-            Vector offset = AnnotationTransform.OffsetOf(el);
-            data.Tx = offset.X;
-            data.Ty = offset.Y;
-            data.Angle = AnnotationTransform.AngleOf(el);
-            if (data.Type == AnnotationData.TypeImage && el is Image img && img.Source is BitmapSource bs)
-            {
-                data.ImageIndex = images.Count;
-                if (bs.CanFreeze && !bs.IsFrozen)
-                    bs.Freeze();
-                images.Add(bs);
-                data.Rect = new[] { Canvas.GetLeft(img), Canvas.GetTop(img), img.Width, img.Height };
-            }
-            doc.Annotations.Add(data);
-        }
-
-        return new ProjectSnapshot((SD.Bitmap)_source.Clone(), doc, images);
-    }
-
-    private sealed record ProjectSnapshot(
-        SD.Bitmap Source,
-        ProjectDocument Document,
-        IReadOnlyList<BitmapSource> Images);
-
-    /// <summary>
-    /// Reopens a .winshot project file and reconstructs the editing session: the
-    /// source bitmap plus every annotation as a live, editable canvas element.
-    /// Returns null (after Log.Error) when the file cannot be parsed.
-    /// </summary>
-    public static EditorWindow? OpenProject(string path, SettingsService settings, HistoryService history)
-    {
-        SD.Bitmap? source = null;
-        try
-        {
-            var (bitmap, doc, images) = ProjectSerializer.Load(path);
-            source = bitmap;
-
-            // Build (and validate) every element before constructing the window so a
-            // malformed entry can never leak a half-initialized editor.
-            var built = doc.Annotations
-                .OrderBy(a => a.Z)
-                .Select(a => (Data: a, Element: ProjectSerializer.CreateElement(a, images, source)))
-                .ToList();
-
-            var win = new EditorWindow(bitmap, settings, history);
-            source = null; // the window owns the bitmap now (disposed on close)
-            foreach (var (data, element) in built)
-            {
-                if (element is FrameworkElement fe) fe.Tag = data;
-                if (element is FrameworkElement target && (data.Tx != 0 || data.Ty != 0 || data.Angle != 0))
-                    AnnotationTransform.Apply(target, new Vector(data.Tx, data.Ty), data.Angle);
-                win.AnnotationCanvas.Children.Add(element);
-                if (data.Type == AnnotationData.TypeStep && data.Number is int n && n >= win._nextStep)
-                    win._nextStep = n + 1;
-            }
-            win._projectPath = path;
-            win.Title = $"WinShot Editor — {System.IO.Path.GetFileName(path)}";
-            // CreateElement painted each redaction at its ORIGINAL rect; the move offsets
-            // were applied above, so re-read the pixels each one actually covers now.
-            win.RefreshAllRedactions();
-
-            // A rotation pivot is the element's own centre, which is only known once the
-            // element has been measured. Re-seat the pivots after the first layout pass,
-            // otherwise every restored rotation would spin about (0,0).
-            if (built.Any(b => b.Data.Angle != 0))
-            {
-                win.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
-                {
-                    foreach (var (data, element) in built)
-                    {
-                        if (data.Angle != 0 && element is FrameworkElement fe)
-                            AnnotationTransform.SetAngle(fe, data.Angle);
-                    }
-                }));
-            }
-
-            return win;
-        }
-        catch (Exception ex)
-        {
-            source?.Dispose();
-            Log.Error($"Failed to open WinShot project: {path}", ex);
-            return null;
-        }
-    }
-
-    private void OnClose(object sender, RoutedEventArgs e) => Close();
 }

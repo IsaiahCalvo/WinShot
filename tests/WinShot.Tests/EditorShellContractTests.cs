@@ -15,17 +15,24 @@ public class EditorShellContractTests
     [Fact]
     public void EveryToolIsReachableFromThePointerPairOrOneCategory()
     {
-        Assert.Equal(new[] { "Select", "Pan" }, EditorShellContract.PointerToolOrder);
-        Assert.Equal(new[] { "Freehand", "Highlighter", "Eyedropper" },
+        // Survey's bar, with WinShot's fifth group: the two navigation tools first, then
+        // one button per group. Eyedropper is not on it — it lives inside the colour picker.
+        Assert.Equal(new[] { "Pan", "Select" }, EditorShellContract.PointerToolOrder);
+        Assert.Equal(new[]
+        {
+            "Pan", "Select", "Draw", "Shapes", "Text", "Effects", "Image",
+        }, EditorShellContract.PrimaryToolOrder);
+        Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" },
             EditorShellContract.ToolsIn(EditorToolCategory.Draw));
-        Assert.Equal(new[] { "Rectangle", "FilledRectangle", "Ellipse", "Line", "Arrow", "Step" },
+        Assert.Equal(new[] { "Rectangle", "Ellipse", "Line", "Arrow", "Step" },
             EditorShellContract.ToolsIn(EditorToolCategory.Shapes));
-        Assert.Equal(new[] { "Text" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
-        // One redaction tool, not two: pixelate and blur are styles on the mark it draws.
-        // The three region tools that act on the pixels underneath share a row.
+        Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
+        // One redaction tool, not Survey's two: pixelate and blur are STYLES on the mark it
+        // draws. The three marks that act on the pixels underneath share the Effects row.
         Assert.Equal(new[] { "Redact", "Spotlight", "Magnifier" },
             EditorShellContract.ToolsIn(EditorToolCategory.Redact));
         Assert.Equal(new[] { "Crop" }, EditorShellContract.ToolsIn(EditorToolCategory.Image));
+        Assert.Empty(EditorShellContract.MoreToolOrder);
 
         string[] buttons = EditorShellContract.PointerToolOrder
             .Concat(EditorShellContract.CategoryOrder.SelectMany(EditorShellContract.ToolsIn))
@@ -33,8 +40,8 @@ public class EditorShellContractTests
         Assert.Equal(buttons.Length, buttons.Distinct(StringComparer.Ordinal).Count());
 
         string[] reachable = buttons
-            .Where(name => name != "FilledRectangle")
-            .Append(nameof(EditorTool.CurvedArrow))
+            .Append(nameof(EditorTool.Eyedropper))     // inside the colour picker
+            .Append(nameof(EditorTool.CurvedArrow))    // the Curved row of the arrow menu
             .ToArray();
         Assert.DoesNotContain(nameof(EditorTool.Emoji), reachable);
         Assert.All(Enum.GetNames<EditorTool>().Where(name => name != nameof(EditorTool.Emoji)),
@@ -88,23 +95,45 @@ public class EditorShellContractTests
         // dash pattern and the hand-drawn quality. A filled one has no stroke to dash,
         // but it keeps Style because "sketchy" is a property of the whole mark.
         Assert.Equal(EditorContextControls.Color | EditorContextControls.Thickness |
-                     EditorContextControls.Fill | EditorContextControls.Style |
-                     EditorContextControls.Opacity,
+                     EditorContextControls.Fill | EditorContextControls.Opacity |
+                     EditorContextControls.LineStyle | EditorContextControls.FillStrokeTabs |
+                     EditorContextControls.CloudBump,
             EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: false));
-        Assert.Equal(EditorContextControls.Color | EditorContextControls.Fill |
-                     EditorContextControls.Style | EditorContextControls.Opacity,
-            EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
+            .HasFlag(EditorContextControls.FillStrokeTabs));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
+            .HasFlag(EditorContextControls.Thickness));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Callout, false)
+            .HasFlag(EditorContextControls.ArrowStyle));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Line, false)
+            .HasFlag(EditorContextControls.LineStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Arrow, false)
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.TextStyle));
-        // Redaction shows its style menu and a continuous strength, and nothing else:
+        Assert.False(EditorShellContract.ContextFor(EditorTool.Text, false)
+            .HasFlag(EditorContextControls.LineStyle));
+        // Redaction shows its style dropdown and a continuous strength, and nothing else:
         // colour and thickness mean nothing to a mark whose job is to hide pixels.
         Assert.Equal(EditorContextControls.RedactStyle | EditorContextControls.RedactStrength,
             EditorShellContract.ContextFor(EditorTool.Redact, false));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Magnifier, false)
+            .HasFlag(EditorContextControls.Magnification));
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Eraser, false)
+            .HasFlag(EditorContextControls.EraserMode));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Step, false)
             .HasFlag(EditorContextControls.StepMode));
-        // Rotate / flip / image size came out of the "More" popup and onto the crop bar.
+        Assert.Equal("Shapes", EditorShellContract.GroupFor(EditorTool.Step, false));
+        Assert.Equal("Effects", EditorShellContract.GroupFor(EditorTool.Redact, false));
+        Assert.Equal("Image", EditorShellContract.GroupFor(EditorTool.Crop, false));
+        Assert.Equal("", EditorShellContract.GroupFor(EditorTool.Select, false));
+        Assert.Equal(EditorTool.Text, EditorShellContract.ToolForAnnotation(AnnotationData.TypeText));
+        Assert.Equal(EditorTool.Callout, EditorShellContract.ToolForAnnotation(AnnotationData.TypeCallout));
+        Assert.Equal(EditorTool.Arrow, EditorShellContract.ToolForAnnotation(AnnotationData.TypeArrow));
+        Assert.Equal(EditorTool.Redact, EditorShellContract.ToolForAnnotation(AnnotationData.TypeRedact));
+        Assert.Equal(EditorTool.Magnifier, EditorShellContract.ToolForAnnotation(AnnotationData.TypeMagnifier));
+        Assert.Null(EditorShellContract.ToolForAnnotation(AnnotationData.TypeImage));
+        // Rotate / flip / image size came out of Survey's "More" popup and onto the crop bar.
         Assert.Equal(EditorContextControls.CropRatio | EditorContextControls.CropTools,
             EditorShellContract.ContextFor(EditorTool.Crop, false));
         // The curved arrow wears the arrow tool's controls, style menu included.
