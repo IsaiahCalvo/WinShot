@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Shapes;
@@ -197,6 +197,71 @@ public class EditorPolyToolTests
         });
         if (!ran) return;
         Assert.True(overhangs, "a cloud polygon's crowns must overhang the vertex ring");
+    }
+
+    /// <summary>
+    /// Ellipse gets the Cloud border style, through the real drag. Survey offers Cloud on every
+    /// region marker; WinShot could only build a rectangle one because five separate places
+    /// each spelled out "rectangle" when rebuilding a cloud's geometry, so the ellipse cloud was
+    /// silently downgraded to Solid at commit. Now it commits as a cloud, and the crowns are
+    /// really there: an ellipse cloud's geometry must differ from the plain ellipse's box and
+    /// from a RECTANGLE cloud built on the same slot.
+    /// </summary>
+    [Fact]
+    public void AnEllipseCommitsWithTheCloudBorderStyle()
+    {
+        string? lineStyle = null;
+        bool isPath = false, differsFromRectCloud = false, bumpVisible = false;
+        double? bump = null;
+        bool ran = false;
+
+        WithEditor((editor, arm, click, key, marks) =>
+        {
+            var t = typeof(EditorWindow);
+            t.GetField("_lineStyle", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(editor, LineBorderStyle.Cloud);
+            arm(EditorTool.Ellipse);
+
+            var canvas = (FrameworkElement)editor.FindName("AnnotationCanvas")!;
+            var viewport = (FrameworkElement)editor.FindName("Viewport")!;
+            EditorWindow.PointerArgs Pt(Point c) =>
+                new(c, canvas.TranslatePoint(c, viewport), MouseButton.Left, 1);
+            editor.PointerDown(Pt(new Point(200, 200)));
+            Pump();
+            editor.PointerMove(Pt(new Point(520, 380)));
+            Pump();
+            editor.PointerUp(Pt(new Point(520, 380)));
+            Pump();
+
+            var oval = ((System.Windows.Controls.Panel)canvas).Children.OfType<FrameworkElement>()
+                .LastOrDefault(c => (c.Tag as AnnotationData)?.Type == AnnotationData.TypeEllipse);
+            if (oval is null) return;
+            var meta = (AnnotationData)oval.Tag!;
+            lineStyle = meta.LineStyle;
+            bump = meta.CloudIntensity;
+            isPath = oval is Path;
+
+            // Same slot, walked as a rectangle instead: if the ellipse walk were not being
+            // used, these two would be identical geometry.
+            if (oval is Path cloud && cloud.Data is not null)
+            {
+                var asRect = CloudPath.ForBox(AnnotationData.TypeRectangle,
+                    new Rect(0, 0, oval.Width, oval.Height), meta.CloudIntensity ?? 2,
+                    cloud.StrokeThickness);
+                differsFromRectCloud = cloud.Data.ToString() != asRect.ToString();
+            }
+
+            // Survey shows the Bump field on a cloud-capable tool with the cloud style armed.
+            bumpVisible = editor.FindName("CloudBumpPanel") is FrameworkElement panel && panel.IsVisible;
+            ran = true;
+        });
+
+        if (!ran) return;
+        Assert.Equal("cloud", lineStyle);
+        Assert.True(isPath, "a cloud REPLACES the shape, so it commits as a Path, not an Ellipse");
+        Assert.NotNull(bump);
+        Assert.True(differsFromRectCloud, "the ellipse cloud is walking as a rectangle");
+        Assert.True(bumpVisible, "the Bump field must be reachable with an ellipse cloud armed");
     }
 
     // ------------------------------------------------------------------ harness

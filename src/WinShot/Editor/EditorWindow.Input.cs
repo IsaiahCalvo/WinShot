@@ -316,7 +316,8 @@ public partial class EditorWindow : Window
                 _activeShape.Width = Math.Max(1, r.Width);
                 _activeShape.Height = Math.Max(1, r.Height);
                 if (_activeShape is Path cloudPath && _lineStyle == LineBorderStyle.Cloud)
-                    cloudPath.Data = CloudPath.ForRectangle(new Rect(0, 0, cloudPath.Width, cloudPath.Height),
+                    cloudPath.Data = CloudPath.ForBox(CloudBoxType(_tool),
+                        new Rect(0, 0, cloudPath.Width, cloudPath.Height),
                         _cloudIntensity, cloudPath.StrokeThickness);
                 break;
             case EditorTool.Freehand or EditorTool.Highlighter when _activeShape is Polyline stroke:
@@ -505,9 +506,10 @@ public partial class EditorWindow : Window
                         : new Rect(bx, by, shape.Width, shape.Height);
                     var (strokeColor, fillColor) = AnnotationStyle.EnforceOneVisible(
                         StrokeColorOf(shape), CurrentFillBrush());
-                    var lineStyle = _tool == EditorTool.Ellipse && _lineStyle == LineBorderStyle.Cloud
-                        ? LineBorderStyle.Solid
-                        : _lineStyle;
+                    // Survey offers Cloud on every region marker, ellipse included; this used
+                    // to downgrade an ellipse cloud to Solid because CreateBoxShape could only
+                    // build a rectangle one.
+                    var lineStyle = _lineStyle;
                     var shapeData = AnnotationData.ForShape(
                         _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
                         bounds, strokeColor, shape.StrokeThickness, _fillMode, fillColor, lineStyle,
@@ -630,6 +632,11 @@ public partial class EditorWindow : Window
                 return;
         }
     }
+
+    /// <summary>The annotation type a box tool's cloud is built for. Anything that is not the
+    /// ellipse tool walks as a rectangle, which is also the right fallback.</summary>
+    private static string CloudBoxType(EditorTool tool) =>
+        tool == EditorTool.Ellipse ? AnnotationData.TypeEllipse : AnnotationData.TypeRectangle;
 
     private void DrawMouseDown(Point pos, PointerArgs e)
     {
@@ -779,39 +786,30 @@ public partial class EditorWindow : Window
                 ApplyLinePreviewStyle(_activeShape, strokeWidth);
                 break;
             case EditorTool.Rectangle:
+            case EditorTool.Ellipse:
                 if (_lineStyle == LineBorderStyle.Cloud)
                 {
+                    // A cloud is not a dash over the shape, it REPLACES it, so the preview is
+                    // a Path for both tools. One branch, because the only difference between a
+                    // rectangle cloud and an ellipse one is which walk CloudPath.ForBox picks.
                     _activeShape = new Path
                     {
                         Stroke = brush,
                         StrokeThickness = strokeWidth,
                         Fill = fillBrush,
-                        Data = CloudPath.ForRectangle(new Rect(0, 0, 1, 1), _cloudIntensity, strokeWidth),
+                        Data = CloudPath.ForBox(CloudBoxType(_tool), new Rect(0, 0, 1, 1),
+                            _cloudIntensity, strokeWidth),
                     };
                 }
                 else
                 {
                     // Survey commits rx:0/ry:0 and renders <rect> with no rx — square corners
                     // during the drag and after release (annotationCreationCommit.js:180-181).
-                    _activeShape = new Rectangle
-                    {
-                        Stroke = brush,
-                        StrokeThickness = strokeWidth,
-                        Fill = fillBrush,
-                    };
+                    _activeShape = _tool == EditorTool.Ellipse
+                        ? new Ellipse { Stroke = brush, StrokeThickness = strokeWidth, Fill = fillBrush }
+                        : new Rectangle { Stroke = brush, StrokeThickness = strokeWidth, Fill = fillBrush };
                     AnnotationFactory.ApplyDash(_activeShape, _lineStyle);
                 }
-                Canvas.SetLeft(_activeShape, pos.X);
-                Canvas.SetTop(_activeShape, pos.Y);
-                break;
-            case EditorTool.Ellipse:
-                _activeShape = new Ellipse
-                {
-                    Stroke = brush,
-                    StrokeThickness = strokeWidth,
-                    Fill = fillBrush,
-                };
-                AnnotationFactory.ApplyDash(_activeShape, _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle);
                 Canvas.SetLeft(_activeShape, pos.X);
                 Canvas.SetTop(_activeShape, pos.Y);
                 break;

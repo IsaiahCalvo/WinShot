@@ -271,7 +271,8 @@ internal static class EditorShellContract
         EditorTool.Ellipse =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Fill | EditorContextControls.Opacity |
-            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
+            EditorContextControls.CloudBump,
         EditorTool.Line =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Opacity | EditorContextControls.LineStyle,

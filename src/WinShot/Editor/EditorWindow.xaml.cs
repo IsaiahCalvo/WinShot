@@ -1290,11 +1290,12 @@ public partial class EditorWindow : Window
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
         ColorWellLabel.Visibility = Visibility.Collapsed;
-        // Survey offers Cloud on rect / ellipse / polygon / polyline (the region markers).
-        // Polygon and Polyline are live here now that CloudPath takes an arbitrary ring;
-        // Ellipse is still gated out because CreateBoxShape only builds a cloud for a
-        // rectangle, which is a separate wiring job (CloudPath.ForEllipse already exists).
-        bool cloudCapable = chrome is EditorTool.Rectangle or EditorTool.Polygon or EditorTool.Polyline;
+        // Survey offers Cloud on rect / ellipse / polygon / polyline — every shape a revision
+        // cloud can mark. All four are live: CloudPath.For takes an arbitrary ring for the two
+        // poly tools, and CloudPath.ForBox picks the rectangle or ellipse walk for the two
+        // sized ones.
+        bool cloudCapable = chrome is EditorTool.Rectangle or EditorTool.Ellipse
+            or EditorTool.Polygon or EditorTool.Polyline;
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(cloudCapable);
         // Survey gates the Bump field on a cloud-capable tool + the cloud border (AppShell.jsx:2590).
