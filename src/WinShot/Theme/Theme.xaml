@@ -659,27 +659,56 @@
     </Style>
 
     <!-- ====================================================================
-         POPOVER SURFACE — the card inside every editor Popup. One material, one
-         radius, one entrance. Give the Border its own ScaleTransform; PopoverIn
-         animates it, and a Style-set transform would be shared and frozen.
+         POPOVER CARD — the card inside EVERY floating layer: the seven editor
+         popovers, both dropdown templates and the context menu.
+
+         Before this there were five cards. Three corner radii (the fit menu 2,
+         the eraser menu 6, everything else 8), four drop shadows — two of them
+         written inline on the Border — and two border brushes, on menus that open
+         inches apart in the same toolbar. The fit menu had no Margin at all, so
+         the shadow it did ask for was clipped away by its own popup window and it
+         was the one card in the app that floated with nothing under it.
+
+         The Margin is not spacing: a Popup window is sized to its child, so the
+         shadow only has room to fall if the child reserves it. 36 covers
+         ChromePopoverShadow's 30 blur plus its 10 drop. Callers override the TOP
+         margin to set their own gap from the trigger, and Padding to suit their
+         content; nothing else here is theirs to change.
          ==================================================================== -->
-    <Style x:Key="PopoverSurface" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource ElevatedBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+    <Style x:Key="PopoverCard" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource ChromePopoverBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ChromeControlBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{StaticResource RadiusInput}"/>
         <Setter Property="Padding" Value="8"/>
-        <Setter Property="Margin" Value="0,4,12,12"/>
-        <Setter Property="Effect" Value="{StaticResource FloatingShadow}"/>
-        <!-- Anchored at the top edge, where the popup meets its button, so it grows
-             away from the control rather than out of its own middle. -->
+        <Setter Property="Margin" Value="0,6,36,36"/>
+        <Setter Property="Effect" Value="{StaticResource ChromePopoverShadow}"/>
+        <!-- Anchored at the top edge, where the popup meets its button, so a card
+             that animates grows away from the control, not out of its own middle. -->
         <Setter Property="RenderTransformOrigin" Value="0.5,0"/>
-        <Style.Triggers>
-            <Trigger Property="IsVisible" Value="True">
-                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PopoverIn}"/></Trigger.EnterActions>
-            </Trigger>
-        </Style.Triggers>
     </Style>
+
+    <!-- The rule between groups of menu rows. Windows' own Separator is a near-white
+         line with its own margins; dropped into a #323236 menu it was the brightest
+         thing on the card, brighter than the labels it was supposed to divide.
+         Keyed as MenuItem's separator as well as implicitly, because a Separator
+         inside a MenuItem's host takes SeparatorStyleKey and ignores the implicit one. -->
+    <Style x:Key="DarkSeparator" TargetType="Separator">
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Margin" Value="8,4"/>
+        <Setter Property="Background" Value="{StaticResource ChromeHairlineBrush}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Background="{TemplateBinding Background}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="Separator" BasedOn="{StaticResource DarkSeparator}"/>
+    <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator"
+           BasedOn="{StaticResource DarkSeparator}"/>
 
     <!-- The one-shot variant of SubToolButton, for the sub-row's plain actions. -->
     <Style x:Key="SubToolIconButton" TargetType="Button" BasedOn="{StaticResource ToolIconButton}">
@@ -1126,12 +1155,9 @@
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True" Focusable="False"
                                PopupAnimation="Fade">
-                            <Border Background="{StaticResource ElevatedBrush}"
-                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="{StaticResource RadiusInput}"
+                            <Border Style="{StaticResource PopoverCard}"
                                     MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
-                                    Margin="0,4,0,0" Padding="4"
-                                    Effect="{StaticResource FloatingShadow}">
+                                    Margin="0,4,36,36" Padding="4">
                                 <ScrollViewer MaxHeight="280">
                                     <ItemsPresenter/>
                                 </ScrollViewer>
@@ -1483,18 +1509,14 @@
          leaking light Windows chrome. Implicit-style ready; reference by key.
          ==================================================================== -->
     <Style x:Key="DarkContextMenu" TargetType="ContextMenu">
-        <Setter Property="Background" Value="{StaticResource ElevatedBrush}"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContextMenu">
-                    <Border Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{StaticResource RadiusInput}" Padding="4"
-                            Effect="{StaticResource FloatingShadow}">
+                    <!-- Same card as every popover. It used to carry its own material and
+                         a shadow with no margin to fall into, so the one menu the user
+                         right-clicks most sat flat against whatever was behind it. -->
+                    <Border Style="{StaticResource PopoverCard}" Margin="0,0,36,36" Padding="4">
                         <ItemsPresenter/>
                     </Border>
                 </ControlTemplate>
@@ -2118,6 +2140,56 @@
         </Setter>
     </Style>
 
+    <!-- StripToolButton's material on a row that carries WORDS as well as a glyph.
+         Same chip, same washes, same radius — only the fixed 40x32 box and the 20x20
+         Viewbox are gone, because a Viewbox sized for one glyph scales a whole
+         sentence down to fit it. -->
+    <Style x:Key="StripToolRow" TargetType="ToggleButton" BasedOn="{StaticResource StripToolButton}">
+        <Setter Property="Width" Value="Auto"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
+                            BorderBrush="Transparent" BorderThickness="1">
+                        <Grid>
+                            <Border x:Name="Chip" Opacity="0" Margin="-1" CornerRadius="6"
+                                    BorderThickness="1" BorderBrush="{StaticResource ToolChipRingBrush}"
+                                    Background="{StaticResource ToolChipBrush}"/>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource HoverFillBrush}"/>
+                            <Border x:Name="Press" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource PressedShadeBrush}"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Left" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bg" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- A text tab above the sub-row: 24 tall, 8px inline padding, 2px underline
          on the selected one. The underline is the accent — it marks WHICH pane
          you are in, which is a mode, not a pen. -->
@@ -2161,26 +2233,16 @@
     <!-- One row of the zoom/fit menu: 8x6 padding, 2px radius, quiet by default.
          Survey paints no hover here and the code sets the active row's Foreground
          as a local value, so the template must leave Foreground alone. -->
-    <Style x:Key="MenuRowButton" TargetType="Button">
-        <Setter Property="Height" Value="28"/>
-        <Setter Property="HorizontalAlignment" Value="Stretch"/>
-        <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="Transparent" CornerRadius="2" Padding="8,6">
-                        <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
+    <!-- ====================================================================
+         MENU ROW — one row of any popup menu in the app: the fit menu, the eraser
+         mode menu, anything that comes after them.
 
-    <!-- One row of a chrome popup menu: full width, 28 tall, 4px radius. -->
+         There were three of these. The fit menu's rows were 11px muted grey with a
+         2px radius and NO hover feedback of any kind; the eraser menu's were 12px
+         primary white with a 4px radius and a hover wash; this one, the only
+         complete one, was written and then never used. Two menus that open from
+         buttons an inch apart cannot be two different controls.
+         ==================================================================== -->
     <Style x:Key="ChromeMenuItem" TargetType="Button">
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="Height" Value="28"/>
@@ -2215,40 +2277,6 @@
                         <Trigger Property="IsPressed" Value="True">
                             <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- Eraser split-menu row: 10x6 padding, 4px radius, hover-only highlight. -->
-    <Style x:Key="EraserModeRow" TargetType="Button">
-        <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="HorizontalAlignment" Value="Stretch"/>
-        <Setter Property="Padding" Value="10,6"/>
-        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"/>
-                        <!-- Wave 0: the hover wash cross-fades like every other row in the
-                             app rather than snapping, so this menu does not read as a
-                             different control from the ones beside it. -->
-                        <Border x:Name="Hover" Opacity="0" CornerRadius="4"
-                                Background="{StaticResource HoverFillBrush}"/>
-                        <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
-                                          Margin="{TemplateBinding Padding}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
-                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -2585,11 +2613,8 @@
                         <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="6"
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True" Focusable="False">
-                            <Border x:Name="Pop" Background="{StaticResource ElevatedBrush}"
-                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="8" MinWidth="126" Padding="5" Margin="0,0,30,30"
-                                    Effect="{StaticResource ChromePopoverShadow}"
-                                    RenderTransformOrigin="0.5,0">
+                            <Border x:Name="Pop" Style="{StaticResource PopoverCard}"
+                                    MinWidth="126" Padding="5" Margin="0,0,36,36">
                                 <Border.RenderTransform>
                                     <TransformGroup>
                                         <ScaleTransform x:Name="PopScale" ScaleX="0.98" ScaleY="0.98"/>

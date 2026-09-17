@@ -287,9 +287,7 @@
                                                         </RadioButton>
                                                         <Popup x:Name="ColorPickerPopup" PlacementTarget="{Binding ElementName=ColorWellBtn}"
                                                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
-                                                                    BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,6,36,36"
-                                                                    Effect="{StaticResource ChromePopoverShadow}">
+                                                            <Border Style="{StaticResource PopoverCard}" Padding="12">
                                                                 <StackPanel Width="260">
                                                                     <StackPanel.Resources>
                                                                         <!-- Survey's segmented grid/spectrum toggle (CompactColorPicker.jsx:322-365):
@@ -354,14 +352,28 @@
                                                                                          Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
                                                                                          AutomationProperties.HelpText="Edit the stroke or border color and opacity."/>
                                                                     </StackPanel>
-                                                                    <!-- Survey keeps the eyedropper with the colour it samples for. -->
-                                                                    <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource StripToolButton}" GroupName="Tool"
+                                                                    <!-- Survey keeps the eyedropper with the colour it samples for.
+
+                                                                         StripToolButton is an ICON CHIP: its template wraps the content in a
+                                                                         fixed 20x20 Viewbox, which is right for a 20px glyph and catastrophic
+                                                                         for a glyph plus four words. Width="Auto" widened the BUTTON and left
+                                                                         the Viewbox at 20, so the whole row was scaled down to fit inside it
+                                                                         and "Pick from image" rendered about three pixels tall — a grey smudge
+                                                                         at the top of the colour picker. It is a labelled row, so it uses the
+                                                                         app's labelled row. -->
+                                                                    <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource StripToolRow}" GroupName="Tool"
                                                                                  Tag="Eyedropper" Checked="OnToolChecked" Click="OnPickerEyedropper" ToolTip="Eyedropper"
-                                                                                 Width="Auto" HorizontalAlignment="Left" Margin="0,0,0,8" Padding="6,0"
+                                                                                 HorizontalAlignment="Left" Margin="0,0,0,8"
                                                                                  AutomationProperties.Name="Eyedropper"
                                                                                  AutomationProperties.HelpText="Sample a source pixel and make it the current annotation color.">
                                                                         <StackPanel Orientation="Horizontal">
-                                                                            <ContentPresenter Content="{StaticResource SurveyIcon.Eyedropper}" VerticalAlignment="Center"/>
+                                                                            <!-- ContentControl, not ContentPresenter: every glyph in the family strokes
+                                                                                 itself from {RelativeSource AncestorType=Control} Foreground, and a bare
+                                                                                 ContentPresenter puts no Control in the content's parent chain. The
+                                                                                 binding then resolved to nothing, the stroke came out null, and this was
+                                                                                 the one icon in the app that drew nothing at all. The other eleven
+                                                                                 glyphs written out in markup all use ContentControl. -->
+                                                                            <ContentControl Content="{StaticResource SurveyIcon.Eyedropper}" VerticalAlignment="Center"/>
                                                                             <TextBlock Text="Pick from image" FontSize="{StaticResource TextBody}" Margin="8,0,4,0" VerticalAlignment="Center"/>
                                                                         </StackPanel>
                                                                     </RadioButton>
@@ -503,10 +515,7 @@
                                                                  below is shadow room, so match it here to centre on the 126px body. -->
                                                             <Path HorizontalAlignment="Center" Margin="0,0,36,0" Data="M0,5 L5,0 L10,5 Z"
                                                                   Fill="{StaticResource ChromeControlBrush}"/>
-                                                            <Border Width="126" Padding="5" CornerRadius="8" BorderThickness="1"
-                                                                    Background="{StaticResource ChromePopoverBrush}"
-                                                                    BorderBrush="{StaticResource ChromeControlBrush}"
-                                                                    Margin="0,0,36,36" Effect="{StaticResource ChromePopoverShadow}">
+                                                            <Border Style="{StaticResource PopoverCard}" Width="126" Padding="5" Margin="0,0,36,36">
                                                                 <StackPanel>
                                                                     <TextBlock x:Name="SizePresetsHeading" Text="WIDTH" Padding="7,7,9,8"
                                                                                FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextCaption}" FontWeight="Bold"
@@ -635,9 +644,7 @@
                                                         <Popup x:Name="FontColorPopup" PlacementTarget="{Binding ElementName=FontColorBtn}"
                                                                Placement="Bottom" VerticalOffset="10" StaysOpen="False"
                                                                AllowsTransparency="True" PopupAnimation="Fade" Focusable="False">
-                                                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
-                                                                    BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,36,36"
-                                                                    Effect="{StaticResource ChromePopoverShadow}">
+                                                            <Border Style="{StaticResource PopoverCard}" Margin="0,0,36,36">
                                                                 <!-- 8 columns x (22px cell + 3px margin per side) = 224 (CompactColorPicker.jsx:368). -->
                                                                 <UniformGrid x:Name="FontColorGrid" Columns="8" Width="224"/>
                                                             </Border>
@@ -688,9 +695,7 @@
                                                         </Button>
                                                         <Popup x:Name="AlignPopup" PlacementTarget="{Binding ElementName=AlignMenuBtn}"
                                                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
-                                                                    BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,6,36,36"
-                                                                    Effect="{StaticResource ChromePopoverShadow}">
+                                                            <Border Style="{StaticResource PopoverCard}">
                                                                 <!-- 3 x 26px cells + 2 x 4px gaps = 86 (AppShell.jsx:1962-1966). -->
                                                                 <UniformGrid x:Name="AlignGrid" Columns="3" Width="86" Height="86">
                                                                     <Button Style="{StaticResource AlignCellButton}" Tag="left|top" Click="OnAlignCellClick" ToolTip="top left">
@@ -926,9 +931,7 @@
                                 AutomationProperties.HelpText="Font, line style, and other format controls that do not fit on the row."/>
                         <Popup x:Name="FormatOverflowPopup" PlacementTarget="{Binding ElementName=FormatOverflowBtn}"
                                Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeControlBrush}"
-                                    BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,6,36,36"
-                                    Effect="{StaticResource ChromePopoverShadow}">
+                            <Border Style="{StaticResource PopoverCard}">
                                 <StackPanel x:Name="FormatOverflowPanel" Orientation="Horizontal"/>
                             </Border>
                         </Popup>
@@ -1184,21 +1187,16 @@
                             </Button>
                             <Popup x:Name="EraserModePopup" PlacementTarget="{Binding ElementName=EraserToolBtn}"
                                    Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True">
-                                <Border MinWidth="142" Padding="4" CornerRadius="6" BorderThickness="1"
-                                        Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeHairlineBrush}"
-                                        Margin="0,0,24,24">
-                                    <Border.Effect>
-                                        <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.6"/>
-                                    </Border.Effect>
+                                <Border Style="{StaticResource PopoverCard}" MinWidth="142" Padding="4" Margin="0,0,36,36">
                                     <StackPanel>
                                         <TextBlock Text="ERASER TYPE" Padding="8,4" Margin="0,0,0,4"
                                                    FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"
                                                    Foreground="{StaticResource ChromeTextMutedBrush}"/>
                                         <Border Height="1" Background="{StaticResource ChromeHairlineBrush}" Margin="0,0,0,4"/>
-                                        <Button x:Name="EraserPartialItem" Style="{StaticResource EraserModeRow}" Tag="Partial"
+                                        <Button x:Name="EraserPartialItem" Style="{StaticResource ChromeMenuItem}" Tag="Partial"
                                                 Content="Partial erase" Click="OnEraserModeRowClick"
                                                 AutomationProperties.Name="Partial erase"/>
-                                        <Button x:Name="EraserFullItem" Style="{StaticResource EraserModeRow}" Tag="Full"
+                                        <Button x:Name="EraserFullItem" Style="{StaticResource ChromeMenuItem}" Tag="Full"
                                                 Content="Full stroke erase" Click="OnEraserModeRowClick"
                                                 AutomationProperties.Name="Full stroke erase"/>
                                     </StackPanel>
@@ -1442,28 +1440,27 @@
                              the trigger's bottom and Left aligns tops. See PlaceFitMenu. -->
                         <Popup x:Name="FitMenuPopup" PlacementTarget="{Binding ElementName=FitMenuBtn}"
                                Placement="Custom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                            <!-- AppShell.jsx:2984-2999: rgb(30,30,30) on 1px #2a3140,
-                                 radius 2, 0 10px 24px rgba(0,0,0,0.45), padding 2. -->
-                            <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeHairlineBrush}"
-                                    BorderThickness="1" CornerRadius="2" Padding="2" Margin="0"
+                            <!-- AppShell.jsx:2984-2999 gives this menu a 2px radius and its own
+                                 shadow. Survey's other popovers are 2px too; WinShot's are 8,
+                                 and the app it has to look like is WinShot — a menu that opens
+                                 a hand's width from the colour picker cannot be the one card
+                                 with square corners. PopoverCard, like every other layer. -->
+                            <Border Style="{StaticResource PopoverCard}" Padding="4" Margin="0,0,36,36"
                                     MinWidth="140">
-                                <Border.Effect>
-                                    <DropShadowEffect BlurRadius="24" ShadowDepth="10" Direction="270" Opacity="0.45"/>
-                                </Border.Effect>
                                 <StackPanel>
-                                    <Button x:Name="FitPageItem" Style="{StaticResource MenuRowButton}" Click="OnFitPage" AutomationProperties.Name="Fit page">
+                                    <Button x:Name="FitPageItem" Style="{StaticResource ChromeMenuItem}" Click="OnFitPage" AutomationProperties.Name="Fit page">
                                         <StackPanel Orientation="Horizontal">
                                             <ContentControl Content="{StaticResource SurveyIcon.FitPage}" Width="16" Height="16"/>
                                             <TextBlock Text="Fit page" Margin="6,0,0,0" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
-                                    <Button x:Name="FitWidthItem" Style="{StaticResource MenuRowButton}" Click="OnFitWidth" AutomationProperties.Name="Fit width">
+                                    <Button x:Name="FitWidthItem" Style="{StaticResource ChromeMenuItem}" Click="OnFitWidth" AutomationProperties.Name="Fit width">
                                         <StackPanel Orientation="Horizontal">
                                             <ContentControl Content="{StaticResource SurveyIcon.FitWidth}" Width="16" Height="16"/>
                                             <TextBlock Text="Fit width" Margin="6,0,0,0" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
-                                    <Button x:Name="FitHeightItem" Style="{StaticResource MenuRowButton}" Click="OnFitHeight" AutomationProperties.Name="Fit height">
+                                    <Button x:Name="FitHeightItem" Style="{StaticResource ChromeMenuItem}" Click="OnFitHeight" AutomationProperties.Name="Fit height">
                                         <StackPanel Orientation="Horizontal">
                                             <ContentControl Content="{StaticResource SurveyIcon.FitHeight}" Width="16" Height="16"/>
                                             <TextBlock Text="Fit height" Margin="6,0,0,0" VerticalAlignment="Center"/>
