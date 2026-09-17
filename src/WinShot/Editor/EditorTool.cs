@@ -8,6 +8,17 @@ public enum EditorTool
     Line,
     Rectangle,
     Ellipse,
+
+    /// <summary>
+    /// Survey's click-to-place closed run (PDFViewer.jsx:34041). It sits between the closed
+    /// shapes and the open ones in the Shapes row because that is what it bridges: a polygon
+    /// is a many-sided Rectangle, a polyline a many-segment Line.
+    /// </summary>
+    Polygon,
+
+    /// <summary>The same gesture, left open. See <see cref="PolyDraft"/> for every finish rule.</summary>
+    Polyline,
+
     Freehand,
     Highlighter,
     Text,

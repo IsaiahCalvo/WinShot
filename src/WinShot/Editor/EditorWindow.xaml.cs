@@ -138,6 +138,15 @@ public partial class EditorWindow : Window
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
     private ArrowheadStyle _arrowhead = ArrowheadStyle.SolidTriangle;
     private ArrowheadStyle _startArrowhead = ArrowheadStyle.None;
+
+    /// <summary>
+    /// Survey's "Both ends" toggle (PDFViewer.jsx:3553): ONE ending picker plus a flag that
+    /// mirrors the picked ending onto the start of the arrow, instead of a second picker.
+    /// Survey persists it to localStorage; WinShot's editor keeps none of its sibling tool
+    /// choices (arrowhead, line style, fill mode) past a session, so this follows the house
+    /// convention and stays a session field.
+    /// </summary>
+    private bool _arrowBothEnds;
     private LineBorderStyle _lineStyle = LineBorderStyle.Solid;
     private ColorWell _colorWell = ColorWell.Stroke;
     private Color _fillColor = Color.FromArgb(0, 255, 255, 255);
@@ -1020,6 +1029,10 @@ public partial class EditorWindow : Window
         {
             CommitText();
             CommitPendingCurve();
+            // An unfinished polygon / polyline is dropped when the user picks another tool.
+            // It is NOT committed: finishing is always explicit, and switching tools is not
+            // one of the three gestures that mean "finish".
+            if (!PolyDraft.IsPolyTool(tool)) CancelPolyDraft();
             // Keep the current annotation selected when switching to Select/Pan so
             // format chrome stays on that object. Arming a draw tool clears it.
             if (tool is not (EditorTool.Select or EditorTool.Pan))
@@ -1044,6 +1057,11 @@ public partial class EditorWindow : Window
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
+            // Survey's releaseFocusForDraftTool (PDFViewer.jsx:34077-34079): arming Polygon or
+            // Polyline hands keyboard focus back to the page. These are the two tools finished
+            // with ENTER, and leaving focus on the toolbar button puts Enter in the button's
+            // lap — it re-clicks the button instead of closing the shape.
+            if (PolyDraft.IsPolyTool(tool)) Viewport.Focus();
         }
     }
 
@@ -1230,6 +1248,13 @@ public partial class EditorWindow : Window
         FillPanel.Visibility = Visibility.Collapsed;
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
+        // Survey shows "Both ends" on the ARROW tool only — a callout's leader has one end
+        // (AppShell.jsx:2758). The curved arrow is excluded for the same kind of reason, and
+        // it is not cosmetic: its commit path (EditorWindow.Input.cs) carries no start head
+        // and RestyleSelectedArrowhead refuses TypeCurvedArrow, so a toggle there would do
+        // nothing. Same row, same panel, arrow only.
+        if (ArrowBothEndsBtn is not null)
+            ArrowBothEndsBtn.Visibility = Show(chrome == EditorTool.Arrow);
         // Survey portals the rich-text row into the sub-toolbar ONLY while an editor is
         // mounted (AppShell.jsx:1756, bridge cleared on commit/cancel/unmount,
         // TextEditOverlay.jsx:324-330, :400-402, :432).
@@ -1242,14 +1267,23 @@ public partial class EditorWindow : Window
                 chrome is EditorTool.Text or EditorTool.Callout || _activeText is not null);
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        // The series rows are derived from the pins on the canvas, so they are rebuilt whenever
+        // the counter row comes into view — that covers a freshly loaded project, whose pins
+        // arrive with their series ids already stamped, without a load-path hook of its own.
+        if (StepModePanel.Visibility == Visibility.Visible) RefreshCounterSeriesChrome();
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
         ColorWellLabel.Visibility = Visibility.Collapsed;
+        // Survey offers Cloud on rect / ellipse / polygon / polyline (the region markers).
+        // Polygon and Polyline are live here now that CloudPath takes an arbitrary ring;
+        // Ellipse is still gated out because CreateBoxShape only builds a cloud for a
+        // rectangle, which is a separate wiring job (CloudPath.ForEllipse already exists).
+        bool cloudCapable = chrome is EditorTool.Rectangle or EditorTool.Polygon or EditorTool.Polyline;
         if (CloudStyleItem is not null)
-            CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
-        // Survey gates the Bump field on rect + cloud border (AppShell.jsx:2590).
+            CloudStyleItem.Visibility = Show(cloudCapable);
+        // Survey gates the Bump field on a cloud-capable tool + the cloud border (AppShell.jsx:2590).
         if (CloudBumpPanel is not null)
-            CloudBumpPanel.Visibility = Show(chrome == EditorTool.Rectangle && _lineStyle == LineBorderStyle.Cloud);
+            CloudBumpPanel.Visibility = Show(cloudCapable && _lineStyle == LineBorderStyle.Cloud);
         if (CloudBumpInput is not null && !CloudBumpInput.IsKeyboardFocusWithin)
             CloudBumpInput.Text = ((int)_cloudIntensity).ToString(CultureInfo.InvariantCulture);
         if (StepStartInput is not null && !StepStartInput.IsKeyboardFocusWithin)
@@ -1588,6 +1622,8 @@ public partial class EditorWindow : Window
             if (meta.CloudIntensity is double bump)
                 _cloudIntensity = CloudPath.ClampIntensity(bump);
             (_arrowhead, _startArrowhead) = AnnotationStyle.HeadsFrom(meta);
+            _arrowBothEnds = AnnotationStyle.BothEnds(_arrowhead, _startArrowhead);
+            if (ArrowBothEndsBtn is not null) ArrowBothEndsBtn.IsChecked = _arrowBothEnds;
             SelectComboByTag(LineStyleBox, _lineStyle == LineBorderStyle.Cloud ? "cloud" :
                 _lineStyle == LineBorderStyle.Dashed ? "dashed" :
                 _lineStyle == LineBorderStyle.Dotted ? "dotted" : "solid");
@@ -2334,10 +2370,12 @@ public partial class EditorWindow : Window
     private void CommitStepStart()
     {
         if (StepStartInput is null) return;
-        // Survey clamps the start number to >= 1 (AppShell.jsx:2540-2556).
-        _nextStep = int.TryParse(StepStartInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v)
-            ? Math.Max(1, v)
-            : _nextStep;
+        // Survey clamps the start number to >= 1 (AppShell.jsx:2540-2556). Since counters
+        // became series-numbered, the field sets the ACTIVE series' seriesStart — the number
+        // its first pin shows — rather than a free-floating "next number", because every pin's
+        // number is now derived from its position in its series and cannot be set directly.
+        if (int.TryParse(StepStartInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v))
+            SetCounterSeriesStart(Math.Max(1, v));
         StepStartInput.Text = _nextStep.ToString(CultureInfo.InvariantCulture);
     }
 

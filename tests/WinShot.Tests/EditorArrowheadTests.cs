@@ -103,10 +103,9 @@ public class EditorArrowheadTests
             after = (arrow.Tag as AnnotationData)?.Head;
             defaultHead = F("_arrowhead").GetValue(editor);
 
-            var undo = t.GetMethod("Undo", BindingFlags.Instance | BindingFlags.NonPublic,
-                null, Type.EmptyTypes, null);
-            undo?.Invoke(editor, null);
-            Pump();
+            // The editor's undo entry point is UndoAsync; reflecting for "Undo" finds nothing
+            // and `?.Invoke` then makes this assertion pass without undoing anything.
+            UndoOnce(editor);
             undone = (arrow.Tag as AnnotationData)?.Head;
         });
 
@@ -114,6 +113,128 @@ public class EditorArrowheadTests
         Assert.NotEqual(before, after);
         Assert.Equal(ArrowheadStyle.OpenCircle, defaultHead);
         Assert.Equal(before, undone);
+    }
+
+    // ------------------------------------------------ Survey's "Both ends" toggle
+    // Pure rules, no Application: these run in a full suite.
+
+    /// <summary>
+    /// Survey's reflect rule (PDFViewer.jsx:4235-4241). The toggle reads ON only when the
+    /// start ending is set, is not None, and MATCHES the end ending — an imported line with
+    /// two DIFFERENT endings shows OFF and keeps both, rather than being silently harmonised.
+    /// </summary>
+    [Theory]
+    [InlineData(ArrowheadStyle.SolidTriangle, ArrowheadStyle.SolidTriangle, true)]
+    [InlineData(ArrowheadStyle.OpenCircle, ArrowheadStyle.OpenCircle, true)]
+    [InlineData(ArrowheadStyle.SolidTriangle, ArrowheadStyle.None, false)]
+    [InlineData(ArrowheadStyle.None, ArrowheadStyle.None, false)]
+    [InlineData(ArrowheadStyle.SolidTriangle, ArrowheadStyle.OpenCircle, false)]
+    [InlineData(ArrowheadStyle.Diamond, ArrowheadStyle.Square, false)]
+    public void BothEndsReadsOnOnlyWhenTheTwoEndingsMatch(
+        ArrowheadStyle end, ArrowheadStyle start, bool expected) =>
+        Assert.Equal(expected, AnnotationStyle.BothEnds(end, start));
+
+    /// <summary>
+    /// Flipping the toggle (or re-picking the ending while it is on) mirrors the END ending
+    /// onto the start; turning it off puts the start back to None (PDFViewer.jsx:8158, 8173).
+    /// </summary>
+    [Theory]
+    [InlineData(true, ArrowheadStyle.OpenTriangle, ArrowheadStyle.OpenTriangle)]
+    [InlineData(true, ArrowheadStyle.Slash, ArrowheadStyle.Slash)]
+    [InlineData(false, ArrowheadStyle.OpenTriangle, ArrowheadStyle.None)]
+    public void StartHeadFollowsTheToggle(bool on, ArrowheadStyle end, ArrowheadStyle expected) =>
+        Assert.Equal(expected, AnnotationStyle.StartHeadFor(on, end));
+
+    /// <summary>Round trip: what the toggle writes is what the reflect rule reads back.</summary>
+    [Fact]
+    public void ToggleAndReflectAreInverses()
+    {
+        foreach (ArrowheadStyle end in Enum.GetValues<ArrowheadStyle>())
+        {
+            if (end == ArrowheadStyle.None) continue; // None on both ends is not "both ends"
+            Assert.True(AnnotationStyle.BothEnds(end, AnnotationStyle.StartHeadFor(true, end)));
+            Assert.False(AnnotationStyle.BothEnds(end, AnnotationStyle.StartHeadFor(false, end)));
+        }
+    }
+
+    /// <summary>
+    /// The toggle is Survey's arrow-only control, and it sits in the arrow props row right of
+    /// the arrowhead dropdown — so it must be reachable with Arrow armed and gone on Callout,
+    /// whose leader has one end.
+    /// </summary>
+    [Fact]
+    public void BothEndsShowsOnArrowAndNotOnCallout()
+    {
+        bool? onArrow = null, onCallout = null;
+        WithEditor(1400, (editor, arm) =>
+        {
+            var btn = (FrameworkElement)editor.FindName("ArrowBothEndsBtn")!;
+            arm(EditorTool.Arrow);
+            onArrow = btn.IsVisible;
+            arm(EditorTool.Callout);
+            onCallout = btn.IsVisible;
+        });
+        if (onArrow is null) return;   // stood down: no Application to own
+        Assert.True(onArrow);
+        Assert.False(onCallout);
+    }
+
+    /// <summary>
+    /// End to end through the pointer seam: draw a real arrow, select it, click the toggle.
+    /// The selected arrow gains the matching start ending in ONE undoable step, and clicking
+    /// again takes it away — the same contract every other style control on the row has.
+    /// </summary>
+    [Fact]
+    public void TogglingBothEndsRestylesTheSelectedArrowAndUndoes()
+    {
+        string? head = null, startOn = null, startUndone = null, startOff = null;
+        bool ran = false;
+        WithEditor(1400, (editor, arm) =>
+        {
+            var t = typeof(EditorWindow);
+            FieldInfo F(string n) => t.GetField(n, BindingFlags.Instance | BindingFlags.NonPublic)!;
+            arm(EditorTool.Arrow);
+
+            var canvas = (FrameworkElement)editor.FindName("AnnotationCanvas")!;
+            var viewport = (FrameworkElement)editor.FindName("Viewport")!;
+            EditorWindow.PointerArgs Pt(Point c) =>
+                new(c, canvas.TranslatePoint(c, viewport), System.Windows.Input.MouseButton.Left, 1);
+
+            editor.PointerDown(Pt(new Point(120, 120)));
+            Pump();
+            editor.PointerMove(Pt(new Point(320, 260)));
+            Pump();
+            editor.PointerUp(Pt(new Point(320, 260)));
+            Pump();
+
+            var arrow = ((System.Windows.Controls.Panel)canvas).Children.OfType<FrameworkElement>()
+                .LastOrDefault(c => (c.Tag as AnnotationData)?.Type == AnnotationData.TypeArrow);
+            if (arrow is null) return;
+            ran = true;
+            F("_selected").SetValue(editor, arrow);
+            head = (arrow.Tag as AnnotationData)?.Head;
+
+            var btn = (System.Windows.Controls.Primitives.ToggleButton)editor.FindName("ArrowBothEndsBtn")!;
+            btn.IsChecked = true;
+            btn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Pump();
+            startOn = (arrow.Tag as AnnotationData)?.StartHead;
+
+            UndoOnce(editor);
+            startUndone = (arrow.Tag as AnnotationData)?.StartHead;
+
+            // Undo clears the selection (EditorWindow.Edit.cs:242), so re-arm it before the
+            // second half — this is the same mark, toggled back off.
+            F("_selected").SetValue(editor, arrow);
+            btn.IsChecked = false;
+            btn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Pump();
+            startOff = (arrow.Tag as AnnotationData)?.StartHead;
+        });
+        if (!ran) return;   // stood down, or the seam is absent
+        Assert.Equal(head, startOn);            // the start mirrors the end exactly
+        Assert.Null(startUndone);               // one undoable step
+        Assert.Null(startOff);                  // toggling off clears it
     }
 
     private static void WithEditor(double width, Action<EditorWindow, Action<EditorTool>> body)
@@ -179,6 +300,22 @@ public class EditorArrowheadTests
         thread.Start();
         thread.Join();
         if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
+    }
+
+    /// <summary>
+    /// One undo through the editor's real entry point. There is no <c>Undo()</c> — the method
+    /// is <c>UndoAsync()</c> (EditorWindow.Edit.cs:238), and reflecting for the short name
+    /// silently finds nothing, which makes an "and it undoes" assertion pass without ever
+    /// undoing anything. Invoke the Task-returning one and pump until it completes.
+    /// </summary>
+    private static void UndoOnce(EditorWindow editor)
+    {
+        var method = typeof(EditorWindow).GetMethod("UndoAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+        Assert.NotNull(method);
+        var task = (Task)method!.Invoke(editor, null)!;
+        for (int i = 0; i < 200 && !task.IsCompleted; i++) { Pump(); Thread.Sleep(5); }
+        Assert.True(task.IsCompleted, "UndoAsync did not complete");
     }
 
     private static void Pump()

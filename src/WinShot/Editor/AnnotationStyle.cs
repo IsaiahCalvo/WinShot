@@ -308,6 +308,22 @@ internal static class AnnotationStyle
         return (parsed, startLegacy);
     }
 
+    /// <summary>
+    /// Survey's "Both ends" reflect rule (PDFViewer.jsx:4235-4241): the toggle reads ON only
+    /// when the start ending is set, is not None, and MATCHES the end ending. A line imported
+    /// with two different endings therefore shows the toggle OFF and keeps both — turning the
+    /// toggle on is what makes them the same, it never silently harmonises them.
+    /// </summary>
+    public static bool BothEnds(ArrowheadStyle end, ArrowheadStyle start) =>
+        start != ArrowheadStyle.None && start == end;
+
+    /// <summary>
+    /// What the start ending becomes when the toggle is flipped or the ending is re-picked
+    /// (PDFViewer.jsx:8158, :8173): the end ending when on, None when off.
+    /// </summary>
+    public static ArrowheadStyle StartHeadFor(bool bothEnds, ArrowheadStyle end) =>
+        bothEnds ? end : ArrowheadStyle.None;
+
     public static LineBorderStyle LineStyleFrom(AnnotationData a) => ParseLineStyle(a.LineStyle);
 
     /// <summary>

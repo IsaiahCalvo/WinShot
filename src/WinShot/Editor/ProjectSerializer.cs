@@ -29,6 +29,22 @@ internal sealed class AnnotationData
     public const string TypeLine = "line";
     public const string TypeRectangle = "rectangle";
     public const string TypeEllipse = "ellipse";
+    /// <summary>
+    /// A click-to-place closed run of vertices. <see cref="Points"/> is the ring in absolute
+    /// content coordinates, exactly like an arrow's endpoints — a polygon is a many-sided
+    /// rectangle, so it takes the shape controls (fill, border style, cloud) a rectangle does.
+    /// Survey emits this type lowercase and so does the app's PDF importer, so drawn and
+    /// imported polygons are one code path (annotationCreationCommit.js:223-227).
+    /// </summary>
+    public const string TypePolygon = "polygon";
+
+    /// <summary>
+    /// The same run left OPEN — a many-segment line. Never filled: a fill on an unclosed run
+    /// paints a phantom chord between the last and first point
+    /// (annotationCreationCommit.js:270-273).
+    /// </summary>
+    public const string TypePolyline = "polyline";
+
     public const string TypeFreehand = "freehand";
     public const string TypeHighlighter = "highlighter";
     public const string TypeText = "text";
@@ -136,6 +152,22 @@ internal sealed class AnnotationData
     /// the rest. Z-order is not creation order here, hence a stamp of its own.
     /// </summary>
     public long? CreatedAt { get; set; }
+
+    /// <summary>
+    /// Counter (Step) only: which SERIES this pin belongs to. Survey numbers each series
+    /// independently — pins are grouped by this id, sorted by <see cref="CreatedAt"/>, and the
+    /// i-th of a group shows <c>SeriesStart + i</c> (counterNumbering.js:25-65). Null in
+    /// projects written before series existed; <see cref="CounterSeries"/> buckets those
+    /// together so they still read back as one running count.
+    /// </summary>
+    public string? SeriesId { get; set; }
+
+    /// <summary>
+    /// The first displayed number of this pin's series. Mirrored onto every pin of the series
+    /// on each renumber, so any one survivor can reconstruct where the count began. Null reads
+    /// as <see cref="CounterSeries.DefaultStart"/>.
+    /// </summary>
+    public int? SeriesStart { get; set; }
 
     /// <summary>Index into the project's embedded images/{n}.png entries.</summary>
     [JsonPropertyName("image")]
@@ -327,13 +359,32 @@ internal sealed class AnnotationData
         Text = emoji,
     };
 
+    /// <summary>
+    /// A polygon or polyline. Geometry lives in <see cref="Points"/> in absolute content
+    /// coordinates, like an arrow's endpoints — not in <see cref="Rect"/>, because a poly
+    /// shape's box is derived from its vertices and storing both would let them disagree.
+    /// </summary>
+    public static AnnotationData ForPoly(
+        string type, IEnumerable<Point> points, Color color, double thickness,
+        LineBorderStyle lineStyle) => new()
+    {
+        Type = type,
+        Points = ToArray(points),
+        Color = ToHex(color),
+        Thickness = thickness,
+        LineStyle = lineStyle == LineBorderStyle.Solid ? null : AnnotationStyle.ToStorageName(lineStyle),
+    };
+
     public static AnnotationData ForStep(
-        Point topLeft, int number, Color color, double thickness, long createdAt = 0) => new()
+        Point topLeft, int number, Color color, double thickness, long createdAt = 0,
+        string? seriesId = null, int? seriesStart = null) => new()
     {
         Type = TypeStep,
         Points = ToArray(new[] { topLeft }),
         Number = number,
         CreatedAt = createdAt,
+        SeriesId = seriesId,
+        SeriesStart = seriesStart,
         Color = ToHex(color),
         Thickness = thickness,
         PointerAngle = CounterGeometry.DefaultPointerAngle,
@@ -574,6 +625,22 @@ internal static class ProjectSerializer
                 };
                 AnnotationFactory.ApplyDash(line, AnnotationStyle.LineStyleFrom(a));
                 return line;
+            }
+            case AnnotationData.TypePolygon:
+            case AnnotationData.TypePolyline:
+            {
+                bool closed = a.Type == AnnotationData.TypePolygon;
+                var run = RequirePoints(a, closed ? PolyDraft.PolygonMinPoints : PolyDraft.PolylineMinPoints);
+                var ink = RequireColor(a);
+                var polyFill = AnnotationStyle.FillColorFrom(a, ink);
+                var poly = AnnotationFactory.CreatePolyShape(
+                    run, closed, ink,
+                    closed && polyFill.A != 0 ? polyFill : Colors.Transparent,
+                    RequireThickness(a), AnnotationStyle.LineStyleFrom(a),
+                    a.CloudIntensity ?? CloudPath.DefaultIntensity, render, seed);
+                if (closed && polyFill.A == 0)
+                    poly.Fill = ShapeFillBrush.CreateFromName(a.Fill, ink);
+                return poly;
             }
             case AnnotationData.TypeRectangle:
             case AnnotationData.TypeEllipse:

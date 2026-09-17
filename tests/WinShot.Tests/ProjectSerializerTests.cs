@@ -56,6 +56,145 @@ public class ProjectSerializerTests
         Assert.Null(failure);
     }
 
+    /// <summary>
+    /// A polygon / polyline round-trips its vertex run, its border style and its cloud Bump —
+    /// and rehydrates into a real element. The type strings are LOWERCASE on purpose: Survey
+    /// and the app's PDF importer both emit them that way, so a drawn shape and an imported one
+    /// are one code path.
+    /// </summary>
+    [Fact]
+    public void SaveAndLoad_PreservesPolygonAndPolylineRuns()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"winshot-poly-project-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "poly.winshot");
+        try
+        {
+            using var source = new SD.Bitmap(4, 3);
+            var doc = new ProjectDocument
+            {
+                Annotations =
+                {
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypePolygon,
+                        Points = new[] { new[] { 10d, 10d }, new[] { 90d, 10d }, new[] { 50d, 80d } },
+                        Color = "#FF34C759", Thickness = 3,
+                        LineStyle = "cloud", CloudIntensity = 5,
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypePolyline,
+                        Points = new[] { new[] { 0d, 0d }, new[] { 20d, 40d }, new[] { 60d, 5d } },
+                        Color = "#FFFF3B30", Thickness = 2, LineStyle = "dashed",
+                    },
+                },
+            };
+
+            ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
+            var loaded = ProjectSerializer.Load(path);
+            using var loadedSource = loaded.Source;
+            var polygon = loaded.Doc.Annotations[0];
+            var polyline = loaded.Doc.Annotations[1];
+
+            Assert.Equal("polygon", polygon.Type);
+            Assert.Equal("polyline", polyline.Type);
+            Assert.Equal(3, polygon.Points!.Length);
+            Assert.Equal(new[] { 50d, 80d }, polygon.Points[2]);
+            Assert.Equal("cloud", polygon.LineStyle);
+            Assert.Equal(5, polygon.CloudIntensity);
+            Assert.Equal("dashed", polyline.LineStyle);
+
+            // And both rebuild into live elements rather than throwing on an unknown type.
+            Exception? failure = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    foreach (var a in new[] { polygon, polyline })
+                    {
+                        var el = ProjectSerializer.CreateElement(a, Array.Empty<BitmapSource>());
+                        var shape = Assert.IsType<System.Windows.Shapes.Path>(el);
+                        Assert.NotNull(shape.Data);
+                    }
+                }
+                catch (Exception ex) { failure = ex; }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+            Assert.Null(failure);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A counter's SERIES has to survive a save/load or the counts split apart on reopen:
+    /// numbering is derived from seriesId + createdAt + seriesStart, so losing any of the three
+    /// renumbers the whole document. Also covers the legacy shape — a pin with no seriesId
+    /// reads back as null rather than as some invented id.
+    /// </summary>
+    [Fact]
+    public void SaveAndLoad_PreservesCounterSeriesIdentity()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"winshot-series-project-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "series.winshot");
+        try
+        {
+            using var source = new SD.Bitmap(4, 3);
+            var doc = new ProjectDocument
+            {
+                Annotations =
+                {
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 1d, 1d } },
+                        Number = 5, CreatedAt = 1700, SeriesId = "series-a", SeriesStart = 5,
+                        Color = "#FFEF4444", Thickness = 4,
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 2d, 2d } },
+                        Number = 6, CreatedAt = 1800, SeriesId = "series-a", SeriesStart = 5,
+                        Color = "#FFEF4444", Thickness = 4,
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 3d, 3d } },
+                        Number = 1, CreatedAt = 1900,
+                        Color = "#FF00FF00", Thickness = 4,
+                    },
+                },
+            };
+
+            ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
+            var loaded = ProjectSerializer.Load(path);
+            using var loadedSource = loaded.Source;
+            var pins = loaded.Doc.Annotations;
+
+            Assert.Equal("series-a", pins[0].SeriesId);
+            Assert.Equal("series-a", pins[1].SeriesId);
+            Assert.Equal(5, pins[0].SeriesStart);
+            Assert.Equal(new long?[] { 1700, 1800, 1900 }, pins.Select(p => p.CreatedAt).ToArray());
+            Assert.Null(pins[2].SeriesId);   // legacy pin stays legacy
+
+            // And the reloaded pins renumber to exactly what was saved.
+            CounterSeries.Renumber(pins);
+            Assert.Equal(new int?[] { 5, 6, 1 }, pins.Select(p => p.Number).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public void SaveAndLoad_PreservesArrowAndLetterStepStyleMetadata()
     {

@@ -200,6 +200,65 @@
          1.5 — the optical sizing rule for a small form — and its stem sits 0.7 right of the
          ring centre on purpose: the eye reads a "1" by its stem, so that is what centred
          looks like. -->
+    <!-- Shape tool: Polygon. Survey src/Icons.jsx `polygon`, verbatim: the owner-approved
+         934-unit artwork (a closed run with round vertex nubs) as ONE filled path inside the
+         file's own transform, translate(-3.4572 -1.9089) scale(0.0267). It is a silhouette,
+         not a 1.5-stroke line drawing like Rect/Ellipse/Line beside it — that is Survey's
+         choice for this glyph and it is kept.
+         WPF applies a TransformGroup's children in the order listed, which is the REVERSE of
+         an SVG transform list: SVG's `translate(t) scale(s)` means scale first, so the
+         ScaleTransform is listed first here. -->
+    <Viewbox x:Key="SurveyIcon.Polygon" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Canvas>
+                <Canvas.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="0.0267" ScaleY="0.0267"/>
+                        <TranslateTransform X="-3.4572" Y="-1.9089"/>
+                    </TransformGroup>
+                </Canvas.RenderTransform>
+                <Path Style="{StaticResource SurveyIconFill}" Data="M878.5 488.98C882.73 489.32 886.99 489.04 891.22 489.45C907.26 490.99 923.4 498.15 934.72 509.77C967.91 543.81 957.66 603.02 913.14 621.6C899.44 627.31 884.07 628.78 869.5 625.98C864.37 624.99 859.58 622.79 854.5 621.79C805.36 678.36 756.21 734.93 707.07 791.5C708.36 796.29 710.53 800.78 711.74 805.63C714.87 818.17 714.26 832.16 709.73 844.3C693.44 887.94 636.42 901.88 599.91 874.57C590.22 867.32 582.92 857.36 578.37 846.19C576.57 841.74 575.93 836.86 574.16 832.5C569.64 830.65 564.82 829.73 560.12 828.43C548.83 825.32 537.5 822.36 526.17 819.42C494.67 811.26 463.3 802.64 431.77 794.61C410.11 789.09 388.49 783.31 366.89 777.54C354.74 774.29 338.69 768.82 326.5 767.7C321.12 772.22 316.17 776.92 310.1 780.58C295.46 789.41 277.17 791.7 260.52 788.85C214.32 780.94 191.54 730.78 212.26 689.75C217.46 679.46 226.02 670.39 235.75 664.27C239.79 661.72 244.28 660 248.29 657.5C249.72 652.24 249.84 646.5 250.52 641.08C252.09 628.56 253.6 616.02 255.22 603.51C260.77 560.57 266.06 517.59 271.38 474.63C274.03 453.29 276.87 431.99 279.39 410.64C280.6 400.43 283.78 386.4 282.72 376.5C268.38 365.45 257.39 352.51 253.25 334.39C243.76 292.92 273.51 253.53 315.5 249.96C330.74 248.66 346.91 252.28 359.72 260.78C366.03 264.97 370.74 270.46 376.5 275.12C456.5 253.84 536.5 232.57 616.5 211.29C618.19 207.66 618.98 203.63 620.42 199.86C624.19 189.97 629.98 180.56 637.81 173.34C671.47 142.29 724.9 150.02 748.31 189.22C757.43 204.5 759.62 223.24 756.04 240.5C754.93 245.84 753.08 251.27 750.62 256.14C749.46 258.43 746.89 261.23 747.57 263.94C748.75 268.61 758.66 283.75 761.67 288.79C771.93 305.96 781.81 323.36 791.93 340.61C812.64 375.9 832.77 411.58 853.81 446.69C859.32 455.9 864.54 465.32 869.89 474.63C872.62 479.38 874.92 484.84 878.5 488.98ZM682.71 190.44C661.21 192.5 647.51 215.07 653.34 235.24C656.44 245.92 665.05 253.67 675.2 257.37C679.88 259.08 684.52 259.78 689.5 259.28C726.77 255.52 733.04 204.14 697.53 191.92C692.85 190.31 687.61 189.97 682.71 190.44ZM627.5 264.43C621.37 264.54 615.13 267.12 609.16 268.56C596.42 271.62 583.77 275.15 571.12 278.55C536.34 287.89 501.34 296.49 466.71 306.34C450.32 311 433.75 315.41 417.23 319.61C409.15 321.67 397.59 323.36 390.5 327.39C385 348.36 378.21 364.43 358.82 376.36C354.8 378.83 350.54 380.85 346.15 382.6C342.93 383.87 339.55 384.47 336.78 386.5C325.61 477.17 314.44 567.83 303.27 658.5C308.12 662.03 313.73 664.14 318.38 668.1C330.06 678.03 337.88 689.63 342.1 704.46C343.27 708.58 343.43 712.91 344.5 717.02C425.5 738.28 506.5 759.53 587.5 780.79C592.83 776.72 596.96 771.07 602.47 766.98C612.8 759.32 626.72 754.66 639.5 754.02C645.55 753.72 651.53 754.1 657.5 755.12C660.57 755.65 663.39 756.54 666.5 756.63C717.04 698.25 767.57 639.88 818.11 581.5C817.95 577.99 816.82 574.92 816.21 571.47C815.03 564.77 814.67 557.43 815.41 550.67C816.37 541.78 819.33 532.95 823.6 525.11C825.77 521.12 829.07 517.64 830.82 513.5C788.05 440.6 745.27 367.7 702.5 294.81C694.17 294.5 685.93 296.06 677.5 295.09C661.76 293.29 647.95 285.65 636.53 274.97C633.1 271.77 630.77 267.71 627.5 264.43ZM314.64 286.29C299.98 289.46 288.12 302.21 287.56 317.5C286.81 337.62 305.55 354.42 325.5 351.17C330.71 350.33 335.77 348.67 340.08 345.56C347.08 340.48 352.54 333.14 354.15 324.5C358.34 301.97 336.97 281.46 314.64 286.29ZM880.68 525.4C845.4 529.78 840.93 578.44 874.35 590.22C879.06 591.88 884.33 592.24 889.26 591.58C925.05 586.76 928.24 535.6 893.15 526.45C889.03 525.37 884.93 524.87 880.68 525.4ZM268.71 689.36C252.5 692.32 239.82 706.74 240.56 723.5C241.38 742.28 259.68 757.21 278.25 754.57C283.27 753.85 288.44 751.92 292.67 749.15C322.45 729.67 303.53 682.98 268.71 689.36ZM640.67 789.43C605.59 792.48 598.46 840.42 632.47 852.07C637.29 853.72 642.43 854.36 647.5 853.83C682.49 850.17 688.12 801.93 654.43 791.15C649.95 789.72 645.38 789.03 640.67 789.43Z"/>
+            </Canvas>
+        </Canvas>
+    </Viewbox>
+
+    <!-- Shape tool: Polyline. Survey src/Icons.jsx `polyline`, verbatim: an open four-point
+         run with hollow vertices, authored on a 64-unit grid and scaled onto the 24 one. The
+         strokes stay in the SOURCE's units inside the scaled group — 3.5 for the segments,
+         2.2 for the vertex rings — which is what lands them at ~1.4 rendered, the same weight
+         family as the Line glyph beside it. Scaling the numbers instead would be wrong twice:
+         it loses that relationship, and it is not what the file says. -->
+    <Viewbox x:Key="SurveyIcon.Polyline" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Canvas>
+                <Canvas.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="0.4049" ScaleY="0.4049"/>
+                        <TranslateTransform X="-0.956" Y="-0.755"/>
+                    </TransformGroup>
+                </Canvas.RenderTransform>
+                <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="3.5" Data="M13.835,44.565 L22.165,24.435"/>
+                <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="3.5" Data="M27.774,22.966 L34.226,28.034"/>
+                <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="3.5" Data="M41.051,27.295 L48.949,17.705"/>
+                <Ellipse Style="{StaticResource SurveyIconStroke}" StrokeThickness="2.2" Canvas.Left="8.4" Canvas.Top="45.4" Width="7.2" Height="7.2"/>
+                <Ellipse Style="{StaticResource SurveyIconStroke}" StrokeThickness="2.2" Canvas.Left="20.4" Canvas.Top="16.4" Width="7.2" Height="7.2"/>
+                <Ellipse Style="{StaticResource SurveyIconStroke}" StrokeThickness="2.2" Canvas.Left="34.4" Canvas.Top="27.4" Width="7.2" Height="7.2"/>
+                <Ellipse Style="{StaticResource SurveyIconStroke}" StrokeThickness="2.2" Canvas.Left="48.4" Canvas.Top="10.4" Width="7.2" Height="7.2"/>
+            </Canvas>
+        </Canvas>
+    </Viewbox>
+
+    <!-- Survey src/Icons.jsx `arrowBothEnds`, verbatim: one shaft with a chevron head at each
+         end, 24-grid, stroke 1.5, round caps and joins. It is the glyph on Survey's "Both
+         ends" toggle (AppShell.jsx:2780) at 16px inside a 28x24 trigger. Not a unicode arrow
+         and not a mirrored copy of SurveyIcon.Arrow: that one is a corner arrow. -->
+    <Viewbox x:Key="SurveyIcon.ArrowBothEnds" x:Shared="False" Width="16" Height="16">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M4,12 H20 M9,7 L4,12 L9,17 M15,7 L20,12 L15,17"/>
+        </Canvas>
+    </Viewbox>
+
     <Viewbox x:Key="SurveyIcon.Counter" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"/>

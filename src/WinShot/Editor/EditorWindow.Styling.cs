@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -72,6 +73,10 @@ public partial class EditorWindow : Window
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter =>
                 color is not null || thickness is not null,
             AnnotationData.TypeRectangle or AnnotationData.TypeEllipse or AnnotationData.TypeCallout => true,
+            // A polygon takes everything a rectangle does; a polyline takes everything a line
+            // does and ignores the fill, which CreatePolyShape drops for an open run anyway.
+            AnnotationData.TypePolygon => true,
+            AnnotationData.TypePolyline => color is not null || thickness is not null,
             AnnotationData.TypeText => true,
             AnnotationData.TypeStep => color is not null || thickness is not null,
             _ => false, // emoji / spotlight / image carry no editable stroke style
@@ -85,6 +90,7 @@ public partial class EditorWindow : Window
             AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow or AnnotationData.TypeLine
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter
                 or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+                or AnnotationData.TypePolygon or AnnotationData.TypePolyline
                 or AnnotationData.TypeText or AnnotationData.TypeStep or AnnotationData.TypeCallout => true,
             _ => false,
         };
@@ -192,6 +198,35 @@ public partial class EditorWindow : Window
                         RefreshHighlighterFill(ink, snap.StrokeColor);
                     else
                         ink.Fill = stroke;
+                }
+                break;
+            // A poly shape's geometry is a FUNCTION of its border style, not just a dash
+            // pattern over a fixed outline: the Cloud style replaces the run with crowns built
+            // on the ring. So a restyle rebuilds the Data from the stored vertices rather than
+            // poking Stroke/Dash on whatever is already there.
+            case AnnotationData.TypePolygon:
+            case AnnotationData.TypePolyline:
+                if (element is Path poly && snap.Meta.Points is { Length: >= 2 } pv)
+                {
+                    bool closed = meta.Type == AnnotationData.TypePolygon;
+                    var run = pv.Select(q => new Point(q[0], q[1])).ToArray();
+                    Color polyFill = closed
+                        ? (snap.FillColor.A == 0
+                            ? (ShapeFillBrush.Create(snap.Fill, snap.StrokeColor) is SolidColorBrush b
+                                ? b.Color : Colors.Transparent)
+                            : snap.FillColor)
+                        : Colors.Transparent;
+                    var rebuilt = AnnotationFactory.CreatePolyShape(
+                        run, closed, snap.StrokeColor, polyFill, snap.Thickness,
+                        AnnotationStyle.LineStyleFrom(snap.Meta),
+                        snap.Meta.CloudIntensity ?? _cloudIntensity,
+                        StrokeStyles.ParseRender(snap.Meta.Sketch), snap.Meta.Seed ?? 0);
+                    poly.Data = rebuilt.Data;
+                    poly.Stroke = stroke;
+                    poly.StrokeThickness = snap.Thickness;
+                    poly.Fill = rebuilt.Fill;
+                    poly.StrokeDashArray = rebuilt.StrokeDashArray;
+                    poly.StrokeDashCap = rebuilt.StrokeDashCap;
                 }
                 break;
             case AnnotationData.TypeRectangle:
@@ -648,7 +683,14 @@ public partial class EditorWindow : Window
             _stepLetters = string.Equals(tag, "Letter", StringComparison.Ordinal);
     }
 
-    private void OnResetStepCounter(object sender, RoutedEventArgs e) => _nextStep = 1;
+    /// <summary>
+    /// "Reset" puts the ACTIVE count back to 1. It used to set a free-floating _nextStep, which
+    /// a series-numbered counter has no room for: a pin's number is derived from where it sits
+    /// in its series, so the only thing left to reset is where that series starts. To begin a
+    /// genuinely separate run from 1, "+ New Count" in the series picker is the control.
+    /// </summary>
+    private void OnResetStepCounter(object sender, RoutedEventArgs e) =>
+        SetCounterSeriesStart(CounterSeries.DefaultStart);
 
     private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -691,9 +733,25 @@ public partial class EditorWindow : Window
         else
         {
             _arrowhead = AnnotationStyle.ParseArrowhead(tag, out _);
-            _startArrowhead = ArrowheadStyle.None;
+            // Survey: with "Both ends" on, a newly picked ending goes on the START as well
+            // (PDFViewer.jsx:8158). With it off only the end changes.
+            _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
             _arrowStyle = ArrowStyle.Straight;
         }
+        if (IsLoaded) RestyleSelectedArrowhead();
+    }
+
+    /// <summary>
+    /// Survey's "Both ends" toggle (PDFViewer.jsx:8163-8174). It mirrors the CURRENT ending
+    /// onto the start of new arrows and, when one is selected, restyles it in the same single
+    /// undoable step every other style control uses — turning the toggle off puts the start
+    /// ending back to None.
+    /// </summary>
+    private void OnArrowBothEndsClick(object sender, RoutedEventArgs e)
+    {
+        if (_syncingContext) return;
+        _arrowBothEnds = sender is ToggleButton { IsChecked: true };
+        _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
         if (IsLoaded) RestyleSelectedArrowhead();
     }
 
@@ -1076,7 +1134,8 @@ public partial class EditorWindow : Window
             fe.Tag is not AnnotationData meta) return;
         if (meta.Type is not (AnnotationData.TypeLine or AnnotationData.TypeArrow
             or AnnotationData.TypeCurvedArrow or AnnotationData.TypeRectangle
-            or AnnotationData.TypeEllipse))
+            or AnnotationData.TypeEllipse
+            or AnnotationData.TypePolygon or AnnotationData.TypePolyline))
             return;
 
         var before = meta.Clone();
@@ -1424,6 +1483,7 @@ public partial class EditorWindow : Window
             fe.Tag is not AnnotationData meta) return;
         if (meta.Type is not (AnnotationData.TypeLine or AnnotationData.TypeArrow
             or AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+            or AnnotationData.TypePolygon or AnnotationData.TypePolyline
             or AnnotationData.TypeText or AnnotationData.TypeCallout))
             return;
         var before = meta.Clone();
@@ -1434,6 +1494,23 @@ public partial class EditorWindow : Window
         after.CloudIntensity = style == LineBorderStyle.Cloud
             ? meta.CloudIntensity ?? _cloudIntensity
             : null;
+
+        // A poly shape needs no element swap: its geometry is rebuilt from the stored vertex
+        // run in place, cloud crowns included, because the Path carries no Width/Height whose
+        // meaning would change. That also keeps the selection object identity, so the vertex
+        // handles do not blink out and back on every border-style pick.
+        if (meta.Type is AnnotationData.TypePolygon or AnnotationData.TypePolyline)
+        {
+            void Apply(AnnotationData state)
+            {
+                fe.Tag = state;
+                ApplyStyleSnapshot(fe, SnapshotStyle(fe, state));
+                if (ReferenceEquals(_selected, fe)) UpdateSelectionVisual();
+            }
+            Apply(after);
+            Push(new EditorAction(undo: () => Apply(before), redo: () => Apply(after)), apply: false);
+            return;
+        }
 
         if (meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
         {
