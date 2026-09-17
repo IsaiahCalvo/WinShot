@@ -2289,8 +2289,14 @@ public class ThemedWindowTests
     private struct RECT { public int Left, Top, Right, Bottom; }
 
     /// <summary>
-    /// A tiny capture must scale UP on Fit so the paper is the work, not a postage
-    /// stamp in an empty viewport. 100% is a zoom preset, not what Fit means.
+    /// A tiny capture must open at 100%, NOT blown up. Fit shrinks only.
+    ///
+    /// <para>This asserted the opposite until 2026-09-17 — "a tiny capture must scale UP so
+    /// the paper is the work" — which is right for a PDF page and wrong for a screenshot:
+    /// upscaling a bitmap adds no detail, it just serves blurry pixels and makes whatever you
+    /// annotate on top land on a soft target. Survey never meets the case because a page is
+    /// always about 612x792pt. Measured before the change: 300x200 opened at 331%, this 80x50
+    /// one at over 900%.</para>
     /// </summary>
     private static void EditorFitsSmallImageSmoke(SettingsService settings, HistoryService history)
     {
@@ -2313,14 +2319,18 @@ public class ThemedWindowTests
         editor.Close();
 
         Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
-        Assert.True(zoom > 1.05, $"tiny capture stayed at native size: zoom={zoom}, viewport={vw}x{vh}");
+        Assert.True(Math.Abs(zoom - 1.0) < 1e-9,
+            $"tiny capture was not opened at 100%: zoom={zoom}, viewport={vw}x{vh}");
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
-        // Survey's fit insets: PAD=20 subtracted per side horizontally, GAP=16 folded into
-        // the height DIVISOR (PdfjsViewerContainer.jsx:51-52, :137-140, :1891-1895).
+        // Survey's fit insets are unchanged — PAD=20 per side horizontally, GAP=16 folded into
+        // the height DIVISOR (PdfjsViewerContainer.jsx:51-52, :137-140, :1891-1895) — they are
+        // just capped at 1.0 now. Check the uncapped arithmetic still matches, so a real
+        // regression in the formula cannot hide behind the cap.
         double surveyFit = Math.Min((vw - 40) / imgW, vh / (imgH + 32));
-        Assert.True(Math.Abs(zoom - surveyFit) < 0.001,
-            $"fit does not match Survey: zoom={zoom} expected={surveyFit} viewport={vw}x{vh}");
+        Assert.True(surveyFit > 1.0,
+            $"this capture is meant to be one Survey's formula would magnify: surveyFit={surveyFit}");
+        Assert.Equal(Math.Min(1.0, surveyFit), zoom, 9);
         // Survey's fit trigger tooltip is `Page fit: ${label}` in every state (AppShell.jsx:3072).
         Assert.Equal("Page fit: Fit page", fitMenuBtn.ToolTip);
         Assert.Equal(Visibility.Visible, zoomBox.Visibility);

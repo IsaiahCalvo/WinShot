@@ -102,8 +102,12 @@ public class EditorFitProbe
                     lines.Add($"    mode          = {Mode()}");
                     lines.Add($"    zoom          = {zoom:F4}  ({zoom * 100:F1}%)");
                     lines.Add($"    survey fitW   = {fitW:F4}   fitH = {fitH:F4}   min = {expect:F4}");
+                    // Fit shrinks only, so Survey's raw formula and ours part company exactly
+                    // where it would magnify — that is the cap doing its job, not a drift.
                     lines.Add($"    delta         = {Math.Abs(zoom - expect):F6}" +
-                              (Math.Abs(zoom - expect) < 1e-6 ? "  (matches Survey)" : "  <-- DIVERGES"));
+                              (Math.Abs(zoom - expect) < 1e-6 ? "  (matches Survey)"
+                               : expect > 1 ? "  (capped at 100%: Survey would magnify)"
+                               : "  <-- DIVERGES"));
                     lines.Add($"    drawn size    = {sw * zoom:F1} x {shown:F1}");
                     lines.Add($"    group band    = {bandH:F1} DIP visible={groupBar.Visibility}" +
                               $" -> covers {topCovered:F1} DIP of the picture");

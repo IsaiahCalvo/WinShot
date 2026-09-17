@@ -27,6 +27,11 @@ public enum ArrowheadStyle
     OpenCircle,
     OpenTriangle,
     HorizontalLine,
+    // PDF /LE Diamond, Square and Slash. Survey has offered all nine since the line-endings
+    // work; WinShot stopped at six because it was ported when Survey only had six.
+    Diamond,
+    Slash,
+    Square,
 }
 
 /// <summary>Which color well the compact picker is editing.</summary>
@@ -165,6 +170,9 @@ internal static class AnnotationStyle
             "openCircle" or "opencircle" => ArrowheadStyle.OpenCircle,
             "openTriangle" or "opentriangle" => ArrowheadStyle.OpenTriangle,
             "horizontalLine" or "horizontalline" => ArrowheadStyle.HorizontalLine,
+            "diamond" => ArrowheadStyle.Diamond,
+            "slash" => ArrowheadStyle.Slash,
+            "square" => ArrowheadStyle.Square,
             _ => Enum.TryParse(name, ignoreCase: true, out ArrowheadStyle parsed)
                 ? parsed
                 : ArrowheadStyle.SolidTriangle,
@@ -178,6 +186,9 @@ internal static class AnnotationStyle
         ArrowheadStyle.OpenCircle => "openCircle",
         ArrowheadStyle.OpenTriangle => "openTriangle",
         ArrowheadStyle.HorizontalLine => "horizontalLine",
+        ArrowheadStyle.Diamond => "diamond",
+        ArrowheadStyle.Slash => "slash",
+        ArrowheadStyle.Square => "square",
         _ => "solidTriangle",
     };
 
