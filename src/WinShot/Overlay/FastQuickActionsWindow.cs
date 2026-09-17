@@ -1652,12 +1652,60 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Rectangle PlacedWorkingArea
         => _placedWorkingArea.Height > 0 ? _placedWorkingArea : WF.Screen.FromRectangle(Bounds).WorkingArea;
 
-    private void PositionFromSettings()
+    /// <summary>
+    /// Test seam, and the only place a card's monitor is ever chosen. Nothing but tests
+    /// assigns this; the hidden-desktop runner is the only place it is safe to, and it
+    /// stands in for the whole screen topology while it is pinned (see
+    /// <see cref="PlacedOrBirthWorkingArea"/>).
+    /// </summary>
+    internal static Func<SD.Rectangle>? BirthWorkingAreaProvider;
+
+    /// <summary>The working area a brand-new card is born on.</summary>
+    private SD.Rectangle BirthWorkingArea()
     {
-        var screen = _settings.Current.OverlayMoveToActiveScreen
+        if (BirthWorkingAreaProvider is { } provider)
+            return provider();
+        WF.Screen screen = _settings.Current.OverlayMoveToActiveScreen
             ? WF.Screen.FromPoint(WF.Cursor.Position)
             : WF.Screen.PrimaryScreen ?? WF.Screen.FromPoint(WF.Cursor.Position);
-        var area = screen.WorkingArea;
+        return screen.WorkingArea;
+    }
+
+    /// <summary>
+    /// The card's monitor is chosen ONCE, when it is born, and it keeps that monitor — and
+    /// so the DPI it was laid out at — for the rest of its life.
+    ///
+    /// PositionFromSettings runs again on every re-show: the annotate round-trip coming back
+    /// through <see cref="ComeBack"/>, "Temporarily hide" being revived by the next capture,
+    /// and the DPI re-layout in OnHandleCreated. Re-reading the cursor on each of those made
+    /// a card chase the pointer to whatever screen it had wandered to. With the laptop at
+    /// 150 % below two 100 % monitors that is the reported bug exactly: capture on a big
+    /// screen, annotate, press Done with the pointer back on the laptop, and a card whose
+    /// chrome, thumbnail and glyphs were all built at 96 dpi is dropped onto a 144 dpi
+    /// screen — two thirds the size it should be, with a stale thumbnail to match. (Worse,
+    /// the move fires WM_DPICHANGED, and WinForms then applies the suggested rect to a form
+    /// whose painting is all manual, stretching the window around 96-dpi content.)
+    ///
+    /// "Move Quick Access to active screen" is about which screen a capture APPEARS on, not
+    /// about a card following the mouse for the rest of its life.
+    /// </summary>
+    private SD.Rectangle PlacedOrBirthWorkingArea()
+    {
+        if (_placedWorkingArea.Height <= 0)
+            return BirthWorkingArea();
+        // Unless that monitor is gone: undocking between the capture and Done would
+        // otherwise place the card on coordinates no screen covers any more, which is an
+        // invisible card holding the only copy of a capture. A pinned seam IS the topology,
+        // so a synthetic monitor is always live.
+        if (BirthWorkingAreaProvider is not null ||
+            WF.Screen.AllScreens.Any(s => s.WorkingArea == _placedWorkingArea))
+            return _placedWorkingArea;
+        return BirthWorkingArea();
+    }
+
+    private void PositionFromSettings()
+    {
+        SD.Rectangle area = PlacedOrBirthWorkingArea();
         _placedWorkingArea = area;
         // Snapshot: a window closing mid-enumeration removes itself from OpenWindows.
         // Cards that are already flying out are skipped: they are still visible and still

@@ -2322,7 +2322,11 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         }
         else if (_mode == SelectorMode.Window && _hoverWindow is not null)
         {
-            brightScreen = _hoverWindow.Bounds;
+            // Mid-glide the border, the wash and the app-name pill all ride the interpolated
+            // rect — they are one object, so anything left behind on the settled window
+            // reads as the highlight coming apart. The readout does not: it follows the
+            // cursor in this mode, and the capture still takes _hoverWindow.Bounds.
+            brightScreen = tweening ? _hoverTween.Current : _hoverWindow.Bounds;
         }
         else if (_paneHover && _hoverPane is SD.Rectangle hoverPane)
         {
@@ -2432,7 +2436,17 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
 
         // Ask for the next frame. Self-sustaining for the 200 ms of the glide, then it stops
         // on its own because Update() clears IsActive once the stopwatch passes the duration.
-        if (tweenBefore != _hoverTween.Current)
+        //
+        // While it is RUNNING, not only when the rounded rect moved. The paint loop runs far
+        // faster than the border crosses a pixel boundary — measured at 1-3 ms a frame against
+        // a 200 ms glide — so between two windows a few pixels apart most frames land on the
+        // same rect, and the old "only if it changed" ask handed the loop nothing to run on:
+        // 38 of 40 paints over a 3 px move asked for no successor. The 15 ms follow tick is no
+        // safety net either, because it returns early unless the CURSOR moved. So the border
+        // stopped partway and sat there until the mouse twitched again, which is the one thing
+        // a glide must never do. Update() returns false on its final frame, so the last ask is
+        // the one made by a rect that actually changed.
+        if (tweening || tweenBefore != _hoverTween.Current)
             InvalidateHoverRegion(tweenBefore, _hoverTween.Current);
 
         // Cancel / Done bar on the adjustable selection: below the region, flipped above when it
@@ -2747,11 +2761,31 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _hoverAppName = next is null ? string.Empty : AppNameFor(next);
         BeginHoverWash(next is not null, previous is not null);
         if (previous is not null && next is not null)
+        {
+            // The border glides between windows instead of teleporting. Window mode used to
+            // draw _hoverWindow.Bounds raw: sweeping across a row of windows moved the
+            // border, the wash and the app-name pill the whole way in a single frame, which
+            // is the one thing on the overlay that cuts rather than moves. It rides the same
+            // tween and the same paint-driven frame loop area mode's element hover already
+            // uses — measured at 1.4-5.1 ms a frame against a WinForms timer's 13.5-30 ms,
+            // because WM_TIMER cannot beat the system tick no matter what timeBeginPeriod
+            // says, and a ~16 ms tick beating against a 16.7 ms refresh IS the judder.
+            _hoverTween.Retarget(previous.Bounds, next.Bounds);
             InvalidateHoverRegion(previous.Bounds, next.Bounds);
+        }
         else if (previous is not null)
+        {
+            // Nothing to glide to, and nothing to glide from: the first window the pointer
+            // meets after the overlay opens must appear on its own rect, not sail in from
+            // wherever the last one was.
+            _hoverTween.Stop();
             InvalidateScreenRect(Inflated(previous.Bounds));
+        }
         else if (next is not null)
+        {
+            _hoverTween.Stop();
             InvalidateScreenRect(Inflated(next.Bounds));
+        }
         return true;
     }
 
