@@ -79,11 +79,19 @@
                             <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Redo}"/></Viewbox>
                         </Button>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                        <!-- 20, not the resource's own 18. Crop is one of the two glyphs in
+                             this toolbar Survey has no counterpart for, and at 18 its house
+                             1.5-unit stroke painted 1.125 px — the lightest thing in the row,
+                             against Rotate's 1.5 px right beside it. At 20 it paints 1.25 px,
+                             which is Pan's weight exactly and inside the band the five
+                             Survey-ported glyphs occupy. Same trick Survey uses: hold the
+                             stroke, move the host size. -->
                         <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}"
                                 Click="OnCropClick" ToolTip="Crop"
                                 AutomationProperties.Name="Crop and resize"
-                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C."
-                                Content="{StaticResource SurveyIcon.Crop}"/>
+                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C.">
+                            <Viewbox Width="20" Height="20"><ContentControl Content="{StaticResource SurveyIcon.Crop}"/></Viewbox>
+                        </Button>
                         <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}"
                                 ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
                                 AutomationProperties.Name="Rotate clockwise"
@@ -115,8 +123,12 @@
                                      AutomationProperties.Name="Pan"
                                      AutomationProperties.HelpText="Drag to move the view. Middle-drag or hold Space works with any tool."
                                      Content="{StaticResource SurveyIcon.Pan}"/>
+                        <!-- FontSize is the glyph size (see SurveyIconToggle). 22, not the
+                             style's 20: live Survey renders the select cursor's mask span at
+                             22x22 where Pan's is 20x20 — a pointed glyph reads smaller than a
+                             blunt one, so it is drawn bigger to look the same size. -->
                         <RadioButton x:Name="SelectToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
-                                     Tag="Select" Checked="OnToolChecked" IsChecked="True"
+                                     Tag="Select" Checked="OnToolChecked" IsChecked="True" FontSize="22"
                                      ToolTip="Select" AutomationProperties.Name="Select"
                                      AutomationProperties.HelpText="Select annotations, drag a marquee, move, resize, or delete. Shortcut V."
                                      Content="{StaticResource SurveyIcon.Cursor}"/>
