@@ -161,6 +161,34 @@ public class EditorPropsProbe
                 // Per-row ink profile with PAN armed. Pan has no contextual controls at all,
                 // so anything painting right of the tool cluster is chrome, and this says
                 // which ROWS it is on — the alternative is guessing at a threshold.
+                // Which group click moves the centred tool row, and what changes with it?
+                lines.Add("########## GROUP-CLICK ROW STABILITY ##########");
+                {
+                    editor.Width = 1400; editor.UpdateLayout(); Pump();
+                    var row = (System.Windows.Controls.Grid)editor.FindName("ToolbarPrimaryRow");
+                    var toolsP = (FrameworkElement)editor.FindName("ToolPanel");
+                    var panSel = (FrameworkElement)editor.FindName("PanSelectPanel");
+                    var sec = (FrameworkElement)editor.FindName("SecondaryToolPanel");
+                    void Dump(string tag)
+                    {
+                        editor.UpdateLayout();
+                        for (int i = 0; i < 6; i++) Pump();
+                        editor.UpdateLayout(); Pump();
+                        string cols = string.Join(" | ", row.ColumnDefinitions.Select(c => $"{c.ActualWidth:F2}"));
+                        lines.Add($"    {tag,-16} toolX={toolsP.TransformToAncestor(editor).Transform(new Point(0,0)).X,8:F2}" +
+                                  $" toolW={toolsP.ActualWidth,7:F2} cols=[{cols}]" +
+                                  $" panSelW={panSel.ActualWidth:F2} secW={sec.ActualWidth:F2}" +
+                                  $" rowW={row.ActualWidth:F2}");
+                    }
+                    Dump("baseline");
+                    foreach (string bn in new[]{"DrawGroupBtn","ShapeGroupBtn","TextGroupBtn","EffectsGroupBtn","ImageGroupBtn"})
+                        if (editor.FindName(bn) is System.Windows.Controls.Button gb2)
+                        {
+                            gb2.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                            Dump(bn);
+                        }
+                }
+
                 lines.Add("########## PAN ROW PROFILE (window=1152) ##########");
                 {
                     toolField.SetValue(editor, EditorTool.Pan);
