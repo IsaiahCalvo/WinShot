@@ -138,11 +138,19 @@ public partial class EditorWindow : Window
             // grabbers on the crowns' hull padded by 1.5 * strokeWidth and says so in as many
             // words ("never the inner box the cloud was built from"). Padding 0 below because
             // that pad is already inside the frame CloudPath hands back.
-            case AnnotationData.TypeRectangle
+            case AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
                 when fe is Path cloudPath && cloudPath.Data is not null
                      && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud:
+                // Rotate the frame about the ELEMENT's centre, not the frame's own. They are
+                // the same point only when the crowns' hull is centred on the layout slot,
+                // which is true for a rectangle and NOT quite true for an ellipse: FitInside
+                // insets symmetrically but the ellipse crown walk does not land symmetrically,
+                // leaving the hull ~0.45 DIP off-centre at stroke 12. Rotating about the wrong
+                // point turns that into (I - R) * delta of drift — measured 0.63 DIP at 90
+                // degrees, which is the frame sitting off the ink it is supposed to wrap.
                 LayoutBoxHandles(
-                    CloudSelectionFrameInCanvas(cloudPath), AnnotationTransform.AngleOf(fe), 0);
+                    CloudSelectionFrameInCanvas(cloudPath), AnnotationTransform.AngleOf(fe), 0,
+                    rotationCentre: RotationCentre(fe));
                 break;
             // Survey isBorderFlush (SVGAnnotationLayer.jsx:5469-5470, :5659-5660): rect and
             // text put their handles ON the shape's own stroke (padding 0); everything else
@@ -838,6 +846,21 @@ public partial class EditorWindow : Window
         if (_handleKind == HandleKind.Vertex)
         {
             ApplyVertexDrag(fe, meta, local);
+            if (angle != 0)
+            {
+                // Same (R - I) compensation the endpoint drag needs, and for the same reason:
+                // moving ONE vertex moves the point cloud's bbox centre, which is the point the
+                // mark pivots about — so re-applying the angle afterwards swings the whole
+                // shape out from under the cursor by the rotation-induced part of that drift.
+                // Measure the drift, shift the geometry back by it, then restore the angle.
+                fe.UpdateLayout();
+                Vector d = RotationCentre(fe) - frozenCentre;
+                double rad = angle * Math.PI / 180, cos = Math.Cos(rad), sin = Math.Sin(rad);
+                ApplyVertexDrag(fe, meta, local,
+                    new Vector((cos - 1) * d.X - sin * d.Y, sin * d.X + (cos - 1) * d.Y));
+                fe.UpdateLayout();
+                AnnotationTransform.SetAngle(fe, angle);
+            }
             UpdateSelectionVisual();
             return;
         }
@@ -1138,10 +1161,19 @@ public partial class EditorWindow : Window
     /// nudge a neighbour by a rounding wobble. The rule itself lives in
     /// <see cref="PolyDraft.MoveVertex"/>, shared with the drafting code.
     /// </summary>
-    private void ApplyVertexDrag(FrameworkElement fe, AnnotationData meta, Point pos)
+    /// <param name="shift">
+    /// The rotation-drift correction, applied to EVERY vertex. This runs twice per frame on a
+    /// rotated shape (once to find the drift, once to cancel it), so it always rebuilds from
+    /// the PRE-DRAG points rather than from whatever the first pass wrote — reading back the
+    /// live geometry here would compound the shift on every mouse move.
+    /// </param>
+    private void ApplyVertexDrag(FrameworkElement fe, AnnotationData meta, Point pos,
+        Vector shift = default)
     {
         if (fe is not Path poly || _resizeBefore?.Points is not { Length: >= 2 } basePts) return;
         Point[] next = PolyDraft.MoveVertex(basePts, _activeHandle, pos);
+        if (shift != default)
+            for (int i = 0; i < next.Length; i++) next[i] += shift;
         fe.RenderTransform = null;   // the points are absolute now
         RebuildPolyGeometry(poly, meta, next);
     }
@@ -1274,7 +1306,7 @@ public partial class EditorWindow : Window
         fe.Height = b.Height;
         if (fe is Path path && fe.Tag is AnnotationData meta &&
             AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
-            path.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height),
+            path.Data = CloudPath.ForBox(meta.Type, new Rect(0, 0, fe.Width, fe.Height),
                 meta.CloudIntensity ?? cloudIntensity, path.StrokeThickness);
         if (fe.Tag is AnnotationData data &&
             data.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse)
@@ -1595,7 +1627,7 @@ public partial class EditorWindow : Window
                 fe.Width = snap.Bounds.Width;
                 fe.Height = snap.Bounds.Height;
                 if (fe is Path cloud && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud)
-                    cloud.Data = CloudPath.ForRectangle(new Rect(0, 0, fe.Width, fe.Height),
+                    cloud.Data = CloudPath.ForBox(meta.Type, new Rect(0, 0, fe.Width, fe.Height),
                         meta.CloudIntensity ?? _cloudIntensity, cloud.StrokeThickness);
                 meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
                 meta.Tx = 0;

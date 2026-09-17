@@ -1127,11 +1127,12 @@ internal static class AnnotationFactory
         StrokeRender render = StrokeRender.Clean, int seed = 0)
     {
         Shape shape;
-        if (type == AnnotationData.TypeRectangle && lineStyle == LineBorderStyle.Cloud)
+        if (type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
+            && lineStyle == LineBorderStyle.Cloud)
         {
             shape = new Path
             {
-                Data = CloudPath.ForRectangle(
+                Data = CloudPath.ForBox(type,
                     new Rect(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)),
                     cloudIntensity, thickness),
             };

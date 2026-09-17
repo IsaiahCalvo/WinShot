@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -32,11 +32,20 @@ namespace WinShot.Tests;
 /// </summary>
 public class CloudClipProbe
 {
+    /// <summary>
+    /// Both SIZED cloud shapes, because they share the whole trap: a rectangle and an ellipse
+    /// cloud are the same Path with the same explicit Width/Height and the same layout clip,
+    /// differing only in which walk CloudPath.ForBox picks. Ellipse only became reachable when
+    /// the five places that rebuilt a cloud's geometry stopped each spelling out "rectangle".
+    /// </summary>
     [Theory]
-    [InlineData(1.0)]
-    [InlineData(4.0)]
-    [InlineData(12.0)]
-    public void CloudCrownsAreNotClippedToTheirLayoutBox(double strokeWidth)
+    [InlineData(AnnotationData.TypeRectangle, 1.0)]
+    [InlineData(AnnotationData.TypeRectangle, 4.0)]
+    [InlineData(AnnotationData.TypeRectangle, 12.0)]
+    [InlineData(AnnotationData.TypeEllipse, 1.0)]
+    [InlineData(AnnotationData.TypeEllipse, 4.0)]
+    [InlineData(AnnotationData.TypeEllipse, 12.0)]
+    public void CloudCrownsAreNotClippedToTheirLayoutBox(string type, double strokeWidth)
     {
         const double W = 320, H = 180;
         Rect geom = default, ink = default;
@@ -47,7 +56,7 @@ public class CloudClipProbe
         {
             var shape = new WpfPath
             {
-                Data = CloudPath.ForRectangle(new Rect(0, 0, W, H), 2, strokeWidth),
+                Data = CloudPath.ForBox(type, new Rect(0, 0, W, H), 2, strokeWidth),
                 Stroke = Brushes.Black,
                 StrokeThickness = strokeWidth,
                 Fill = Brushes.Transparent,
@@ -114,10 +123,10 @@ public class CloudClipProbe
                 Directory.CreateDirectory(dir);
                 var enc = new PngBitmapEncoder();
                 enc.Frames.Add(BitmapFrame.Create(rtb));
-                using var fs = File.Create(System.IO.Path.Combine(dir, $"cloud-clip-w{strokeWidth}.png"));
+                using var fs = File.Create(System.IO.Path.Combine(dir, $"cloud-clip-{type}-w{strokeWidth}.png"));
                 enc.Save(fs);
             }
-            note = $"stroke={strokeWidth}  geometry={geom}  paintedInk={ink}  crownDepth={crownDepth:F1}";
+            note = $"{type} stroke={strokeWidth}  geometry={geom}  paintedInk={ink}  crownDepth={crownDepth:F1}";
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();

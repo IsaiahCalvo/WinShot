@@ -102,6 +102,12 @@ public class EditorShellContractTests
                      EditorContextControls.LineStyle | EditorContextControls.FillStrokeTabs |
                      EditorContextControls.CloudBump,
             EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: false));
+        // Survey offers Cloud on every region marker, so every cloud-capable tool carries the
+        // Bump field. Ellipse was the last one wired; polygon takes a rectangle's whole row.
+        foreach (var cloudTool in new[]
+                 { EditorTool.Rectangle, EditorTool.Ellipse, EditorTool.Polygon, EditorTool.Polyline })
+            Assert.True(EditorShellContract.ContextFor(cloudTool, false)
+                .HasFlag(EditorContextControls.CloudBump), $"{cloudTool} has no Bump field");
         Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
             .HasFlag(EditorContextControls.FillStrokeTabs));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)

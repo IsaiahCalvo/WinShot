@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -117,6 +117,15 @@ public class SelectionHandleAlignmentTests
                     worst = Math.Max(worst, d);
                 }
 
+                // A vertex drag on a ROTATED poly shape: the grabbed vertex has to land exactly
+                // where the pointer went, in world space, and no other vertex may move at all.
+                foreach (double dragAngle in new[] { 0.0, 30.0, 90.0 })
+                {
+                    double d = MeasureRotatedVertexDrag(editor, canvas, dragAngle, report);
+                    rows.Add($"vertex-drag/{dragAngle:0}deg={d:0.###}");
+                    worst = Math.Max(worst, d);
+                }
+
                 // The cloud's glow ring is new chrome with no numeric position to assert, so
                 // guard the two ways it actually breaks: gone when it should be there, or stuck
                 // on over the next selection.
@@ -207,6 +216,46 @@ public class SelectionHandleAlignmentTests
         var oval = new Rect(300, 200, 260, 190);
         yield return new Probe("ellipse", BoxData(AnnotationData.TypeEllipse, oval, thickness),
             fe => LocalBox(fe, 2));
+
+        // Ellipse with a cloud border. Survey offers Cloud on every region marker, and an
+        // ellipse cloud is the SAME object as a rect one — a Path with an explicit
+        // Width/Height whose crown ring is inset so the painted hull lands on the box — so it
+        // takes the same frame rule: the hull padded by one stroke width. Before CloudPath.ForBox
+        // existed, five separate places each decided "rectangle" and this case could not be
+        // drawn at all, let alone selected.
+        var ovalCloud = BoxData(AnnotationData.TypeEllipse, oval, thickness);
+        ovalCloud.LineStyle = "cloud";
+        // The rectangle's neat `box + strokeWidth` shorthand does NOT hold here, and the
+        // difference is the engine's, not the frame's: FitInside measures the crowns' overhang
+        // by building once on the box and reading it back, and an ellipse's crowns are placed
+        // along an arc-length walk, so one pass lands within a fraction of a DIP of flush
+        // rather than exactly on it (measured: 0.3 at stroke 1, 0.9 at stroke 12). Asserting
+        // `box + sw` here would be asserting a rectangle fact about an ellipse.
+        // So state the rule the code actually keeps, which is the same rule for both: the eight
+        // grabbers ride the crowns' own hull padded by 1.5 stroke widths, never the inner box
+        // the cloud was built from. That is the assertion that fails if an ellipse cloud falls
+        // back to the plain-ellipse branch, which is what it did before ForBox existed.
+        yield return new Probe("ellipse-cloud", ovalCloud, fe =>
+            BoxPoints(CloudPath.SelectionFrame(((Path)fe).Data, thickness), 0)
+                .Cast<Point?>().ToArray());
+
+        // Polygon / polyline: the handles ARE the vertices, one grabber each — Survey's own
+        // single-click chrome for them. Like a line, a poly shape has no layout slot: its run is
+        // authored straight in canvas coordinates, so the stored points go through the element
+        // transform unchanged and the targets are simply the points themselves. Sweeping this at
+        // 30 degrees is the whole point — a rotated poly shape is the case the vertex drag's
+        // (R - I) compensation exists for.
+        Point[] ring = { new(280, 240), new(620, 250), new(600, 470), new(300, 430) };
+        foreach (string polyType in new[] { AnnotationData.TypePolygon, AnnotationData.TypePolyline })
+            yield return new Probe(polyType,
+                new AnnotationData
+                {
+                    Type = polyType,
+                    Points = ring.Select(p => new[] { p.X, p.Y }).ToArray(),
+                    Color = "#FF34C759",
+                    Thickness = thickness,
+                },
+                _ => ring.Cast<Point?>().ToArray());
 
         // Line / arrow: the two endpoint thumbs ARE the selection, plus the bend dot at the
         // midpoint. A stroke annotation has no layout slot — its geometry is authored straight
@@ -366,6 +415,87 @@ public class SelectionHandleAlignmentTests
         Invoke(editor, "Select", null);
         canvas.Children.Remove(fe);
         return d;
+    }
+
+    /// <summary>
+    /// Drags one vertex of a rotated polygon and measures where that vertex ENDS UP in world
+    /// space against where the pointer asked for it — plus that no other vertex moved.
+    ///
+    /// This is the defect the endpoint drag already carried a fix for and the vertex drag did
+    /// not: moving one point moves the point cloud's bbox centre, which is the pivot the mark
+    /// turns about, so re-applying the angle afterwards swings the whole shape by the
+    /// rotation-induced part of that drift. At 0 degrees there is no drift and the uncompensated
+    /// code passes, which is exactly why the sweep has to include a real angle.
+    /// </summary>
+    private static double MeasureRotatedVertexDrag(EditorWindow editor, Canvas canvas,
+        double angle, StringBuilder report)
+    {
+        Point[] ring = { new(280, 240), new(620, 250), new(600, 470), new(300, 430) };
+        var data = new AnnotationData
+        {
+            Type = AnnotationData.TypePolygon,
+            Points = ring.Select(p => new[] { p.X, p.Y }).ToArray(),
+            Color = "#FF34C759",
+            Thickness = 4,
+            Angle = angle,
+        };
+        var fe = (FrameworkElement)ProjectSerializer.CreateElement(data, Array.Empty<BitmapSource>());
+        fe.Tag = data;
+        canvas.Children.Add(fe);
+        canvas.UpdateLayout();
+        if (angle != 0) AnnotationTransform.SetAngle(fe, angle);
+        canvas.UpdateLayout();
+        Pump(2);
+
+        Invoke(editor, "Select", fe);
+        Invoke(editor, "UpdateSelectionVisual");
+        Pump(2);
+
+        // Where every vertex is PAINTED before the drag. World space is the only frame both
+        // sides of this agree in: the authored points are expected to shift (the compensation
+        // translates all of them), what must not move is the ink.
+        Point[] before = ring.Select(fe.TransformToAncestor(canvas).Transform).ToArray();
+
+        const int vertex = 1;
+        Point grab = before[vertex];
+        Point drop = grab + new Vector(48, -33);
+
+        var type = typeof(EditorWindow);
+        type.GetMethod("BeginResize", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { vertex, grab });
+        type.GetMethod("DragResize", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(editor, new object[] { drop });
+        Pump(2);
+        type.GetMethod("EndResize", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(editor, null);
+        Pump(2);
+
+        double worst = double.MaxValue;
+        if (((AnnotationData)fe.Tag!).Points is { Length: 4 } after)
+        {
+            canvas.UpdateLayout();
+            var toCanvas = fe.TransformToAncestor(canvas);
+            Point[] now = after.Select(q => toCanvas.Transform(new Point(q[0], q[1]))).ToArray();
+            worst = (now[vertex] - drop).Length;
+            if (worst > ToleranceDip)
+                report.AppendLine($"vertex-drag angle={angle:0}: dragged vertex landed " +
+                    $"{worst:0.##} DIP from the pointer (asked {drop.X:0.#},{drop.Y:0.#}, " +
+                    $"got {now[vertex].X:0.#},{now[vertex].Y:0.#})");
+            for (int i = 0; i < now.Length; i++)
+            {
+                if (i == vertex) continue;
+                double moved = (now[i] - before[i]).Length;
+                if (moved > ToleranceDip)
+                    report.AppendLine($"vertex-drag angle={angle:0}: vertex {i} moved {moved:0.##} DIP");
+                worst = Math.Max(worst, moved);
+            }
+        }
+        else
+            report.AppendLine($"vertex-drag angle={angle:0}: the polygon lost its points");
+
+        Invoke(editor, "Select", null);
+        canvas.Children.Remove(fe);
+        return worst;
     }
 
     /// <summary>

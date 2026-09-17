@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace WinShot.Editor;
@@ -106,6 +106,21 @@ internal static class CloudPath
     }
 
     private static Point[] Corners(Rect b) => [b.TopLeft, b.TopRight, b.BottomRight, b.BottomLeft];
+
+    /// <summary>
+    /// The crowns for a BOX-shaped cloud, chosen by annotation type. Rectangle and ellipse
+    /// differ only in how the engine walks the four corners they are both handed — a rectangle
+    /// by edge, an ellipse as an arc-length table — so every caller that rebuilds a sized
+    /// cloud's geometry (the live drag, the resize, both restyle paths, the undo snapshot)
+    /// routes through this one call rather than each deciding for itself. That is what kept
+    /// the ellipse cloud unreachable: the decision was spelled out five times, all of them
+    /// saying "rectangle".
+    /// </summary>
+    public static PathGeometry ForBox(string type, Rect bounds, double intensity = DefaultIntensity,
+        double strokeWidth = 1) =>
+        type == AnnotationData.TypeEllipse
+            ? ForEllipse(bounds, intensity, strokeWidth)
+            : ForRectangle(bounds, intensity, strokeWidth);
 
     /// <summary>
     /// A polygon's crowns: built on the vertex ring ITSELF, not on its bounding box. This is
