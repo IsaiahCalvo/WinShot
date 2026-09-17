@@ -1270,7 +1270,15 @@
         <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
-        <Setter Property="Padding" Value="8,5"/>
+        <!-- Vertical padding is ZERO, because a TextBox charges it twice: once here, as the
+             content host's Margin in the template below, and once inside the control, which
+             insets its own text view by Padding as well. At 8,5 that spent 20 px of a 28 px
+             field on padding and left 8 px for a 17 px line, so every field using this style
+             showed a 3 px sliver of its own value — the Resize dialog's width, height and
+             scale, the colour picker's hex field and the composer's. Settings looked right
+             only because its own TextBox style sets 8,0. The line is centred by
+             VerticalContentAlignment, which needs no padding to do it. -->
+        <Setter Property="Padding" Value="8,0"/>
         <Setter Property="Height" Value="30"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
@@ -1279,8 +1287,13 @@
                     <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             CornerRadius="{StaticResource RadiusInput}">
-                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
-                                      VerticalAlignment="Center"/>
+                        <!-- The content host FILLS the field; the text is centred inside it by
+                             VerticalContentAlignment above. Giving the ScrollViewer itself
+                             VerticalAlignment="Center" let it take a desired height of its own
+                             and then clip the line to it — in the Resize dialog all three
+                             number fields showed only the bottom 3 px of their digits, so the
+                             size you were about to resize to was unreadable. -->
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocused" Value="True">

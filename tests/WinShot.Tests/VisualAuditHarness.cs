@@ -197,12 +197,26 @@ public class VisualAuditHarness
 
         var withInk = RenderWindowBits(win, dpi);
         var saved = new List<(FrameworkElement El, double Op)>();
+        var savedFg = new List<(TextBox Box, Brush Fg)>();
         foreach (var t in targets)
+        {
+            // A TextBox draws its own text through a template content host, not through any
+            // element whose Opacity we can reach, so hiding presenters left the text on screen
+            // and the diff picked up a stray hairline instead — the resize dialog's fields all
+            // measured 3 px of "ink". Its Foreground is the handle that works.
+            if (t.Fe is TextBox box)
+            {
+                savedFg.Add((box, box.Foreground));
+                box.Foreground = Brushes.Transparent;
+                continue;
+            }
             foreach (var p in t.Presenters) { saved.Add((p, p.Opacity)); p.Opacity = 0; }
+        }
         win.UpdateLayout();
         Pump();
         var withoutInk = RenderWindowBits(win, dpi);
         foreach (var (el, op) in saved) el.Opacity = op;
+        foreach (var (box, fg) in savedFg) box.Foreground = fg;
         win.UpdateLayout();
         Pump();
 
@@ -210,6 +224,9 @@ public class VisualAuditHarness
         var a = Pixels(withInk);
         var b = Pixels(withoutInk);
 
+        // Pass 1: measure. Pass 2: flag, because "this icon is out of step with its row" can
+        // only be answered once the rest of the row has been measured.
+        var seen = new List<Measured>();
         foreach (var (fe, presenters, text) in targets)
         {
             try
@@ -218,50 +235,83 @@ public class VisualAuditHarness
                 if (box.Width < 4 || box.Height < 4) continue;
                 var ink = InkIn(a, b, stride, box);
                 if (ink.IsEmpty) continue;
-
-                int cw = box.Width, ch = box.Height;
                 ink.Offset(-box.X, -box.Y);
-                int gl = ink.Left, gt = ink.Top, gr = cw - ink.Right, gb = ch - ink.Bottom;
-                double pct = ch == 0 ? 0 : 100.0 * ink.Height / ch;
-
-                var flags = new List<string>();
-                double px = dpi / 96.0;
-                bool isText = text.Length > 0;
-                // A CheckBox/RadioButton draws its box hard against the left edge and its label
-                // beside it: left-hugging and lopsided are the design, not a defect. Only the
-                // vertical edges say anything about those.
-                bool leftAligned = fe is CheckBox or RadioButton or TextBox;
-
-                if (gt < 2 * px || gb < 2 * px) flags.Add("CLIPPED-V");
-                if (!leftAligned && (gl < 2 * px || gr < 2 * px)) flags.Add("CLIPPED-H");
-
-                // Cap ink sits above the baseline, so a correctly centred word with no
-                // descender measures ~1 px high-heavy; allow that plus a pixel of rounding.
-                double vTol = isText ? 2 * px + 0.12 * ink.Height : Math.Max(1, px);
-                if (Math.Abs(gt - gb) > vTol) flags.Add("OFFCENTRE-V");
-                if (!leftAligned && Math.Abs(gl - gr) > 2 * px) flags.Add("LOPSIDED-H");
-
-                // Only a *button* owes its label a share of its own height; a checkbox label
-                // inside a tall settings row is meant to be small.
-                if (pct < 30 && fe is ButtonBase && !leftAligned) flags.Add("TINY");
-
-                string id = Id(fe);
-                rows.Add(string.Join("\t", surface, (int)dpi, id, fe.GetType().Name,
-                    Flat(text.Length == 0 ? "(icon)" : text), Row(fe),
-                    box.X, box.Y, cw, ch, ink.Width, ink.Height, gl, gt, gr, gb,
-                    pct.ToString("F0", CultureInfo.InvariantCulture),
-                    Stroke(a, b, stride, box).ToString("F2", CultureInfo.InvariantCulture),
-                    flags.Count == 0 ? "ok" : string.Join("+", flags)));
-
-                if (flags.Count > 0)
-                    Crop4x(win, fe, dpi, Path.Combine(cropDir, $"{surface}-{id}-{(int)dpi}-4x.png"));
+                seen.Add(new Measured(fe, Id(fe), text, Row(fe), box, ink,
+                    Stroke(a, b, stride, box)));
             }
             catch
             {
-                // A control that cannot be rendered in isolation (no presentation source yet)
-                // is not a defect; skip rather than fail the sweep.
+                // A control with no presentation source yet is not a defect; skip it.
             }
         }
+
+        var rowInkHeights = seen
+            .Where(m => m.Text.Length == 0 && m.Fe is ButtonBase)
+            .GroupBy(m => m.RowName)
+            .ToDictionary(g => g.Key, g => Median(g.Select(m => (double)m.Ink.Height).ToList()));
+
+        double px = dpi / 96.0;
+        foreach (var m in seen)
+        {
+            int cw = m.Box.Width, ch = m.Box.Height;
+            int gl = m.Ink.Left, gt = m.Ink.Top, gr = cw - m.Ink.Right, gb = ch - m.Ink.Bottom;
+            double pct = ch == 0 ? 0 : 100.0 * m.Ink.Height / ch;
+            bool isText = m.Text.Length > 0;
+            // A CheckBox or RadioButton IS its box: the box defines the control's height and
+            // hugs its left edge, so clipping and lopsidedness mean nothing there. Flagging
+            // them buried the real findings under twenty rows of noise.
+            bool boxIsTheControl = m.Fe is CheckBox or RadioButton
+                || (m.Fe is ToggleButton && m.Fe.TemplatedParent is ComboBox);
+
+            var flags = new List<string>();
+            if (!boxIsTheControl)
+            {
+                if (gt < 2 * px || gb < 2 * px) flags.Add("CLIPPED-V");
+                if (m.Fe is not TextBox && (gl < 2 * px || gr < 2 * px)) flags.Add("CLIPPED-H");
+                if (m.Fe is not TextBox && Math.Abs(gl - gr) > 2 * px) flags.Add("LOPSIDED-H");
+            }
+
+            // Cap ink sits above the baseline, so a correctly centred word with no descender
+            // measures ~1 px high-heavy; allow that plus a pixel of rounding.
+            // A cap stops 0.70em above the baseline and a descender falls 0.29em below it, so
+            // a perfectly centred word measures top-heavy in proportion to its own ink height.
+            // At 0.12 this flagged Copy, Drag & Drop and Scrolling, all of which sit correctly.
+            double vTol = isText ? 2 * px + 0.25 * m.Ink.Height : Math.Max(1, px);
+            if (Math.Abs(gt - gb) > vTol) flags.Add("OFFCENTRE-V");
+
+            // A 13 px label in a 30 px pill measures 30 % — that is the normal, correct value,
+            // so the bar sits below it. Under a quarter of the button is a label that reads as
+            // a small word lost in a big control.
+            if (isText && pct < 26 && m.Fe is ButtonBase && !boxIsTheControl) flags.Add("TINY");
+
+            // An icon is judged against its own row, not against a constant: what makes a row
+            // look thrown together is one glyph drawn a different size from its neighbours.
+            if (!isText && m.Fe is ButtonBase
+                && rowInkHeights.TryGetValue(m.RowName, out double med) && med > 0
+                && Math.Abs(m.Ink.Height - med) / med > 0.25)
+                flags.Add($"ODD-SIZE({m.Ink.Height}v{med:F0})");
+
+            rows.Add(string.Join("\t", surface, (int)dpi, m.Id, m.Fe.GetType().Name,
+                Flat(isText ? m.Text : "(icon)"), m.RowName,
+                m.Box.X, m.Box.Y, cw, ch, m.Ink.Width, m.Ink.Height, gl, gt, gr, gb,
+                pct.ToString("F0", CultureInfo.InvariantCulture),
+                m.Stroke.ToString("F2", CultureInfo.InvariantCulture),
+                flags.Count == 0 ? "ok" : string.Join("+", flags)));
+
+            if (flags.Count > 0)
+                Crop4x(win, m.Fe, dpi, Path.Combine(cropDir, $"{surface}-{m.Id}-{(int)dpi}-4x.png"));
+        }
+    }
+
+    private sealed record Measured(
+        FrameworkElement Fe, string Id, string Text, string RowName,
+        SD.Rectangle Box, SD.Rectangle Ink, double Stroke);
+
+    private static double Median(List<double> v)
+    {
+        if (v.Count == 0) return 0;
+        v.Sort();
+        return v[v.Count / 2];
     }
 
     /// <summary>
@@ -370,9 +420,21 @@ public class VisualAuditHarness
         {
             dc.DrawRectangle(Brushes.Magenta, null, new Rect(0, 0, bw, bh));
             dc.PushTransform(new TranslateTransform(Pad - tl.X, Pad - tl.Y));
+            // The window's LAYOUT box, mapped 1:1. Stretch.None aligns a visual's CONTENT
+            // bounds, which for a window with a drop shadow or an open popup start outside the
+            // layout box and slid every crop by the overhang.
+            var page = new Rect(0, 0, win.ActualWidth, win.ActualHeight);
             dc.DrawRectangle(
-                new VisualBrush(win) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top },
-                null, new Rect(0, 0, win.ActualWidth, win.ActualHeight));
+                new VisualBrush(win)
+                {
+                    Stretch = Stretch.Fill,
+                    ViewboxUnits = BrushMappingMode.Absolute,
+                    Viewbox = page,
+                    ViewportUnits = BrushMappingMode.Absolute,
+                    Viewport = page,
+                    TileMode = TileMode.None,
+                },
+                null, page);
             dc.Pop();
         }
         rtb.Render(dv);
@@ -416,20 +478,17 @@ public class VisualAuditHarness
         return "-";
     }
 
-    private static string ContentText(FrameworkElement fe) => fe switch
+    /// <summary>
+    /// The words a control shows, if any. A button holding an icon AND a label — Drag &amp; Drop,
+    /// the History sort button — is a text button: judging its ink with an icon's one-pixel
+    /// centring tolerance flagged three labels that were sitting exactly where they should.
+    /// </summary>
+    private static string ContentText(FrameworkElement fe)
     {
-        TextBox tb => tb.Text,
-        ContentControl cc => cc.Content as string ?? TextOf(cc.Content),
-        _ => string.Empty,
-    };
-
-    private static string TextOf(object? content) => content switch
-    {
-        null => string.Empty,
-        TextBlock t => t.Text,
-        string s => s,
-        _ => string.Empty,
-    };
+        if (fe is TextBox tb) return tb.Text;
+        if (fe is ContentControl cc && cc.Content is string s) return s;
+        return string.Concat(Descendants(fe).OfType<TextBlock>().Select(t => t.Text));
+    }
 
     private static string Flat(string s) =>
         s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
