@@ -2334,14 +2334,24 @@
         </Setter>
     </Style>
 
-    <!-- The fit trigger is a 36x28 cell with a 2px radius. -->
+    <!-- The fit trigger is a 36x28 cell with a 2px radius.
+
+         The ContentPresenter STRETCHES, and that is the whole point of this template.
+         Its content is a two-layer Grid — the chevron pinned to the left edge, the fit-mode
+         glyph independently centred — which is Survey's layout (its 36x28 cell puts the
+         12px chevron at x=2 and the 16px glyph at x=10, so their INK clears by ~6px). A
+         centred ContentPresenter measures that Grid to its own content instead, 16 DIP,
+         and then "pinned left" and "centred" mean the same place: the chevron drew straight
+         through the middle of the page glyph and the button rendered as an unreadable blob
+         with the page's three rules lost underneath a chevron. Alignment inside the content
+         only means anything once the content has the cell's full width to align within. -->
     <Style x:Key="RailFitButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
         <Setter Property="Width" Value="36"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="2">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Border>
                 </ControlTemplate>
