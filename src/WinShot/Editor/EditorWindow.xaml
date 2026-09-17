@@ -1178,7 +1178,7 @@
                          mark, which can be moved, resized and restyled after it is drawn. -->
                     <StackPanel x:Name="EffectsGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="RedactToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Redact" Content="&#xE7E6;" Checked="OnToolChecked" ToolTip="Redact (X)"
+                                     Tag="Redact" Content="{StaticResource SurveyIcon.Pixelate}" Checked="OnToolChecked" ToolTip="Redact (X)"
                                      AutomationProperties.Name="Redact"
                                      AutomationProperties.HelpText="Cover a dragged region with a movable, re-styleable redaction. Shortcut X."/>
                         <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
@@ -1187,7 +1187,7 @@
                                      AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
                                      Content="{StaticResource SurveyIcon.Spotlight}"/>
                         <RadioButton x:Name="MagnifierToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Magnifier" Content="&#xE71E;" Checked="OnToolChecked" ToolTip="Magnify (M)"
+                                     Tag="Magnifier" Content="{StaticResource SurveyIcon.Magnifier}" Checked="OnToolChecked" ToolTip="Magnify (M)"
                                      AutomationProperties.Name="Magnify"
                                      AutomationProperties.HelpText="Drag a bubble that shows a piece of the picture blown up. Drag its ring to aim it somewhere else. Shortcut M."/>
                     </StackPanel>
@@ -1203,7 +1203,7 @@
                                      ToolTip="Crop &amp; resize (C)"
                                      AutomationProperties.Name="Crop and resize"
                                      AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut C."/>
-                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xEE71;"
+                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddImage}"
                                 Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                 AutomationProperties.Name="Add screenshot or image"
                                 AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
@@ -1211,7 +1211,7 @@
                                 Click="OnAddCapture" ToolTip="Add capture…"
                                 AutomationProperties.Name="Add capture"
                                 AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
-                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE790;"
+                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Background}"
                                 Click="OnAddBackground" ToolTip="Add background (B)"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>

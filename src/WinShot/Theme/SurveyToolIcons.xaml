@@ -135,21 +135,6 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Survey src/Icons.jsx `text`. Its group transform translate(12 12) scale(1.2)
-         translate(-12 -12) was missing here, so the serif T rendered 20% small. -->
-    <Viewbox x:Key="SurveyIcon.Text" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Canvas Width="24" Height="24">
-                <Canvas.RenderTransform>
-                    <ScaleTransform ScaleX="1.2" ScaleY="1.2" CenterX="12" CenterY="12"/>
-                </Canvas.RenderTransform>
-                <Path Style="{StaticResource SurveyIconStroke}" Data="M4,7 L4,4 L20,4 L20,7"/>
-                <Path Style="{StaticResource SurveyIconStroke}" Data="M9,20 L15,20"/>
-                <Path Style="{StaticResource SurveyIconStroke}" Data="M12,4 L12,20"/>
-            </Canvas>
-        </Canvas>
-    </Viewbox>
-
     <!-- Survey src/assets/icons/callout-arrow-outline.svg, verbatim. That file's owner rule:
          nothing inside the bubble — no underscore, no "T" — so the two inner lines this
          used to carry are gone, and the leader is a 5-unit, 90-degree open arrowhead. -->
@@ -164,13 +149,6 @@
     <Viewbox x:Key="SurveyIcon.Rect" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="18" Height="18" RadiusX="2" RadiusY="2"/>
-        </Canvas>
-    </Viewbox>
-
-    <Viewbox x:Key="SurveyIcon.FilledRect" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconFill}"
-                       Canvas.Left="3" Canvas.Top="3" Width="18" Height="18" RadiusX="2" RadiusY="2"/>
         </Canvas>
     </Viewbox>
 
@@ -302,25 +280,40 @@
         </Canvas>
     </Viewbox>
 
-    <Viewbox x:Key="SurveyIcon.Blur" x:Shared="False" Width="18" Height="18">
+    <!-- The REDACT tool's glyph, and the only thing that renders it. It used to be a Segoe
+         MDL2 code point (&#xE7E6;) set as a ToggleButton's text Content, and StripToolButton
+         never sets FontFamily — so the code point fell back to the UI font and the button
+         rendered a literal tofu box. Every icon in this toolbar is a path now.
+
+         Survey has no region-redaction glyph to port: its Blur and Pixelate tools do not
+         exist any more (they are two of the four STYLES of WinShot's re-editable redaction
+         mark), and its text-redact.svg is an "A under a black bar" for redacting selected
+         TEXT — the wrong idea for a dragged region. So this is WinShot's own mark, drawn to
+         the house rules, using the mosaic that was already in this file.
+
+         Rebalanced from the old 9-cell grid, which measured 113.8 px2 of ink at 18 px —
+         roughly double the 50-66 band its neighbours occupy, because it carried four solid
+         5-unit cells AND five stroked ones. A five-cell checkerboard says "pixelated" with
+         the ink of one glyph instead of two, and the empty cells do the same work the
+         stroked ones did without paying for them. -->
+    <Viewbox x:Key="SurveyIcon.Pixelate" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}"
-                  Data="M12,3 C12,3 6.5,10.5 6.5,15 A5.5,5.5 0 0 0 17.5,15 C17.5,10.5 12,3 12,3 Z"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3.2"  Canvas.Top="3.2"  Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16.2" Canvas.Top="3.2"  Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.7"  Canvas.Top="9.7"  Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3.2"  Canvas.Top="16.2" Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16.2" Canvas.Top="16.2" Width="4.6" Height="4.6"/>
         </Canvas>
     </Viewbox>
 
-    <!-- Source: Theme/Icons/pixelate.svg -->
-    <Viewbox x:Key="SurveyIcon.Pixelate" x:Shared="False" Width="18" Height="18">
+    <!-- The MAGNIFIER tool's glyph. Same story as Redact: it was &#xE71E; as text Content and
+         rendered as a tofu box. Survey DOES have this one — src/Icons.jsx `search`, a circle
+         at (11,11) r8 with a M20,20 L16,16 handle, both stroke 1.5 — so it is ported verbatim
+         rather than invented. 1.5 at the sub-row's 20 px host is 1.25 px, the family weight. -->
+    <Viewbox x:Key="SurveyIcon.Magnifier" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.5" Canvas.Top="3" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="16" Canvas.Top="3" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3" Canvas.Top="9.5" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="9.5" Canvas.Top="9.5" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16" Canvas.Top="9.5" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="16" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.5" Canvas.Top="16" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="16" Canvas.Top="16" Width="5" Height="5"/>
+            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="16" Height="16"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M20,20 L16,16"/>
         </Canvas>
     </Viewbox>
 
@@ -382,12 +375,6 @@
             <Path Style="{StaticResource SurveyIconStroke}" Data="M2,6 H18 V22"/>
         </Canvas>
     </Viewbox>
-    <Viewbox x:Key="SurveyIcon.Resize" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="18" Height="18" RadiusX="2" RadiusY="2"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,15 L15,9 M15,9 H11 M15,9 V13"/>
-        </Canvas>
-    </Viewbox>
     <Viewbox x:Key="SurveyIcon.AddImage" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Path Style="{StaticResource SurveyIconStroke}" Data="M13,4 H5 A2,2 0 0 0 3,6 V18 A2,2 0 0 0 5,20 H19 A2,2 0 0 0 21,18 V12"/>
@@ -436,17 +423,7 @@
             <Path Style="{StaticResource SurveyIconStroke}" Data="M6,9 L12,15 L18,9"/>
         </Canvas>
     </Viewbox>
-    <Viewbox x:Key="SurveyIcon.ChevronLeft" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M15,6 L9,12 L15,18"/>
-        </Canvas>
-    </Viewbox>
 
-    <Viewbox x:Key="SurveyIcon.ChevronUp" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M18,15 L12,9 L6,15"/>
-        </Canvas>
-    </Viewbox>
     <Viewbox x:Key="SurveyIcon.Download" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Path Style="{StaticResource SurveyIconStroke}" Data="M21,15 V19 C21,19.5304 20.7893,20.0391 20.4142,20.4142 C20.0391,20.7893 19.5304,21 19,21 H5 C4.46957,21 3.96086,20.7893 3.58579,20.4142 C3.21071,20.0391 3,19.5304 3,19 V15"/>
