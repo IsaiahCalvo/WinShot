@@ -20,6 +20,10 @@ internal sealed class RectangleTween
 {
     private static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(WinShot.Core.Motion.GlideDurationMs);
 
+    /// <summary>One animation frame, the budget <see cref="Update()"/> advances on.</summary>
+    private static readonly long FrameTicks =
+        TimeSpan.FromMilliseconds(WinShot.Core.Motion.FrameIntervalMs).Ticks;
+
     /// <summary>How far past the target an eased amount may carry the rect. Comfortably above
     /// EaseOutBack's ~1.10 peak and low enough that nonsense stays on screen.</summary>
     private const float MaxOvershoot = 1.2f;
@@ -27,6 +31,11 @@ internal sealed class RectangleTween
     private readonly Stopwatch _clock = new();
     private SD.RectangleF _from;
     private SD.RectangleF _to;
+
+    /// <summary>Elapsed time at the last advance <see cref="Update()"/> actually performed, and
+    /// what that advance answered. See <see cref="Update()"/> for why they are kept.</summary>
+    private long _advancedTicks = -1;
+    private bool _advancedRunning;
 
     public bool IsActive { get; private set; }
 
@@ -41,23 +50,68 @@ internal sealed class RectangleTween
         // back to the caller's origin — don't "tidy up" the threshold.
         _from = IsActive && Current.Width > 2 && Current.Height > 2 ? Current : from;
         _to = to;
+
+        // Animation turned off system-wide (Settings > Accessibility > Visual effects) means
+        // the highlight LANDS, the way every Motion.Run tween in the app already does. This one
+        // reads its own stopwatch instead of going through Motion.Run, so it had been ignoring
+        // the setting outright — and round 2 widened that from the window-to-window sweep to
+        // the entrance and the exit as well, which is the whole highlight.
+        if (!WinShot.Core.Motion.AnimationsEnabled())
+        {
+            Current = SD.Rectangle.Round(_to);
+            Stop();
+            return;
+        }
+
         Current = RoundEdges(_from.Left, _from.Top, _from.Right, _from.Bottom);
         IsActive = true;
         _clock.Restart();
+        // The clock went back to zero, so the frame budget in Update() has to as well — held
+        // against a stamp from the old flight it would refuse to advance the first frame or
+        // two of the new one, which is a stall at the exact moment the pointer is moving.
+        _advancedTicks = -1;
     }
 
     public void Stop()
     {
         IsActive = false;
         _clock.Reset();
+        _advancedTicks = -1;
     }
 
-    /// <summary>Advances to the current wall-clock position. Returns whether it is still running.</summary>
-    public bool Update() =>
+    /// <summary>
+    /// Advances to the current wall-clock position, at most ONCE per animation frame. Returns
+    /// whether it is still running.
+    ///
+    /// The frame budget is the reason for the "at most once". The selector paints one surface
+    /// per monitor and every one of them calls this, so on a multi-monitor desktop the second
+    /// surface used to advance the glide again 1-3 ms after the first: the two halves of one
+    /// border straddling a seam were computed from two different moments and landed a pixel
+    /// apart for that frame, all the way across. Holding the answer for the rest of the frame
+    /// means every surface in a paint round draws the same rectangle, which is the only way a
+    /// highlight spanning two displays can be one object.
+    ///
+    /// It is also the whole point of <see cref="WinShot.Core.Motion.FrameIntervalMs"/>. The
+    /// glide rides the paint loop, which round 1 measured at 1.4 ms a frame — so it was
+    /// advancing ~140 times over a 200 ms glide's 25 intended frames, burning repaints on
+    /// sub-pixel moves that round to the same rect.
+    /// </summary>
+    public bool Update()
+    {
+        if (!IsActive)
+            return false;
+
+        long ticks = _clock.Elapsed.Ticks;
+        if (_advancedTicks >= 0 && ticks - _advancedTicks < FrameTicks)
+            return _advancedRunning;
+
+        _advancedTicks = ticks;
         // Clamped, because the overload below ends only on an exact 1.0 so that an eased
         // caller may overshoot past it. This one owns a plain linear clock with no overshoot
         // in it, and a late frame lands past the duration routinely.
-        Update(Duration.Ticks <= 0 ? 1f : Math.Min(1f, (float)_clock.Elapsed.Ticks / Duration.Ticks));
+        _advancedRunning = Update(Duration.Ticks <= 0 ? 1f : Math.Min(1f, (float)ticks / Duration.Ticks));
+        return _advancedRunning;
+    }
 
     /// <summary>
     /// Advances to an explicit amount, for callers that already own the clock and the curve
