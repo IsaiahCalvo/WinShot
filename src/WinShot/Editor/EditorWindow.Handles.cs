@@ -353,7 +353,20 @@ public partial class EditorWindow : Window
     /// </summary>
     private void PaintCloudGlow(Path? cloud)
     {
-        if (cloud?.Data is not PathGeometry crowns || HoverHalo is null)
+        if (cloud?.Data is not { } crowns || HoverHalo is null)
+        {
+            if (_cloudGlow is not null) _cloudGlow.Visibility = Visibility.Collapsed;
+            return;
+        }
+        // NOT while the shape is under the pointer. The ring is by far the most expensive thing
+        // in a cloud's frame: it widens every crown TWICE, subtracts the two, and the result is
+        // deep-cloned into canvas space before WPF rasterises a boolean. Measured on a Bump-1
+        // 3000x2000 cloud, building the ring alone was 54 ms against 14 ms to rebuild the whole
+        // cloud, and taking it out of the resize path cut that frame from 594 ms to single
+        // figures. It is chrome on a shape the user is actively dragging — the same deal the
+        // editor already makes with the hover halo — and EndResize/EndMove both finish through
+        // UpdateSelectionVisual, so it comes back on release without a second code path.
+        if (_activeHandle >= 0 || _dragging || _movingSelection)
         {
             if (_cloudGlow is not null) _cloudGlow.Visibility = Visibility.Collapsed;
             return;
