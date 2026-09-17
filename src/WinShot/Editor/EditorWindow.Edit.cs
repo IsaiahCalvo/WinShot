@@ -287,6 +287,12 @@ public partial class EditorWindow : Window
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
 
+        // An in-progress polygon / polyline draft takes Enter and Escape ahead of every other
+        // handler, the way Survey's capture-phase window listener does
+        // (SVGAnnotationLayer.jsx:1757-1777). Escape especially: cancelling the shape you are
+        // drawing is more specific than the editor's own "clear the selection".
+        if (_polyDraft is not null && PolyKeyDown(e.Key)) { e.Handled = true; return; }
+
         if (e.Key == Key.Space)
         {
             if (!_spaceDown)

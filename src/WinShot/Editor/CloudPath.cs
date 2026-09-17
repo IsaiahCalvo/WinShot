@@ -108,6 +108,25 @@ internal static class CloudPath
     private static Point[] Corners(Rect b) => [b.TopLeft, b.TopRight, b.BottomRight, b.BottomLeft];
 
     /// <summary>
+    /// A polygon's crowns: built on the vertex ring ITSELF, not on its bounding box. This is
+    /// the call that makes clouds stop being rectangle-only — the engine has always taken an
+    /// arbitrary ring (and is parity-tested on concave pentagons, ten-point stars and
+    /// counter-clockwise windings), it just had no caller that handed it one.
+    /// <para>There is no <see cref="FitInside"/> here, and that is deliberate rather than an
+    /// omission: the inset exists because a rect/ellipse cloud is hung on a Shape with an
+    /// explicit Width/Height, and WPF layout-clips a Stretch.None Shape to that slot. A poly
+    /// shape is drawn in ABSOLUTE canvas coordinates on a Path with no size of its own, the
+    /// way a line or an arrow is, so nothing clips its crowns and pulling the ring in would
+    /// only shrink the shape the user drew.</para>
+    /// </summary>
+    public static PathGeometry ForPolygon(IReadOnlyList<Point> ring, double intensity = DefaultIntensity) =>
+        For(CloudKind.Polygon, ring, intensity);
+
+    /// <summary>The same, left open: no body figure, so no phantom chord closing the run.</summary>
+    public static PathGeometry ForPolyline(IReadOnlyList<Point> run, double intensity = DefaultIntensity) =>
+        For(CloudKind.Polyline, run, intensity);
+
+    /// <summary>
     /// The crowns for any cloud-capable shape. The body is filled but never stroked, so the
     /// fill is the scalloped region and the ink is only the crowns; an open shape has no
     /// interior, so it gets no body figure.

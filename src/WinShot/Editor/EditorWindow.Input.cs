@@ -132,6 +132,19 @@ public partial class EditorWindow : Window
             }
         }
 
+        // Polygon / polyline are CLICK-TO-PLACE, not drag-out, so they never reach
+        // DrawMouseDown's press-drag-release machinery: every left click drops one vertex, and
+        // the run is finished explicitly (EditorWindow.Poly.cs).
+        if (PolyDraft.IsPolyTool(_tool))
+        {
+            CommitText();
+            if (PolyPointerDown(pos, Keyboard.Modifiers.HasFlag(ModifierKeys.Shift), e.ClickCount))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (_tool == EditorTool.Select)
         {
             SelectMouseDown(pos, e);
@@ -157,6 +170,15 @@ public partial class EditorWindow : Window
             ClampView();
             return;
         }
+        // The rubber band tracks the cursor for as long as a draft is alive — no button held,
+        // because a click-to-place draft is not a drag.
+        if (_polyDraft is not null)
+        {
+            PolyPointerMove(e.GetPosition(AnnotationCanvas),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
+            return;
+        }
+
         bool onHandle = false;
         if (_activeHandle < 0 && !_dragging && !_movingSelection && !_marqueeSelecting && _handleKind != HandleKind.None)
         {

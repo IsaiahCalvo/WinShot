@@ -111,7 +111,9 @@ internal static class EditorShellContract
         EditorToolCategory.Draw => new[] { "Freehand", "Highlighter", "Eraser" },
         EditorToolCategory.Shapes => new[]
         {
-            "Rectangle", "Ellipse", "Line", "Arrow", "Step",
+            // Survey's order (PDFViewer.jsx:34035-34045): Polygon and Polyline sit between
+            // the closed shapes and the open ones because that is what they bridge.
+            "Rectangle", "Ellipse", "Polygon", "Polyline", "Line", "Arrow", "Step",
         },
         EditorToolCategory.Text => new[] { "Text", "Callout" },
         EditorToolCategory.Redact => new[] { "Redact", "Spotlight", "Magnifier" },
@@ -135,7 +137,8 @@ internal static class EditorShellContract
     public static EditorToolCategory? CategoryOf(EditorTool tool) => tool switch
     {
         EditorTool.Freehand or EditorTool.Highlighter or EditorTool.Eraser => EditorToolCategory.Draw,
-        EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Line or EditorTool.Arrow
+        EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Polygon or EditorTool.Polyline
+            or EditorTool.Line or EditorTool.Arrow
             or EditorTool.CurvedArrow or EditorTool.Step => EditorToolCategory.Shapes,
         EditorTool.Text or EditorTool.Callout => EditorToolCategory.Text,
         EditorTool.Redact or EditorTool.Spotlight or EditorTool.Magnifier => EditorToolCategory.Redact,
@@ -176,6 +179,8 @@ internal static class EditorShellContract
         AnnotationData.TypeLine => EditorTool.Line,
         AnnotationData.TypeRectangle => EditorTool.Rectangle,
         AnnotationData.TypeEllipse => EditorTool.Ellipse,
+        AnnotationData.TypePolygon => EditorTool.Polygon,
+        AnnotationData.TypePolyline => EditorTool.Polyline,
         AnnotationData.TypeFreehand => EditorTool.Freehand,
         AnnotationData.TypeHighlighter => EditorTool.Highlighter,
         AnnotationData.TypeText => EditorTool.Text,
@@ -270,6 +275,18 @@ internal static class EditorShellContract
         EditorTool.Line =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.Opacity | EditorContextControls.LineStyle,
+        // Survey's measured rows: Polygon carries exactly Rectangle's controls (colour, width,
+        // presets, border style, and the fill tabs) because a polygon IS a many-sided
+        // rectangle; Polyline carries Line's, minus the fill - an open run is never filled.
+        EditorTool.Polygon =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.Fill | EditorContextControls.Opacity |
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
+            EditorContextControls.CloudBump,
+        EditorTool.Polyline =>
+            EditorContextControls.Color | EditorContextControls.Thickness |
+            EditorContextControls.Opacity | EditorContextControls.LineStyle |
+            EditorContextControls.CloudBump,
         EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
         // The curved arrow wears the straight arrow's controls, style menu included: Curved

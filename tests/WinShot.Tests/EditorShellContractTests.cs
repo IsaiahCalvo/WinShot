@@ -24,7 +24,10 @@ public class EditorShellContractTests
         }, EditorShellContract.PrimaryToolOrder);
         Assert.Equal(new[] { "Freehand", "Highlighter", "Eraser" },
             EditorShellContract.ToolsIn(EditorToolCategory.Draw));
-        Assert.Equal(new[] { "Rectangle", "Ellipse", "Line", "Arrow", "Step" },
+        // Survey's own order (PDFViewer.jsx:34035-34045): Polygon and Polyline sit between the
+        // closed shapes and the open ones, because that is what they bridge — a polygon is a
+        // many-sided Rectangle, a polyline a many-segment Line.
+        Assert.Equal(new[] { "Rectangle", "Ellipse", "Polygon", "Polyline", "Line", "Arrow", "Step" },
             EditorShellContract.ToolsIn(EditorToolCategory.Shapes));
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
         // One redaction tool, not Survey's two: pixelate and blur are STYLES on the mark it

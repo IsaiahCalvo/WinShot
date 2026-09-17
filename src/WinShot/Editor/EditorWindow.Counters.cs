@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
@@ -124,8 +124,11 @@ public partial class EditorWindow
         int before = _counterSeriesStart;
         _counterSeriesStart = start;
 
+        // A null active series is the LEGACY bucket, not "no series" — a project written before
+        // series existed loads its pins there, and Start still has to move them.
+        string activeKey = _counterSeriesId ?? CounterSeries.LegacyKey;
         var pins = CounterPins()
-            .Where(m => !string.IsNullOrEmpty(m.SeriesId) && m.SeriesId == _counterSeriesId)
+            .Where(m => (string.IsNullOrEmpty(m.SeriesId) ? CounterSeries.LegacyKey : m.SeriesId!) == activeKey)
             .ToArray();
         if (pins.Length == 0)
         {
@@ -253,10 +256,13 @@ public partial class EditorWindow
     /// </summary>
     private ContextMenu SeriesRowMenu(CounterSeriesEntry series)
     {
-        var menu = new ContextMenu();
-        var continueItem = new MenuItem { Header = "Continue" };
+        // DarkContextMenu / DarkMenuItem are KEYED, not implicit: an unstyled code-built menu
+        // falls back to Aero2 — a white popup with black text hanging inside a dark window.
+        var itemStyle = (Style)FindResource("DarkMenuItem");
+        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu") };
+        var continueItem = new MenuItem { Header = "Continue", Style = itemStyle };
         continueItem.Click += (_, _) => { menu.IsOpen = false; SwitchCounterSeries(series.SeriesId); };
-        var deleteItem = new MenuItem { Header = "Delete" };
+        var deleteItem = new MenuItem { Header = "Delete", Style = itemStyle };
         deleteItem.Click += (_, _) => { menu.IsOpen = false; DeleteCounterSeries(series.SeriesId); };
         menu.Items.Add(continueItem);
         menu.Items.Add(deleteItem);

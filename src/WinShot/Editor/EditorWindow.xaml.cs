@@ -1045,6 +1045,10 @@ public partial class EditorWindow : Window
         {
             CommitText();
             CommitPendingCurve();
+            // An unfinished polygon / polyline is dropped when the user picks another tool.
+            // It is NOT committed: finishing is always explicit, and switching tools is not
+            // one of the three gestures that mean "finish".
+            if (!PolyDraft.IsPolyTool(tool)) CancelPolyDraft();
             // Keep the current annotation selected when switching to Select/Pan so
             // format chrome stays on that object. Arming a draw tool clears it.
             if (tool is not (EditorTool.Select or EditorTool.Pan))
@@ -1069,6 +1073,11 @@ public partial class EditorWindow : Window
             UpdateCursor();
             UpdateContextPanels();
             UpdateGroupButtonChrome();
+            // Survey's releaseFocusForDraftTool (PDFViewer.jsx:34077-34079): arming Polygon or
+            // Polyline hands keyboard focus back to the page. These are the two tools finished
+            // with ENTER, and leaving focus on the toolbar button puts Enter in the button's
+            // lap — it re-clicks the button instead of closing the shape.
+            if (PolyDraft.IsPolyTool(tool)) Viewport.Focus();
         }
     }
 
@@ -1281,11 +1290,16 @@ public partial class EditorWindow : Window
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
         ColorWellLabel.Visibility = Visibility.Collapsed;
+        // Survey offers Cloud on rect / ellipse / polygon / polyline (the region markers).
+        // Polygon and Polyline are live here now that CloudPath takes an arbitrary ring;
+        // Ellipse is still gated out because CreateBoxShape only builds a cloud for a
+        // rectangle, which is a separate wiring job (CloudPath.ForEllipse already exists).
+        bool cloudCapable = chrome is EditorTool.Rectangle or EditorTool.Polygon or EditorTool.Polyline;
         if (CloudStyleItem is not null)
-            CloudStyleItem.Visibility = Show(chrome == EditorTool.Rectangle);
-        // Survey gates the Bump field on rect + cloud border (AppShell.jsx:2590).
+            CloudStyleItem.Visibility = Show(cloudCapable);
+        // Survey gates the Bump field on a cloud-capable tool + the cloud border (AppShell.jsx:2590).
         if (CloudBumpPanel is not null)
-            CloudBumpPanel.Visibility = Show(chrome == EditorTool.Rectangle && _lineStyle == LineBorderStyle.Cloud);
+            CloudBumpPanel.Visibility = Show(cloudCapable && _lineStyle == LineBorderStyle.Cloud);
         if (CloudBumpInput is not null && !CloudBumpInput.IsKeyboardFocusWithin)
             CloudBumpInput.Text = ((int)_cloudIntensity).ToString(CultureInfo.InvariantCulture);
         if (StepStartInput is not null && !StepStartInput.IsKeyboardFocusWithin)

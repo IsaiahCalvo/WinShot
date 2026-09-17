@@ -18,7 +18,12 @@ public partial class EditorWindow : Window
     // ----------------------------------------------------- resize handles (Gap)
 
     /// <summary>Which family of handles is currently shown.</summary>
-    private enum HandleKind { None, Box, Endpoints, Crop, Callout }
+    /// <summary>
+    /// Vertex: one grabber per stored point, for a polygon or polyline. Survey's own
+    /// single-click chrome for those (useSVGInteraction.js:4550, handle id `vertex-N`) —
+    /// the bounding box only appears in double-click bbox-edit mode, like a line's does.
+    /// </summary>
+    private enum HandleKind { None, Box, Endpoints, Crop, Callout, Vertex }
 
     private const double HandleScreenPx = 11;  // Survey HANDLE_RADIUS 5.5 -> an 11 px circle
     /// <summary>Survey HANDLE_RADIUS_SECONDARY 4 — only the line/arrow curve-bend handle.</summary>
@@ -119,6 +124,10 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeLine:
             case AnnotationData.TypeCurvedArrow:
                 LayoutEndpointHandles(meta);
+                break;
+            case AnnotationData.TypePolygon:
+            case AnnotationData.TypePolyline:
+                LayoutVertexHandles(meta);
                 break;
             case AnnotationData.TypeCallout:
                 LayoutCalloutHandles(meta);
@@ -491,6 +500,30 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Thumbs: 0=from, 1=to, and for line/arrow 2=Survey midpoint-on-curve.</summary>
+    /// <summary>
+    /// One grabber per vertex. Survey's poly shapes carry their OWN chrome on a single click —
+    /// the points you placed, each draggable — rather than a bounding box, which is the whole
+    /// reason a polygon is worth having over a rectangle. The box is still reachable: a
+    /// double-click swaps in bbox-edit mode, exactly as it does for a line or a counter.
+    /// </summary>
+    private void LayoutVertexHandles(AnnotationData meta)
+    {
+        if (meta.Points is not { Length: >= 2 } pts) { HideHandles(); return; }
+        Vector off = ElementOffset(_selected!);
+        _handleKind = HandleKind.Vertex;
+        EnsureThumbs(pts.Length);
+        double angle = AnnotationTransform.AngleOf(_selected!);
+        Point pivot = RotationCentre((FrameworkElement)_selected!);
+        for (int i = 0; i < pts.Length; i++)
+        {
+            var p = new Point(pts[i][0] + off.X, pts[i][1] + off.Y);
+            PlaceThumb(i, angle == 0 ? p : AnnotationRotation.RotatePoint(p, pivot, angle),
+                constantRing: true);
+        }
+        HideRotateThumb();
+        HandleLayer.Visibility = Visibility.Visible;
+    }
+
     private void LayoutEndpointHandles(AnnotationData meta)
     {
         if (meta.Points is not { Length: >= 2 } pts) { HideHandles(); return; }
@@ -723,7 +756,7 @@ public partial class EditorWindow : Window
         // tip/knee are all cursor:'grab' (SVGAnnotationLayer.jsx:5379, 5396, 5149).
         Cursor cursor = _handleKind switch
         {
-            HandleKind.Endpoints => Cursors.Hand,
+            HandleKind.Endpoints or HandleKind.Vertex => Cursors.Hand,
             HandleKind.Callout => _handleThumbs[handle].Cursor ?? Cursors.Hand,
             _ when _selected is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeStep } }
                 => Cursors.Hand,
@@ -801,6 +834,13 @@ public partial class EditorWindow : Window
         var frozenCentre = _resizePivot
             ?? new Point(oldBounds.Left + oldBounds.Width / 2, oldBounds.Top + oldBounds.Height / 2);
         Point local = angle == 0 ? pos : AnnotationRotation.RotatePoint(pos, frozenCentre, -angle);
+
+        if (_handleKind == HandleKind.Vertex)
+        {
+            ApplyVertexDrag(fe, meta, local);
+            UpdateSelectionVisual();
+            return;
+        }
 
         if (_handleKind == HandleKind.Endpoints)
         {
@@ -1085,7 +1125,62 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeCurvedArrow:
                 ResizeStrokeInBox(fe, meta, b);
                 break;
+            case AnnotationData.TypePolygon:
+            case AnnotationData.TypePolyline:
+                ResizePolyInBox(fe, meta, b);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Survey's per-vertex drag (useSVGInteraction.js:4550, :2105-2111): the grabbed point is
+    /// replaced and EVERY other vertex is left byte-identical, so dragging one corner cannot
+    /// nudge a neighbour by a rounding wobble. The rule itself lives in
+    /// <see cref="PolyDraft.MoveVertex"/>, shared with the drafting code.
+    /// </summary>
+    private void ApplyVertexDrag(FrameworkElement fe, AnnotationData meta, Point pos)
+    {
+        if (fe is not Path poly || _resizeBefore?.Points is not { Length: >= 2 } basePts) return;
+        Point[] next = PolyDraft.MoveVertex(basePts, _activeHandle, pos);
+        fe.RenderTransform = null;   // the points are absolute now
+        RebuildPolyGeometry(poly, meta, next);
+    }
+
+    /// <summary>
+    /// A polygon / polyline in bbox-edit mode: scale every stored vertex out of the pre-drag
+    /// bounds into the new box, the way <see cref="ResizeStrokeInBox"/> does for a line.
+    /// </summary>
+    private void ResizePolyInBox(FrameworkElement fe, AnnotationData meta, Rect newBounds)
+    {
+        if (fe is not Path poly || _resizeBefore?.Points is not { Length: >= 2 } basePts) return;
+        Rect baseBounds = _resizeBefore.Bounds;
+        double sx = baseBounds.Width > 1e-6 ? newBounds.Width / baseBounds.Width : 1;
+        double sy = baseBounds.Height > 1e-6 ? newBounds.Height / baseBounds.Height : 1;
+        Point[] mapped = basePts.Select(p => new Point(
+            newBounds.X + (p.X - baseBounds.X) * sx,
+            newBounds.Y + (p.Y - baseBounds.Y) * sy)).ToArray();
+        fe.RenderTransform = null;
+        RebuildPolyGeometry(poly, meta, mapped);
+    }
+
+    /// <summary>
+    /// Re-draws a poly shape from a new vertex run and re-stores it. One funnel, because the
+    /// Cloud border style makes the geometry a function of the ring: a cloud re-built from a
+    /// stale ring is a cloud around the shape's old outline.
+    /// </summary>
+    private void RebuildPolyGeometry(Path poly, AnnotationData meta, IReadOnlyList<Point> points)
+    {
+        bool closed = meta.Type == AnnotationData.TypePolygon;
+        var rebuilt = AnnotationFactory.CreatePolyShape(
+            points, closed, StrokeColorOf(poly), Colors.Transparent, poly.StrokeThickness,
+            AnnotationStyle.LineStyleFrom(meta), meta.CloudIntensity ?? _cloudIntensity,
+            StrokeStyles.ParseRender(meta.Sketch), meta.Seed ?? 0);
+        poly.Data = rebuilt.Data;
+        meta.Points = points.Select(p => new[] { p.X, p.Y }).ToArray();
+        meta.Tx = 0;
+        meta.Ty = 0;
+        Canvas.SetLeft(poly, 0);
+        Canvas.SetTop(poly, 0);
     }
 
     /// <summary>
@@ -1458,7 +1553,8 @@ public partial class EditorWindow : Window
         if (meta.Points is { } mp && mp.Length > 0 &&
             meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeLine
                 or AnnotationData.TypeCurvedArrow or AnnotationData.TypeFreehand
-                or AnnotationData.TypeHighlighter or AnnotationData.TypeCallout)
+                or AnnotationData.TypeHighlighter or AnnotationData.TypeCallout
+                or AnnotationData.TypePolygon or AnnotationData.TypePolyline)
         {
             pts = mp.Select(p => new Point(p[0] + off.X, p[1] + off.Y)).ToArray();
         }
@@ -1513,6 +1609,13 @@ public partial class EditorWindow : Window
                 meta.Tx = snap.Tx;
                 meta.Ty = snap.Ty;
                 fe.UpdateLayout();
+                break;
+
+            case AnnotationData.TypePolygon:
+            case AnnotationData.TypePolyline:
+                fe.RenderTransform = null;
+                if (fe is Path polyPath && snap.Points is { Length: >= 2 } polyPts)
+                    RebuildPolyGeometry(polyPath, meta, polyPts);
                 break;
 
             case AnnotationData.TypeArrow:

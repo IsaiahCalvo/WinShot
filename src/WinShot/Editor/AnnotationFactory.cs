@@ -1067,6 +1067,60 @@ internal static class AnnotationFactory
         _ => "top",
     };
 
+    /// <summary>
+    /// A polygon or polyline: a <see cref="Path"/> carrying the run in ABSOLUTE canvas
+    /// coordinates with no Width/Height of its own, exactly the way a line or an arrow is
+    /// built. That is not an accident of convenience — it is what lets the Cloud border style
+    /// work here at all. A rect cloud has to be inset because WPF layout-clips a sized
+    /// Stretch.None Shape to its slot and chops the crowns flat; a Path with no slot has
+    /// nothing to clip against, so the crowns stand off the vertex ring as drawn.
+    /// </summary>
+    /// <param name="closed">Polygon. An open polyline takes no fill: a fill on an unclosed run
+    /// paints a phantom chord between the last point and the first
+    /// (annotationCreationCommit.js:270-273).</param>
+    public static Path CreatePolyShape(
+        IReadOnlyList<Point> points, bool closed, Color stroke, Color fill, double thickness,
+        LineBorderStyle lineStyle, double cloudIntensity = CloudPath.DefaultIntensity,
+        StrokeRender render = StrokeRender.Clean, int seed = 0)
+    {
+        Geometry data;
+        if (lineStyle == LineBorderStyle.Cloud)
+        {
+            data = closed
+                ? CloudPath.ForPolygon(points, cloudIntensity)
+                : CloudPath.ForPolyline(points, cloudIntensity);
+        }
+        else
+        {
+            IReadOnlyList<Point> run = render == StrokeRender.Sketchy
+                ? StrokeStyles.SketchPolygon(points, seed)
+                : points;
+            var geometry = new PathGeometry();
+            if (run.Count >= 2) geometry.Figures.Add(PolyFigure(run, closed, filled: closed));
+            data = geometry;
+        }
+
+        var path = new Path
+        {
+            Data = data,
+            Stroke = new SolidColorBrush(stroke),
+            StrokeThickness = thickness,
+            // Survey commits these with round caps and joins so a sharp corner or a dotted run
+            // reads as one continuous drawn line (annotationCreationCommit.js:276-278).
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            // An open run gets NO fill brush at all, not a transparent one: WPF hit-tests a
+            // Transparent fill, so a transparent polyline would swallow every click inside the
+            // area it happens to bound — an area it does not even paint.
+            Fill = closed ? (fill.A != 0 ? new SolidColorBrush(fill) : Brushes.Transparent) : null,
+        };
+        if (lineStyle != LineBorderStyle.Cloud) ApplyDash(path, lineStyle);
+        Canvas.SetLeft(path, 0);
+        Canvas.SetTop(path, 0);
+        return path;
+    }
+
     public static Shape CreateBoxShape(
         string type, Rect bounds, Color stroke, Color fill, double thickness, LineBorderStyle lineStyle,
         double cloudIntensity = CloudPath.DefaultIntensity,

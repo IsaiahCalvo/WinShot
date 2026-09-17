@@ -1159,6 +1159,20 @@
                                      Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse"
                                      AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse."
                                      Content="{StaticResource SurveyIcon.Ellipse}"/>
+                        <!-- Survey puts Polygon and Polyline between the closed shapes and the
+                             open ones (PDFViewer.jsx:34035-34045) because that is what they
+                             bridge. Both are CLICK-TO-PLACE, not drag-out: each click drops a
+                             vertex and the run is finished explicitly. -->
+                        <RadioButton x:Name="PolygonToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
+                                     Tag="Polygon" Checked="OnToolChecked" ToolTip="Polygon"
+                                     AutomationProperties.Name="Polygon"
+                                     AutomationProperties.HelpText="Click to place each corner. Click the first corner, or press Enter, to close the shape. Escape cancels."
+                                     Content="{StaticResource SurveyIcon.Polygon}"/>
+                        <RadioButton x:Name="PolylineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
+                                     Tag="Polyline" Checked="OnToolChecked" ToolTip="Polyline"
+                                     AutomationProperties.Name="Polyline"
+                                     AutomationProperties.HelpText="Click to place each point. Press Enter to finish the run open, or click the first point to close it into a polygon. Escape cancels."
+                                     Content="{StaticResource SurveyIcon.Polyline}"/>
                         <RadioButton x:Name="LineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Line" Checked="OnToolChecked" ToolTip="Line"
                                      AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."

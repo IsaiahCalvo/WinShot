@@ -1347,8 +1347,13 @@ public partial class EditorWindow : Window
 
         // The Start field shows where the NEXT pin of the active series lands. An empty series
         // (just created, or all its pins deleted) keeps the start the user typed.
+        //
+        // A null active series means the LEGACY bucket, not "no series": that is the state a
+        // project written before series existed loads into, and its pins still have to advance
+        // the next number the way they always did.
+        string activeKey = _counterSeriesId ?? CounterSeries.LegacyKey;
         var active = pins.Select(p => p.Meta)
-            .Where(m => m.SeriesId == _counterSeriesId && !string.IsNullOrEmpty(m.SeriesId))
+            .Where(m => (string.IsNullOrEmpty(m.SeriesId) ? CounterSeries.LegacyKey : m.SeriesId) == activeKey)
             .ToArray();
         _nextStep = active.Length == 0
             ? _counterSeriesStart
