@@ -18,10 +18,14 @@
         <Setter Property="Stroke" Value="{x:Null}"/>
     </Style>
 
+    <!-- Survey src/assets/icons/selection-cursor-rounded.svg, verbatim. Stroke 1.75, not the
+         house 1.5. The file's own transform is translate(12 12) scale(1) translate(-12 -12),
+         i.e. the identity, so it is dropped. Survey's Icons.jsx `cursor` renderer (the plain
+         arrow this used to be) is not what the Select button renders — `selectCursor` is. -->
     <Viewbox x:Key="SurveyIcon.Cursor" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M3,3 L10.07,19.97 L12.58,12.58 L19.97,10.07 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M13,13 L19,19"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.75"
+                  Data="M9.80282 4.62973L15.8364 6.99069C19.3164 8.35243 21.0564 9.03329 20.9987 10.1133C20.941 11.1934 19.1251 11.6886 15.4933 12.6791C14.412 12.974 13.8713 13.1215 13.4964 13.4963C13.1215 13.8712 12.9741 14.4119 12.6791 15.4933C11.6887 19.125 11.1934 20.9409 10.1134 20.9986C9.03335 21.0563 8.35249 19.3163 6.99075 15.8363L4.62979 9.80276C3.20411 6.15934 2.49127 4.33764 3.41448 3.41442C4.3377 2.49121 6.15941 3.20405 9.80282 4.62973Z"/>
         </Canvas>
     </Viewbox>
 
@@ -41,22 +45,81 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/assets/icons/pan-hand-closed.svg, verbatim: a closed hand, not a
+         four-way arrow cross. Stroke 1.5, round caps and joins. -->
     <Viewbox x:Key="SurveyIcon.Pan" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M5,9 L2,12 L5,15 M9,5 L12,2 L15,5 M19,9 L22,12 L19,15 M9,19 L12,22 L15,19"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M2,12 H22 M12,2 V22"/>
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M7.84051 13.4813V4.98823C7.84051 4.1585 8.50582 3.48586 9.32652 3.48586C10.1472 3.48586 10.8125 4.15828 10.8125 4.98802M10.8125 9.97422V3.50238C10.8125 2.67264 11.4778 2 12.2986 2C13.1193 2 13.7846 2.67264 13.7846 3.50238V11.0057M13.7846 5.47656C13.7846 4.64306 14.4836 3.9678 15.308 3.9678C16.1324 3.9678 16.8008 4.64348 16.8008 5.47699V11.9989M16.8008 7.51562C16.8008 6.69224 17.461 6.02157 18.2754 6.02157C19.0898 6.02157 19.75 6.68905 19.75 7.51243V16.1246C19.75 17.1574 19.3743 18.3101 18.2322 19.6845C17.9 20.083 17.45 20.5 17 20.8M7.84051 8.85627C7.00785 9.63725 4.99016 11.6991 4.43639 12.8432C3.88262 13.9873 4.7059 15.3388 5.05201 15.8682L7.84008 19.5755C8.25 20.15 8.6 20.55 9 20.8C10.6 21.55 15.25 21.55 17 20.8"/>
         </Canvas>
     </Viewbox>
 
-    <!-- Highlighter: Survey ships a 128px PNG mask, which goes blotchy at 20px. This is a
-         vector trace of that marker (chisel tip lower-left, body, cap band) in the same
-         1.5px stroked style as the rest of the set, so it stays crisp at any DPI. -->
+    <!-- Survey src/assets/icons/highlighter-tool.svg, verbatim. It is a mask icon there, so
+         the file's stroke="#fff" carries no colour — every opaque pixel takes the icon
+         colour. Kept on its native 128 grid so the numbers stay literal; the Viewbox
+         normalises. Paths 2 and 3 are stroke-linecap="butt" in the source, not round. -->
     <Viewbox x:Key="SurveyIcon.Highlighter" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="128" Height="128">
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="7.2"
+                  Data="M93 16.8 Q94.8 16.8 96.6 18.6 L112.5 34.5 Q116.2 38.2 112.8 42.3 L63.3 102.1 Q60.3 105.7 55.9 103 L52 100.6 Q46 96.9 37 103 L31 110 Q30 110 29.2 109.7 L15.5 102.8 L27 92 Q34 85 29.2 77.2 L27.1 73.9 Q24.5 69.2 29 65.4 L90.1 17.7 Q91.6 16.7 93 16.8Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="7.2"
+                  StrokeStartLineCap="Flat" StrokeEndLineCap="Flat" Data="M40.7 55.5L70.4 90.1"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="7.2"
+                  StrokeStartLineCap="Flat" StrokeEndLineCap="Flat" Data="M27 92L37 103"/>
+        </Canvas>
+    </Viewbox>
+
+    <!-- The Draw GROUP button, distinct from the Pen sub-tool. Survey src/Icons.jsx
+         `drawGroup`: lucide square-pen, pasted inline there (lucide-react is not a Survey
+         dependency, so that file is the source). Stroke 2 is lucide's own weight, kept
+         deliberately so it does not read lighter than its top-row neighbours. -->
+    <Viewbox x:Key="SurveyIcon.DrawGroup" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.5,16.5 L15.5,10.5 L19.5,14.5 L13.5,20.5 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M15.5,10.5 L17,9 A1.5,1.5 0 0 1 19.1,9 L21,10.9 A1.5,1.5 0 0 1 21,13 L19.5,14.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.5,16.5 L5.5,18.5 L3.5,21 L6.5,20 L13.5,20.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M3.5,21 L2.5,21.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2"
+                  Data="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2"
+                  Data="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>
+        </Canvas>
+    </Viewbox>
+
+    <!-- The Shapes GROUP button. Survey src/assets/icons/shapes.svg, verbatim. One weight,
+         1.7. The composition (circle top-left, square right, triangle bottom) and the size
+         asymmetry are the owner's overshoot rule, not slop: the circle's outer diameter is
+         ~3% over the square's and the triangle is widest, so all three look the same size. -->
+    <Viewbox x:Key="SurveyIcon.Shapes" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Ellipse Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Canvas.Left="2.54" Canvas.Top="2.54" Width="8.32" Height="8.32"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Canvas.Left="13.55" Canvas.Top="4.75" Width="7.9" Height="7.9" RadiusX="1" RadiusY="1"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Data="M11 14.2 15.75 21.45 6.25 21.45Z"/>
+        </Canvas>
+    </Viewbox>
+
+    <!-- The Text GROUP button, distinct from the Text sub-tool's serif T. Survey
+         src/assets/icons/case-sensitive.svg (lucide case-sensitive), verbatim, stroke 2. -->
+    <Viewbox x:Key="SurveyIcon.TextGroup" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="m2 16 4.039-9.69a.5.5 0 0 1 .923 0L11 16"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M22 9v7"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M3.304 13h6.392"/>
+            <Ellipse Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Canvas.Left="15" Canvas.Top="9" Width="7" Height="7"/>
+        </Canvas>
+    </Viewbox>
+
+    <!-- The Text SUB-TOOL. Survey src/assets/icons/text-box-selection.svg, verbatim: ten
+         paths, four corner handles plus six lines. The file's #1C274C is dropped — it is a
+         mask icon in Survey, so the colour there is meaningless. -->
+    <Viewbox x:Key="SurveyIcon.TextBox" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9 9H15"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M12 15L12 9"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M6 4C6 5.10457 5.10457 6 4 6C2.89543 6 2 5.10457 2 4C2 2.89543 2.89543 2 4 2C5.10457 2 6 2.89543 6 4Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M6 20C6 21.1046 5.10457 22 4 22C2.89543 22 2 21.1046 2 20C2 18.8954 2.89543 18 4 18C5.10457 18 6 18.8954 6 20Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M22 4C22 5.10457 21.1046 6 20 6C18.8954 6 18 5.10457 18 4C18 2.89543 18.8954 2 20 2C21.1046 2 22 2.89543 22 4Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M22 20C22 21.1046 21.1046 22 20 22C18.8954 22 18 21.1046 18 20C18 18.8954 18.8954 18 20 18C21.1046 18 22 18.8954 22 20Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M6 20H18"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M18 4H6"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M20 18L20 6"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M4 6L4 18"/>
         </Canvas>
     </Viewbox>
 
@@ -72,19 +135,29 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/Icons.jsx `text`. Its group transform translate(12 12) scale(1.2)
+         translate(-12 -12) was missing here, so the serif T rendered 20% small. -->
     <Viewbox x:Key="SurveyIcon.Text" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M4,7 L4,4 L20,4 L20,7"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,20 L15,20"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M12,4 L12,20"/>
+            <Canvas Width="24" Height="24">
+                <Canvas.RenderTransform>
+                    <ScaleTransform ScaleX="1.2" ScaleY="1.2" CenterX="12" CenterY="12"/>
+                </Canvas.RenderTransform>
+                <Path Style="{StaticResource SurveyIconStroke}" Data="M4,7 L4,4 L20,4 L20,7"/>
+                <Path Style="{StaticResource SurveyIconStroke}" Data="M9,20 L15,20"/>
+                <Path Style="{StaticResource SurveyIconStroke}" Data="M12,4 L12,20"/>
+            </Canvas>
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/assets/icons/callout-arrow-outline.svg, verbatim. That file's owner rule:
+         nothing inside the bubble — no underscore, no "T" — so the two inner lines this
+         used to carry are gone, and the leader is a 5-unit, 90-degree open arrowhead. -->
     <Viewbox x:Key="SurveyIcon.Callout" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M20,4 H4 C2.9,4 2,4.9 2,6 V18 C2,19.1 2.9,20 4,20 H18 L22,24 V6 C22,4.9 21.1,4 20,4 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,12 H17"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,8 H13"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="6.75" Canvas.Top="2.95" Width="14.5" Height="11" RadiusX="2.5" RadiusY="2.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.6 13.95 2.95 21.05"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M7.95 20.89 2.95 21.05 2.79 16.05"/>
         </Canvas>
     </Viewbox>
 
@@ -120,11 +193,17 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/assets/icons/counter-outline.svg, verbatim. All geometry now, no TextBlock:
+         a font glyph in an icon neither scales nor recolours with the rest of the set.
+         The ring is the Ellipse glyph's exact circle (12,12 r10) so the two read as
+         siblings, and it stays hollow when selected (owner rule). The numeral is 2.0, not
+         1.5 — the optical sizing rule for a small form — and its stem sits 0.7 right of the
+         ring centre on purpose: the eye reads a "1" by its stem, so that is what centred
+         looks like. -->
     <Viewbox x:Key="SurveyIcon.Counter" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="5" Canvas.Top="3" Width="16" Height="16"/>
-            <TextBlock Canvas.Left="5" Canvas.Top="3" Width="16" Height="16" Text="1" FontSize="10" FontWeight="Bold"
-                       TextAlignment="Center" Padding="0,1,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"/>
+            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M10.7 9.5 12.7 7.6V16.4"/>
         </Canvas>
     </Viewbox>
 
@@ -330,20 +409,20 @@
     </Viewbox>
     <Viewbox x:Key="SurveyIcon.FitPage" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Canvas.Left="6" Canvas.Top="3" Width="12" Height="18" RadiusX="1.5" RadiusY="1.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Data="M9,7 H15 M9,11 H15 M9,15 H13"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="6" Canvas.Top="3" Width="12" Height="18" RadiusX="1.5" RadiusY="1.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,7 H15 M9,11 H15 M9,15 H13"/>
         </Canvas>
     </Viewbox>
     <Viewbox x:Key="SurveyIcon.FitWidth" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Canvas.Left="4" Canvas.Top="5" Width="16" Height="14" RadiusX="1.5" RadiusY="1.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Data="M7,12 H17 M7,12 L10,9 M7,12 L10,15 M17,12 L14,9 M17,12 L14,15"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="4" Canvas.Top="5" Width="16" Height="14" RadiusX="1.5" RadiusY="1.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,12 H17 M7,12 L10,9 M7,12 L10,15 M17,12 L14,9 M17,12 L14,15"/>
         </Canvas>
     </Viewbox>
     <Viewbox x:Key="SurveyIcon.FitHeight" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Canvas.Left="5" Canvas.Top="4" Width="14" Height="16" RadiusX="1.5" RadiusY="1.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.7" Data="M12,7 V17 M12,7 L9,10 M12,7 L15,10 M12,17 L9,14 M12,17 L15,14"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="5" Canvas.Top="4" Width="14" Height="16" RadiusX="1.5" RadiusY="1.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M12,7 V17 M12,7 L9,10 M12,7 L15,10 M12,17 L9,14 M12,17 L15,14"/>
         </Canvas>
     </Viewbox>
 </ResourceDictionary>

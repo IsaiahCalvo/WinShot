@@ -27,11 +27,29 @@
         </Grid.ColumnDefinitions>
 
         <!-- Survey's top chrome is a full-bleed FLAT strip, not a floating pill:
-             background #181c24, padding 8px 12px, no radius, no border, no
-             shadow, no margin, butting straight onto the 34px sub-row below
-             (AppShell.jsx:1337-1355). -->
+             background #181c24, padding 8px 12px, no radius, no shadow, no margin.
+             and no bottom border either — measured on the running app 2026-09-17, not
+             assumed: its strip is 1400x44 at #181c24 with border-bottom 0px, and the
+             48px rail below it (#12151c, border-left 1px #2a3140, no top border) runs
+             its left rule straight up into that strip with nothing to meet.
+
+             WinShot DELIBERATELY DIVERGES here. Isaiah, 2026-09-17: "The right rail dies
+             into the top toolbar because the top toolbar has no bottom border... same
+             hairline, same token (Border), consistent at every DPI." Chrome materials are
+             WinShot's side of the Survey line — Survey wins mechanics, features and icons;
+             WinShot wins palette, materials and type — so this is the rule working, not a
+             port error. Do not "restore" it to Survey's borderless strip.
+
+             All three chrome edges are now the one hairline in the one token: this bottom
+             rule, the rail's left rule, and the bottom bar's top rule (EditorBottomBar,
+             BorderThickness 0,1,0,0). Border is #1FFFFFFF, a 12%-white WASH, so the three
+             paint to different values over their own surfaces by design — EditorChromeJoinTests
+             scans the rendered pixels and checks each against that token composited over its
+             own background, at 96/144/192 DPI. The 34px group bar overlays the canvas lower
+             down and carries its own bottom rule, so nothing doubles. -->
         <Border x:Name="TopToolbar" Grid.Row="0" Grid.ColumnSpan="2" Margin="0" Padding="12,8" CornerRadius="0"
-                BorderThickness="0" Background="{StaticResource ChromeBgBrush}"
+                BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
+                Background="{StaticResource ChromeBgBrush}"
                 TextElement.Foreground="{StaticResource ChromeTextBrush}"
                 SnapsToDevicePixels="True">
             <StackPanel>
@@ -114,19 +132,19 @@
                                 Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
                                 AutomationProperties.Name="Draw"
                                 AutomationProperties.HelpText="Pen, highlighter, and eraser. Shortcut P or H."
-                                Content="{StaticResource SurveyIcon.Pen}"/>
+                                Content="{StaticResource SurveyIcon.DrawGroup}"/>
 
                         <Button x:Name="ShapeGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnShapeGroupClick" Tag="Shapes" ToolTip="Shapes"
                                 AutomationProperties.Name="Shapes"
                                 AutomationProperties.HelpText="Rectangle, ellipse, line, arrow, and counter."
-                                Content="{StaticResource SurveyIcon.Rect}"/>
+                                Content="{StaticResource SurveyIcon.Shapes}"/>
 
                         <Button x:Name="TextGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnTextGroupClick" Tag="Text" ToolTip="Text"
                                 AutomationProperties.Name="Text"
                                 AutomationProperties.HelpText="Text box and callout."
-                                Content="{StaticResource SurveyIcon.Text}"/>
+                                Content="{StaticResource SurveyIcon.TextGroup}"/>
 
                         <Button x:Name="EffectsGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnEffectsGroupClick" Tag="Effects" ToolTip="Effects"
@@ -149,14 +167,34 @@
                     </StackPanel>
                     </Grid>
 
-                    <!-- Survey's props block is `position:absolute; left:100%` — it hangs off the
-                         cluster's right edge and takes part in NO layout, which is what makes
-                         the centred cluster stay put whatever the armed tool asks for. A zero
-                         width host is WPF's spelling of that: the children arrange past it and
-                         paint, and the star column's share stops depending on their width. The
-                         format packer still keeps them from running off the end of the bar; it
-                         just no longer has to be right to the DIP for the row to hold still. -->
-                    <StackPanel Grid.Column="2" HorizontalAlignment="Left" Width="0"
+                    <!-- Survey's props block is `position:absolute; left:100%` — it hangs off
+                         the cluster's right edge and takes part in NO layout, which is what
+                         keeps the centred cluster still whatever the armed tool asks for.
+                         A Canvas is WPF's spelling of that: it measures to (0,0) however wide
+                         its children are, so the props never reach the star column's width.
+
+                         It used to be spelled `Width="0"` on this StackPanel, and that is what
+                         took every formatting control away. A horizontal StackPanel's
+                         ArrangeOverride GROWS its arrange size to the measured extent of its
+                         children (328 DIP here); ArrangeCore then compares that ink size to the
+                         explicit Width, finds 328 > 0, and applies a zero-width LAYOUT CLIP.
+                         The controls still measured, still arranged, still answered IsVisible —
+                         and painted 52 ink pixels instead of 4411. A Canvas does not clip,
+                         because its ArrangeOverride returns the slot it was given instead of
+                         growing to its content. Measured both ways by EditorPropsProbe.
+
+                         Letting the props take part in layout instead is not an option either:
+                         the two side columns are `*`, and at 150% DPI layout rounding splits
+                         them 576.00 / 575.33, so a props cluster wide enough to matter moves the
+                         centred row by one device pixel — the 0.67 DIP ToolRowStabilitySmoke
+                         catches. Zero width is the fix; zero width WITH a clip was the bug.
+
+                         The inner Grid exists only to hand the row's height down so the controls
+                         can still centre vertically: a Canvas ignores a child's VerticalAlignment. -->
+                    <Canvas Grid.Column="2" Width="0" HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch">
+                    <Grid Height="{Binding ActualHeight, ElementName=ToolbarPrimaryRow}">
+                    <StackPanel HorizontalAlignment="Left"
                                 Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
@@ -827,6 +865,8 @@
                         </Popup>
                         </StackPanel>
                     </StackPanel>
+                    </Grid>
+                    </Canvas>
                 </Grid>
             </StackPanel>
         </Border>
@@ -1099,7 +1139,7 @@
                                      Tag="Text" Checked="OnToolChecked" ToolTip="Text"
                                      AutomationProperties.Name="Text"
                                      AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
-                                     Content="{StaticResource SurveyIcon.Text}"/>
+                                     Content="{StaticResource SurveyIcon.TextBox}"/>
                         <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Callout" Checked="OnToolChecked" ToolTip="Callout"
                                      AutomationProperties.Name="Callout"
@@ -1269,12 +1309,14 @@
                                 </Viewbox>
                             </Grid>
                         </Button>
+                        <!-- Custom placement, not Left: Survey aligns this menu's BOTTOM with
+                             the trigger's bottom and Left aligns tops. See PlaceFitMenu. -->
                         <Popup x:Name="FitMenuPopup" PlacementTarget="{Binding ElementName=FitMenuBtn}"
-                               Placement="Left" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                               Placement="Custom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <!-- AppShell.jsx:2984-2999: rgb(30,30,30) on 1px #2a3140,
                                  radius 2, 0 10px 24px rgba(0,0,0,0.45), padding 2. -->
                             <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeHairlineBrush}"
-                                    BorderThickness="1" CornerRadius="2" Padding="2" Margin="30,0,6,30"
+                                    BorderThickness="1" CornerRadius="2" Padding="2" Margin="0"
                                     MinWidth="140">
                                 <Border.Effect>
                                     <DropShadowEffect BlurRadius="24" ShadowDepth="10" Direction="270" Opacity="0.45"/>
