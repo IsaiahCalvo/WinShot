@@ -256,67 +256,6 @@ public class SelectorRenderTests
     }
 
     /// <summary>
-    /// While the element-retarget glide is in flight the shutter pill must be painted where a
-    /// press will find it. The border rides the interpolation on purpose; the pill does not —
-    /// ShutterPillScreenRect() always answers with the settled element, so a pill drawn off the
-    /// interpolated rect was a button that visibly sat somewhere it could not be clicked.
-    /// </summary>
-    [Fact]
-    public void TheShutterPillIsPaintedInsideItsHitRectMidGlide()
-    {
-        var from = new SD.Rectangle(20, 20, 60, 40);
-        var to = new SD.Rectangle(180, 150, 120, 80);
-
-        using var selector = Seed(FlatDesktop(), new SD.Point(240, 190));
-        Set(selector, "_paneHover", true);
-        Set(selector, "_hoverPane", to);
-        var tween = (RectangleTween)typeof(FastRegionSelectorDialog)
-            .GetField("_hoverTween", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(selector)!;
-        tween.Retarget(from, to);
-        Assert.True(tween.IsActive && tween.Current != to, "the glide should still be short of the target");
-
-        SD.Rectangle hit = (SD.Rectangle)typeof(FastRegionSelectorDialog)
-            .GetMethod("ShutterPillScreenRect", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(selector, null)!;
-
-        // Where the pill WOULD have gone when it was placed off the interpolated border —
-        // the bug this test exists for. Well clear of the hit rect while the glide is young.
-        SD.Rectangle strayed = SelectorChrome.SizePillRect(
-            tween.Current, SelectorChrome.MeasureLabel($"{to.Width} × {to.Height}", 1d), Monitor, 1d);
-        Assert.False(hit.IntersectsWith(strayed), "the two candidate spots must be distinguishable");
-
-        using SD.Bitmap painted = Paint(selector);
-
-        // Count only the pill's own ground: near-black AND neutral, so the accent border (which
-        // rides the glide on purpose) and the crosshair's shadow pass are not mistaken for it.
-        int PillPixels(SD.Rectangle area)
-        {
-            // ShutterPillScreenRect answers in SCREEN coordinates, which on a desktop whose
-            // primary is not the whole virtual screen runs off this Monitor-sized canvas.
-            // Scan the part that is on it; a rect entirely off it counts zero, which is the
-            // right answer for "the pill is not there".
-            area.Intersect(new SD.Rectangle(0, 0, painted.Width, painted.Height));
-            int found = 0;
-            for (int y = area.Top; y < area.Bottom; y++)
-            {
-                for (int x = area.Left; x < area.Right; x++)
-                {
-                    SD.Color px = painted.GetPixel(x, y);
-                    if (px.R < 45 && Math.Abs(px.R - px.B) < 20)
-                        found++;
-                }
-            }
-            return found;
-        }
-
-        Assert.True(PillPixels(hit) > 200, $"the pill should fill its hit rect, found {PillPixels(hit)} px");
-        Assert.Equal(0, PillPixels(strayed));
-
-        tween.Stop();
-    }
-
-    /// <summary>
     /// The pill's TEXT has to fade with the pill. TextRenderer.DrawText is a GDI wrapper and
     /// GDI drops the alpha byte, so the old call painted opaque text on a ghost background for
     /// the whole tween and then snapped it away. The existing band test only counts the dark

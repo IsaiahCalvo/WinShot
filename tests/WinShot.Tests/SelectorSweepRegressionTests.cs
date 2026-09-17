@@ -394,30 +394,6 @@ public class SelectorSweepRegressionTests
         Assert.True(SelectorHint.ShouldShow(SelectorHint.NextSessionCount(-5)));
     }
 
-    /// <summary>The pill you can click is the pill you can see, at a monitor's far corner.</summary>
-    [Fact]
-    public void TheShutterPillStaysOnScreenInTheBottomRightCorner()
-    {
-        var monitor = new SD.Rectangle(0, 0, 1920, 1080);
-        var element = new SD.Rectangle(1800, 1000, 118, 78); // flush with the corner
-        SD.Size pill = SelectorChrome.MeasureLabel($"{element.Width} × {element.Height}", 1d);
-        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill, monitor, 1d);
-
-        Assert.True(monitor.Contains(rect), $"pill {rect} left the monitor {monitor}");
-    }
-
-    /// <summary>Same, on a monitor at a negative origin.</summary>
-    [Fact]
-    public void TheShutterPillStaysOnANegativeOriginMonitor()
-    {
-        var monitor = new SD.Rectangle(-1920, -1080, 1920, 1080);
-        var element = new SD.Rectangle(-200, -120, 200, 120);
-        SD.Size pill = SelectorChrome.MeasureLabel("200 × 120", 1d);
-        SD.Rectangle rect = SelectorChrome.SizePillRect(element, pill, monitor, 1d);
-
-        Assert.True(monitor.Contains(rect), $"pill {rect} left the monitor {monitor}");
-    }
-
     private sealed class Pointer : IDisposable
     {
         public SD.Point At;

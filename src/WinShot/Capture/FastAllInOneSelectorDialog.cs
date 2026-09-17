@@ -716,7 +716,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             InvalidateScreenRect(new SD.Rectangle(
                 loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
 
-        SD.Rectangle readout = SelectorChrome.CursorReadoutRect(
+        SD.Rectangle readout = SelectorChrome.CursorReadoutDirtyRect(
             mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
         InvalidateScreenRect(new SD.Rectangle(
             readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
@@ -1109,24 +1109,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             if (_pendingPx is not null && !_dragging)
                 SelectionHandles.Draw(g, local, _handleScale, _resizeHandle,
                     WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
-            if (cursorOnThisSurface)
-            {
-                // The readout labels the SETTLED rect, never the interpolated one: digits
-                // spinning for 140 ms read as a glitch rather than as motion.
-                var px = _hoverWindow is not null && !_dragging && _pendingPx is null
-                    ? VirtualFromScreen(_hoverWindow.Bounds)
-                    : _pendingPx is SD.Rectangle settled && !_dragging
-                        ? settled
-                        : VirtualFromScreen(bright);
-                SD.Size follow = SelectorChrome.ReadoutOffset(s);
-                int pillGap = WinShot.Recording.RecordingMonitorDpi.Px(8, s);
-                SD.Point at = _dragging || _pendingPx is not null
-                    ? new SD.Point(local.Right + pillGap, local.Bottom + pillGap)
-                    : new SD.Point(
-                        ToLocal(_currentScreen, monitorBounds).X + follow.Width,
-                        ToLocal(_currentScreen, monitorBounds).Y + follow.Height);
-                SelectorChrome.DrawLabel(g, clientSize, $"{px.Width} × {px.Height}", at.X, at.Y, s);
-            }
         }
 
         bool controlPressed = (WF.Control.ModifierKeys & WF.Keys.Control) == WF.Keys.Control;

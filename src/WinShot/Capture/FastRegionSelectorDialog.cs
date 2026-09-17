@@ -37,9 +37,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// <summary>Where the left button went down, for telling a click from a drag at release.</summary>
     private SD.Point _pressScreen;
 
-    /// <summary>True while the left button is held on the detected element's shutter pill.</summary>
-    private bool _pressedShutter;
-
     /// <summary>Set by <c>Complete</c> and cleared by <c>ResetForUse</c>. A pooled selector is
     /// parked, not destroyed, and keeps keyboard focus, so keys keep arriving after the
     /// session is over.</summary>
@@ -126,10 +123,19 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     private SD.Point _adjustAnchor;        // cursor at the start of a move/resize
     private SD.Rectangle _adjustStartRect; // pending rect at the start of a move/resize
     private WindowInfo? _hoverWindow;
+    /// <summary>
+    /// The window a highlight is still fading OUT on, after the pointer left every window.
+    /// Paint-only: nothing hit-tests or captures through it, and the moment another window is
+    /// hovered it is dropped. It exists because the highlight cannot fade out of a rect the
+    /// selector has already forgotten — without it, leaving for the desktop cut the border,
+    /// the wash and the app name out of the frame in one step, which is the one thing on this
+    /// overlay that is never allowed to cut.
+    /// </summary>
+    private WindowInfo? _hoverExit;
     /// <summary>Name of the app behind <see cref="_hoverWindow"/>, resolved once per target.</summary>
     private string _hoverAppName = string.Empty;
-    /// <summary>0..1 ramp on the window-target wash, so retargeting reads as the tint moving
-    /// rather than two rectangles blinking.</summary>
+    /// <summary>0..1 presence of the window highlight — border alpha, wash alpha and app-name
+    /// pill alpha, all three — so an entrance, a retarget and a leave are one number.</summary>
     private double _hoverWash;
     private IDisposable? _hoverWashTween;
     private SD.Bitmap? _frozen;            // frozen virtual-desktop snapshot shown under the overlay
@@ -624,7 +630,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         RecordingChoice = null;
         _hoverBarButton = -1;
         _pressedBarButton = -1;
-        _pressedShutter = false;
         _resizeHandle = -1;
         _movingPending = false;
         _pressedEdge = MarqueeSide.None;
@@ -648,14 +653,11 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _barTween = null;
         Array.Clear(_barHover);
         Array.Clear(_barPress);
-        _pillTween?.Dispose();
-        _pillTween = null;
-        _pillHover = false;
-        _pillSwap = 0d;
         _pendingGlideTween?.Dispose();
         _pendingGlideTween = null;
         _pendingGlide.Stop();
         _hoverWindow = null;
+        _hoverExit = null;
         _hoverAppName = string.Empty;
         // A pooled selector outlives the windows it saw last session; a stale handle can be
         // reused by a different process, and a fixed-size cache with no clear point grows.
@@ -749,8 +751,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             _hintHold = null;
             _barTween?.Dispose();
             _barTween = null;
-            _pillTween?.Dispose();
-            _pillTween = null;
             _pendingGlideTween?.Dispose();
             _pendingGlideTween = null;
             _edgeTween?.Dispose();
@@ -823,7 +823,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             InvalidateScreenRect(new SD.Rectangle(
                 loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
 
-        SD.Rectangle readout = SelectorChrome.CursorReadoutRect(
+        SD.Rectangle readout = SelectorChrome.CursorReadoutDirtyRect(
             mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
         InvalidateScreenRect(new SD.Rectangle(
             readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
@@ -1117,17 +1117,12 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             _barTween = null;
             Array.Clear(_barHover);
             Array.Clear(_barPress);
-            _pressedShutter = false;
-            // The selection these three animate is gone as of this keystroke. Every other
+            // The selection these two animate is gone as of this keystroke. Every other
             // teardown path drops them explicitly; leaving them running kept the process-wide
             // 1 ms clock raised for up to 140 ms against a rect nobody can see.
             _handleTween?.Dispose();
             _handleTween = null;
             _handleScale = 1d;
-            _pillTween?.Dispose();
-            _pillTween = null;
-            _pillHover = false;
-            _pillSwap = 0d;
             _pendingGlideTween?.Dispose();
             _pendingGlideTween = null;
             _pendingGlide.Stop();
@@ -1208,16 +1203,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // from the detector, and downstream probe refinement is only correct for those.
         SelectedByPaneClick = false;
         _pressScreen = screen;
-
-        // The size pill IS the shutter — it cross-fades to a camera glyph and swaps in the
-        // camera cursor, so it reads as a button. It must never be the ground a marquee
-        // starts on: a press there with a few pixels of trackpad wobble used to confirm a
-        // 4x4 capture of the pill's own corner instead of taking the element it labels.
-        if (ShutterPillScreenRect() is SD.Rectangle shutter && shutter.Contains(screen))
-        {
-            _pressedShutter = true;
-            return;
-        }
 
         if (_recordingHud)
         {
@@ -1462,58 +1447,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// <summary>0..1 growth of the pending selection's handles (overshoots past 1).</summary>
     private double _handleScale = 1d;
     private IDisposable? _handleTween;
-
-    /// <summary>True while the pointer is over the detected element's size pill.</summary>
-    private bool _pillHover;
-    /// <summary>0..1 cross-fade from the size text to the camera glyph on that pill.</summary>
-    private double _pillSwap;
-    private IDisposable? _pillTween;
-
-    /// <summary>
-    /// The size pill for the currently detected element, in screen pixels — or null when
-    /// there is no detected element to label. Paint and hit-test share it so the pill you can
-    /// click is exactly the pill you can see.
-    /// </summary>
-    private SD.Rectangle? ShutterPillScreenRect()
-    {
-        if (!_paneHover || _pendingScreen is not null || _dragging || _hoverPane is not SD.Rectangle pane)
-            return null;
-        string text = $"{pane.Width} × {pane.Height}";
-        // Clamped to the monitor the element is on, matching how the painted pill is clamped
-        // to its surface's client area — otherwise an element against the right or bottom
-        // edge hit-tests somewhere the pill is not drawn. Sized at that monitor's scale for
-        // the same reason: the pill you can click has to be the pill you can see.
-        SD.Rectangle pillMonitor = WF.Screen.FromRectangle(pane).Bounds;
-        double pillScale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(pillMonitor);
-        return SelectorChrome.SizePillRect(
-            pane, SelectorChrome.MeasureLabel(text, pillScale), pillMonitor, pillScale);
-    }
-
-    /// <summary>
-    /// Cross-fades the pill between its size text and a camera glyph. The capture half of
-    /// this already worked — a bare click takes the detected element — but nothing on screen
-    /// said the highlighted thing was clickable.
-    /// </summary>
-    private void SetPillHover(bool hovering)
-    {
-        if (_pillHover == hovering)
-            return;
-        _pillHover = hovering;
-
-        double from = _pillSwap;
-        double to = hovering ? 1d : 0d;
-        _pillTween?.Dispose();
-        _pillTween = WinShot.Core.Motion.Run(
-            WinShot.Core.Motion.QuickMs,
-            WinShot.Core.Motion.EaseOutCubic,
-            progress =>
-            {
-                _pillSwap = from + ((to - from) * progress);
-                if (ShutterPillScreenRect() is SD.Rectangle pill)
-                    InvalidateScreenRect(Inflated(pill));
-            },
-            () => _pillTween = null);
-    }
 
     /// <summary>0..1 opacity of the hint/confirmation pill; 0 means it is not on screen.</summary>
     private double _hintOpacity;
@@ -1945,19 +1878,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // the moment the overlay opens, no modifier to discover. Click it to take it;
         // click-drag instead and the marquee wins — a drawn rect is never second-guessed.
         if (_paneHover && _pendingScreen is null && !_dragging)
-        {
-            // Moving onto the pill must not re-resolve the element out from under it — the
-            // pill sits outside the rect it labels, so re-resolving would swap the highlight
-            // the instant you reached for the shutter.
-            bool onPill = ShutterPillScreenRect() is SD.Rectangle pill && pill.Contains(_currentScreen);
-            SetPillHover(onPill);
-            if (!onPill)
-                UpdateHoverElement(_currentScreen);
-        }
-        else if (_pillHover)
-        {
-            SetPillHover(false);
-        }
+            UpdateHoverElement(_currentScreen);
 
         // Area mode, idle: keep the crosshair + loupe glued to the cursor. Repaint only the
         // old+new crosshair bands and loupe box (not the whole monitor), so a large external
@@ -2091,20 +2012,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                     else
                         FlashMessage("The selection already reaches the edge of the screen.");
                 }
-            }
-            return;
-        }
-
-        if (_pressedShutter)
-        {
-            _pressedShutter = false;
-            // Released on the pill it was pressed on: take the element the pill labels.
-            if (ShutterPillScreenRect() is SD.Rectangle shutter &&
-                shutter.Contains(_currentScreen) &&
-                _hoverPane is SD.Rectangle shot)
-            {
-                SelectedByPaneClick = true;
-                Confirm(VirtualFromScreen(shot));
             }
             return;
         }
@@ -2309,8 +2216,11 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // The active selection (drawing / adjustable pending / hovered window) shows the
         // frozen pixels at full brightness with an accent border.
         SD.Rectangle? brightScreen = null;
-        SD.Rectangle? labelScreen = null;
         bool showHandles = false;
+        // The window highlight's presence, and only its. A marquee or a framed selection is an
+        // object the user is holding, never one fading, so those stay solid whatever the ramp
+        // happens to be carrying.
+        double highlight = 1d;
         if (_dragging && _dragMoved)
         {
             brightScreen = DragRect();
@@ -2320,20 +2230,17 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             brightScreen = _pendingGlide.IsActive ? _pendingGlide.Current : pending;
             showHandles = true;
         }
-        else if (_mode == SelectorMode.Window && _hoverWindow is not null)
+        else if (_mode == SelectorMode.Window && HighlightWindow is WindowInfo hovered)
         {
             // Mid-glide the border, the wash and the app-name pill all ride the interpolated
             // rect — they are one object, so anything left behind on the settled window
-            // reads as the highlight coming apart. The readout does not: it follows the
-            // cursor in this mode, and the capture still takes _hoverWindow.Bounds.
-            brightScreen = tweening ? _hoverTween.Current : _hoverWindow.Bounds;
+            // reads as the highlight coming apart. The capture still takes _hoverWindow.Bounds.
+            brightScreen = tweening ? _hoverTween.Current : hovered.Bounds;
+            highlight = Math.Clamp(_hoverWash, 0d, 1d);
         }
         else if (_paneHover && _hoverPane is SD.Rectangle hoverPane)
         {
-            // Mid-glide the border rides the interpolated rect, but the readout stays on the
-            // real one - spinning digits for 200 ms reads as a glitch, not as motion.
             brightScreen = tweening ? _hoverTween.Current : hoverPane;
-            labelScreen = hoverPane;
         }
 
         if (brightScreen is SD.Rectangle bright)
@@ -2343,7 +2250,21 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             // Scaled like the edge-press glow below, which starts at this same 2 px weight:
             // an unscaled base made hovering an edge pop the stroke a pixel wider at 150 %
             // before the tween had done anything.
-            using (var pen = new SD.Pen(Accent, (float)(2d * Math.Max(1d, s))))
+            // In window mode the border carries the highlight's presence like the wash and
+            // the pill do. It used to be unconditionally opaque, which is why the entrance and
+            // the exit could not be given a fade: a solid border over a ramping tint reads as
+            // a pop against it, which is the note the wash's own comment used to carry.
+            //
+            // Whole pixels, because this surface paints with SmoothingMode.None and an aliased
+            // pen covers whole rows: 2 x 1.25 is 2.5, which is not two and a half rows of
+            // anything — it is whatever GDI+ rounds it to. Scanned across a whole glide it
+            // rounds UP and it rounds CONSISTENTLY (3 rows at 125 %, 3 at 150 %, 4 at 200 %),
+            // so there is no shimmer to fix; the ceiling is here to put that number in the
+            // source rather than leave it to the rasteriser, which is the same reason the
+            // crosshair guide's weight is rounded.
+            using (var pen = new SD.Pen(
+                SD.Color.FromArgb((int)Math.Round(255 * highlight), Accent),
+                (float)Math.Ceiling(2d * Math.Max(1d, s))))
                 g.DrawRectangle(pen, local);
 
             // The edge under the pointer thickens: the only thing on the selection that says
@@ -2369,12 +2290,12 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                 }
             }
 
-            if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
+            if (_mode == SelectorMode.Window && HighlightWindow is not null && _pendingScreen is null && !_dragging)
             {
                 // A hand-drawn marquee and a whole window looked identical — both a plain
                 // accent border over undimmed pixels. The wash says "this is one object,
                 // and it is the thing that will be captured".
-                int washAlpha = (int)Math.Round(WindowWashAlpha * Math.Clamp(_hoverWash, 0d, 1d));
+                int washAlpha = (int)Math.Round(WindowWashAlpha * highlight);
                 if (washAlpha > 0)
                 {
                     using var wash = new SD.SolidBrush(SD.Color.FromArgb(washAlpha, Accent));
@@ -2383,55 +2304,26 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                 // One pill per window, not one per monitor the window overlaps: this block
                 // runs on every surface, so a window spanning two displays used to draw its
                 // name twice, each centred in that display's slice of it.
-                if (_hoverAppName.Length > 0 && cursorOnThisSurface)
+                // Only while the highlight is big enough to hold it. The name is centred
+                // INSIDE the rect, so on anything smaller it hangs out of both sides and reads
+                // as a label that has come loose from the thing it names — which is most of
+                // the entrance and the exit now that those grow out of and shrink back into
+                // the pointer, and was already true of any window narrower than its own name.
+                SD.Size namePill = SelectorChrome.MeasureLabel(_hoverAppName, s);
+                if (_hoverAppName.Length > 0 && cursorOnThisSurface &&
+                    namePill.Width <= local.Width && namePill.Height <= local.Height)
                 {
-                    SD.Size pill = SelectorChrome.MeasureLabel(_hoverAppName, s);
                     SelectorChrome.DrawLabel(g, clientSize, _hoverAppName,
-                        local.Left + (local.Width - pill.Width) / 2,
-                        local.Top + (local.Height - pill.Height) / 2, s,
+                        local.Left + (local.Width - namePill.Width) / 2,
+                        local.Top + (local.Height - namePill.Height) / 2, s,
                         // Rides the wash it sits on: landing solid over a tint still ramping
                         // is the same pop the wash exists to avoid.
-                        Math.Clamp(_hoverWash, 0d, 1d));
+                        highlight);
                 }
             }
 
             if (showHandles)
                 DrawHandles(g, monitorBounds, bright);
-
-            if (cursorOnThisSurface)
-            {
-                SD.Rectangle sized = labelScreen ?? bright;
-                // The readout is placed off the rect it LABELS, never off the interpolated
-                // border. `local` rides _hoverTween mid-retarget while ShutterPillScreenRect()
-                // — the thing a press is tested against — always uses the settled element, so
-                // deriving the position from `local` painted the shutter somewhere it could
-                // not be clicked for the whole 200 ms glide.
-                SD.Rectangle labelLocal = ToLocal(sized, monitorBounds);
-                string sizeText = $"{sized.Width} × {sized.Height}";
-                int pillGap = WinShot.Recording.RecordingMonitorDpi.Px(8, s);
-                SD.Point at = new(labelLocal.Right + pillGap, labelLocal.Bottom + pillGap);
-                if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
-                {
-                    SD.Point atCursor = ToLocal(_currentScreen, monitorBounds);
-                    SD.Size follow = SelectorChrome.ReadoutOffset(s);
-                    at = new SD.Point(atCursor.X + follow.Width, atCursor.Y + follow.Height);
-                }
-                else if (_pendingScreen is not null)
-                {
-                    // The Cancel/Done bar owns the space below a pending region — on a narrow
-                    // selection the pill would land on Cancel — so the readout rides the
-                    // selection's top-right, flipped just inside when the region touches the
-                    // monitor top.
-                    SD.Size pill = SelectorChrome.MeasureLabel(sizeText, s);
-                    int pillTop = labelLocal.Top - pill.Height - pillGap;
-                    if (pillTop < 0) pillTop = labelLocal.Top + pillGap;
-                    at = new SD.Point(Math.Max(0, labelLocal.Right - pill.Width), pillTop);
-                }
-                if (labelScreen is not null)
-                    SelectorChrome.DrawShutterPill(g, clientSize, sizeText, at, _pillSwap, s);
-                else
-                    SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y, s);
-            }
         }
 
         // Ask for the next frame. Self-sustaining for the 200 ms of the glide, then it stops
@@ -2501,8 +2393,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             }
             else if (dragSize.IsEmpty)
             {
-                // Mid-drag the selection's own size pill already sits at the corner the
-                // cursor is on; a second copy 16 px away is the same number twice.
+                // Idle only. The readout answers "where am I"; mid-drag the magnifier is the
+                // surface that reports the extent, and a following pill that swells to a
+                // w × h figure is the dimension chrome this selector no longer draws.
                 SelectorChrome.DrawCursorReadout(g, clientSize,
                     SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds), s);
             }
@@ -2756,9 +2649,13 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (next == _hoverWindow)
             return false;
 
-        WindowInfo? previous = _hoverWindow;
+        WindowInfo? previous = _hoverWindow ?? _hoverExit;
         _hoverWindow = next;
-        _hoverAppName = next is null ? string.Empty : AppNameFor(next);
+        // A highlight still fading out is the thing an arriving one continues from, so the
+        // pointer sweeping off a window and straight onto its neighbour is one movement and
+        // not a fade-out racing a fade-in.
+        _hoverExit = next is null ? previous : null;
+        _hoverAppName = next is null ? _hoverAppName : AppNameFor(next);
         BeginHoverWash(next is not null, previous is not null);
         if (previous is not null && next is not null)
         {
@@ -2775,16 +2672,21 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         }
         else if (previous is not null)
         {
-            // Nothing to glide to, and nothing to glide from: the first window the pointer
-            // meets after the overlay opens must appear on its own rect, not sail in from
-            // wherever the last one was.
-            _hoverTween.Stop();
-            InvalidateScreenRect(Inflated(previous.Bounds));
+            // The pointer left every window. The highlight shrinks back into the pointer while
+            // its tint fades, which is the entrance below played backwards.
+            SD.Rectangle seed = PointerSeed();
+            _hoverTween.Retarget(previous.Bounds, seed);
+            InvalidateHoverRegion(previous.Bounds, seed);
         }
         else if (next is not null)
         {
-            _hoverTween.Stop();
-            InvalidateScreenRect(Inflated(next.Bounds));
+            // The first window the pointer meets grows out of the pointer. It must not sail in
+            // from wherever the LAST one was — that is a highlight arriving from a place the
+            // user is not looking — but appearing whole on its own rect is the snap this round
+            // is about, and the pointer is the one rect the eye is already on.
+            SD.Rectangle seed = PointerSeed();
+            _hoverTween.Retarget(seed, next.Bounds);
+            InvalidateHoverRegion(seed, next.Bounds);
         }
         return true;
     }
@@ -2837,16 +2739,19 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     private readonly Dictionary<IntPtr, string> _appNames = new();
 
     /// <summary>
-    /// Ramps the window-target wash in over <see cref="Motion.QuickMs"/> when the tint
-    /// arrives from nothing. Retargeting straight from one window to another CARRIES the
-    /// wash across at its current strength instead of restarting it at zero — that is what
-    /// makes a retarget read as the tint moving rather than one rectangle blinking off while
-    /// its neighbour fades up. Only the wash is painted, and only for the window under the
-    /// pointer, so leaving has nothing to ramp: the tint goes with the rectangle it was on.
+    /// Ramps the window highlight's PRESENCE — border alpha, wash alpha and app-name pill
+    /// alpha together — in over <see cref="Motion.QuickMs"/> as it arrives and out as the
+    /// pointer leaves every window. Retargeting straight from one window to another CARRIES
+    /// the value across at its current strength instead of restarting it at zero: that is what
+    /// makes a retarget read as one highlight moving rather than one rectangle blinking off
+    /// while its neighbour fades up.
     ///
-    /// This is the one asymmetric entrance/exit on the selector, and it only holds while the
-    /// accent BORDER is also instant. Give the border a fade and this must get one too, or the
-    /// wash will read as a pop against it.
+    /// The entrance and the exit are now the same ramp in opposite directions, because the
+    /// asymmetry that used to live here was a real defect: leaving for the desktop dropped the
+    /// value to 0 in one assignment, so the border, the tint and the app name were cut out of
+    /// the frame in a single frame while every other transition on this overlay moved. It fades
+    /// out over the rect it was on (<see cref="_hoverExit"/>), and this method owns that rect's
+    /// lifetime — nothing else may clear it, or the fade paints against nothing.
     /// </summary>
     private void BeginHoverWash(bool arriving, bool wasHovering)
     {
@@ -2855,25 +2760,53 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
 
         _hoverWashTween?.Dispose();
         _hoverWashTween = null;
-        if (!arriving)
+        if (!arriving && _hoverExit is null)
         {
+            // A teardown, not a leave: there is no rect left to fade out over.
             _hoverWash = 0d;
             return;
         }
 
-        double from = wasHovering ? _hoverWash : 0d;
+        double target = arriving ? 1d : 0d;
+        double from = wasHovering || !arriving ? _hoverWash : 0d;
         _hoverWash = from;
         _hoverWashTween = WinShot.Core.Motion.Run(
             WinShot.Core.Motion.QuickMs,
-            WinShot.Core.Motion.EaseOutCubic,
+            arriving ? WinShot.Core.Motion.EaseOutCubic : WinShot.Core.Motion.EaseInCubic,
             progress =>
             {
-                _hoverWash = from + ((1d - from) * progress);
-                if (_hoverWindow is WindowInfo w)
+                _hoverWash = from + ((target - from) * progress);
+                if (HighlightWindow is WindowInfo w)
                     InvalidateScreenRect(Inflated(w.Bounds));
             },
-            () => _hoverWashTween = null);
+            () =>
+            {
+                _hoverWashTween = null;
+                if (arriving)
+                    return;
+                // The last frame of the fade drew at alpha 0, but the tween that shrank the
+                // rect may still be mid-flight; retiring the rect has to repaint the ground it
+                // was standing on or the final sliver of border stays.
+                SD.Rectangle left = _hoverExit?.Bounds ?? SD.Rectangle.Empty;
+                _hoverExit = null;
+                _hoverTween.Stop();
+                if (!left.IsEmpty)
+                    InvalidateScreenRect(Inflated(left));
+            });
     }
+
+    /// <summary>The window a highlight is being painted FOR: the one under the pointer, or the
+    /// one a leave is still fading out over. One accessor, so paint and repaint can never
+    /// disagree about which of the two is on screen.</summary>
+    private WindowInfo? HighlightWindow => _hoverWindow ?? _hoverExit;
+
+    /// <summary>
+    /// The rect a window highlight grows out of and shrinks back into: the pointer itself, with
+    /// no extent. The alternatives are both worse — appearing whole is the snap this round is
+    /// about, and gliding in from the last window the pointer visited starts the motion
+    /// somewhere the user is not looking.
+    /// </summary>
+    private SD.Rectangle PointerSeed() => new(_currentScreen.X, _currentScreen.Y, 0, 0);
 
     /// <summary>A highlight's ground plus everything drawn outside it: the border pen and
     /// its antialiasing, and -- on a framed selection -- the handle dots, their pop-in
@@ -2902,14 +2835,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         int edge = WinShot.Recording.RecordingMonitorDpi.Px(4, scale); // border pen width + antialiasing
         union.Inflate(edge, edge);
         InvalidateScreenRect(union);
-        // The size label hanging off the bottom-right corner. Logical px, scaled: the pill's
-        // font and padding grow with the monitor, so a fixed device-pixel box is the same bug
-        // the loupe had — it clips the label's own repaint from 125 % up.
-        InvalidateScreenRect(new SD.Rectangle(
-            union.Right,
-            union.Bottom,
-            WinShot.Recording.RecordingMonitorDpi.Px(250, scale),
-            WinShot.Recording.RecordingMonitorDpi.Px(64, scale)));
     }
 
     /// <summary>Innermost snappable rect under the point. The list is deepest-first, so the
@@ -3036,7 +2961,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         DialogResult = result;
         StopAspectSnap();
         StopFollowMotion();
-        // A tween outliving the session holds the process-wide 1 ms clock.
+        // A tween outliving the session holds the process-wide 1 ms clock — which is exactly
+        // what a leave fade would become here, so the rect it would fade out over goes first.
+        _hoverExit = null;
         BeginHoverWash(arriving: false, wasHovering: false);
         _handleTween?.Dispose();
         _handleTween = null;
@@ -3049,10 +2976,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _hintIsMessage = false;
         _barTween?.Dispose();
         _barTween = null;
-        _pillTween?.Dispose();
-        _pillTween = null;
-        _pillHover = false;
-        _pillSwap = 0d;
         _pendingGlideTween?.Dispose();
         _pendingGlideTween = null;
         _pendingGlide.Stop();
@@ -3189,7 +3112,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (_mode == SelectorMode.Measure)
             return MeasureCursor();
 
-        if (_mode == SelectorMode.Window || _pillHover)
+        if (_mode == SelectorMode.Window)
         {
             // Sized for the monitor the pointer is actually on: a custom HCURSOR is drawn at
             // its native pixel size, so a cursor built for the primary reads wrong the moment
