@@ -37,7 +37,19 @@ public class EditorPropsProbe
         {
             try
             {
-                if (Application.Current is null) _ = new Application();
+                // This assembly gets exactly ONE System.Windows.Application and whichever test
+                // reaches it first owns it on its own STA thread. Touching it from here would
+                // throw "the calling thread cannot access this object", and building an
+                // EditorWindow against a dispatcher that is not running lays out windows that
+                // never resolve their theme. So stand down when someone else owns it — the
+                // full suite stays green — and do the real work when run under a filter, which
+                // is how the handoff says to run it. OnExplicitShutdown because the default
+                // OnLastWindowClose would shut the Application down when this test closes its
+                // window, poisoning every later test in the host.
+                if (Application.Current is { } inherited && !inherited.CheckAccess())
+                    return;
+                var app = Application.Current ?? new Application();
+                app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 ThemeResources.EnsureLoaded();
 
                 var settings = new SettingsService();
