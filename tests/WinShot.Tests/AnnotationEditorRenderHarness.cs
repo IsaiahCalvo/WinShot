@@ -3042,15 +3042,16 @@ public class AnnotationEditorRenderHarness
                         $"{(onHovered == "Hand" && onSelected == "SizeAll" && onEmpty == "Arrow" ? "PASS" : "FAIL")}");
                     selectM.Invoke(editor, new object?[] { null }); Pump(2);
 
-                    // R2-6: pan mode is Survey's grab / grabbing pair, not Hand / SizeAll.
-                    var grabF = typeof(EditorWindow).GetField("GrabCursor",
-                        BindingFlags.Static | BindingFlags.NonPublic)!;
+                    // R2-6: pan mode is Survey's grab / grabbing pair, not Hand / SizeAll. The
+                    // hand is drawn at runtime per monitor scale (PanCursors), so identity is
+                    // checked against the cache at the editor's own DPI.
                     Check("PanToolBtn"); Pump(2);
                     var panCursor = surface.Cursor;
-                    sweep.AppendLine($"[R2-6 panCursor] armed cursor is the custom grab asset=" +
-                        $"{ReferenceEquals(panCursor, grabF.GetValue(null))} loaded={grabF.GetValue(null) is not null} " +
+                    var expectedGrab = PanCursors.Grab(VisualTreeHelper.GetDpi(editor).DpiScaleX);
+                    sweep.AppendLine($"[R2-6 panCursor] armed cursor is the runtime grab hand=" +
+                        $"{ReferenceEquals(panCursor, expectedGrab)} " +
                         $"isWin32Hand={ReferenceEquals(panCursor, Cursors.Hand)} -> " +
-                        $"{(grabF.GetValue(null) is not null && ReferenceEquals(panCursor, grabF.GetValue(null)) ? "PASS" : "FAIL")}");
+                        $"{(ReferenceEquals(panCursor, expectedGrab) ? "PASS" : "FAIL")}");
                     Check("SelectToolBtn"); Pump(2);
 
                     // R2-7/8/9: the picker is modal between presets and spectrum, has no Apply button,

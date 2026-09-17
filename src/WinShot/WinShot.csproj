@@ -82,10 +82,6 @@
                       LogicalName="WinShot.Assets.quick-access-unlock.svg" />
     <EmbeddedResource Include="Assets\quick-access-save.svg"
                       LogicalName="WinShot.Assets.quick-access-save.svg" />
-    <EmbeddedResource Include="Assets\cursor-grab.cur"
-                      LogicalName="WinShot.Assets.cursor-grab.cur" />
-    <EmbeddedResource Include="Assets\cursor-grabbing.cur"
-                      LogicalName="WinShot.Assets.cursor-grabbing.cur" />
     <None Include="Theme\Icons\*.svg" CopyToOutputDirectory="PreserveNewest" />
     <!-- Context-menu glyphs for the quick-actions card's editing rows. -->
     <EmbeddedResource Include="Assets\quick-access-text.svg"

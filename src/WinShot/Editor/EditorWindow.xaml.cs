@@ -961,22 +961,6 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Survey's pan cursors are CSS <c>grab</c> / <c>grabbing</c> (PDFViewer.jsx:3071, :23599).
-    /// Windows ships neither, so WinShot carries its own 32x32 pair; Cursors.Hand is the
-    /// pointing-finger link cursor and Cursors.SizeAll is the move-object arrow — a different
-    /// idiom entirely. Null if the resource is missing, and the old cursor is used instead.
-    /// </summary>
-    private static readonly Cursor? GrabCursor = LoadCursor("cursor-grab");
-    private static readonly Cursor? GrabbingCursor = LoadCursor("cursor-grabbing");
-
-    private static Cursor? LoadCursor(string name)
-    {
-        using System.IO.Stream? stream = typeof(EditorWindow).Assembly
-            .GetManifestResourceStream($"WinShot.Assets.{name}.cur");
-        return stream is null ? null : new Cursor(stream);
-    }
-
-    /// <summary>
     /// EditorSurface sits INSIDE Viewport, and WPF's QueryCursor bubbles outward, so the
     /// innermost element with a non-null Cursor wins. Anything that wants a cursor over the
     /// image has to set both.
@@ -1001,9 +985,9 @@ public partial class EditorWindow : Window
     private void UpdateCursor()
     {
         if (_panning)
-            SetSurfaceCursor(GrabbingCursor ?? Cursors.SizeAll);
+            SetSurfaceCursor(PanCursors.Grabbing(VisualTreeHelper.GetDpi(this).DpiScaleX));
         else if (_spaceDown || _tool == EditorTool.Pan)
-            SetSurfaceCursor(GrabCursor ?? Cursors.Hand);
+            SetSurfaceCursor(PanCursors.Grab(VisualTreeHelper.GetDpi(this).DpiScaleX));
         else if (_tool == EditorTool.Eraser)
         {
             // Survey's eraser surface is cursor:'none' so the ring is the ONLY cursor
