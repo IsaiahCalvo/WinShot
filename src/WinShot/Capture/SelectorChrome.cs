@@ -7,7 +7,7 @@ namespace WinShot.Capture;
 /// <summary>
 /// Shared visual chrome for the capture selectors (<see cref="FastRegionSelectorDialog"/>
 /// and <see cref="FastAllInOneSelectorDialog"/>): the crosshair guide lines, the
-/// size/coordinate label pill, the measurement vocabulary, and the common overlay-surface
+/// coordinate readout pill, the measurement vocabulary, and the common overlay-surface
 /// setup. Kept in one place so both selectors draw identical chrome and a styling change
 /// happens once.
 /// </summary>
@@ -20,9 +20,6 @@ internal static class SelectorChrome
     private const int PillPadX = 16;
     private const int PillPadY = 8;
     private const int PillRadius = 6;
-
-    /// <summary>Gap between a labelled rectangle and the size pill parked off its corner.</summary>
-    private const int PillGap = 8;
 
     private static double Clean(double scale) => scale is > 0d and < 100d ? scale : 1d;
 
@@ -47,9 +44,9 @@ internal static class SelectorChrome
         ThemePalette.UiFontPx(ThemePalette.PxForPt(ThemePalette.TextBodyPt, Clean(scale)), SD.FontStyle.Bold);
 
     /// <summary>How far down-and-right of the pointer a pill that FOLLOWS the pointer sits,
-    /// on a monitor at <paramref name="scale"/>. One relationship, one pair of numbers:
-    /// window mode places its size readout with these too, and the user switches between the
-    /// two surfaces with Space.</summary>
+    /// on a monitor at <paramref name="scale"/>. One relationship, one pair of numbers, so the
+    /// repaint that erases a following pill is computed from the same offset that placed
+    /// it.</summary>
     public static SD.Size ReadoutOffset(double scale) =>
         new(Px(CursorReadoutOffsetX, scale), Px(CursorReadoutOffsetY, scale));
 
@@ -59,9 +56,8 @@ internal static class SelectorChrome
     /// <c>TextRenderer.DrawText</c> is a GDI (DrawTextW) wrapper and its colour goes through
     /// ColorTranslator.ToWin32, which is <c>R | G&lt;&lt;8 | B&lt;&lt;16</c> — the alpha byte is
     /// dropped on the floor. Every fading label drawn that way rendered fully opaque for the
-    /// whole tween and then vanished, and the shutter pill's cross-fade printed both of its
-    /// labels solid on top of each other for the entire 140 ms. GDI+ <c>DrawString</c> does
-    /// honour alpha, which is why the quick-actions card's flash line already uses it.
+    /// whole tween and then vanished. GDI+ <c>DrawString</c> does honour alpha, which is why
+    /// the quick-actions card's flash line already uses it.
     /// </summary>
     public static void DrawCenteredText(
         SD.Graphics g, string text, SD.Font font, SD.Rectangle bounds, SD.Color color)
@@ -204,65 +200,6 @@ internal static class SelectorChrome
     /// <see cref="ReadoutOffset"/>, which scales it for the monitor it lands on.</summary>
     private const int CursorReadoutOffsetX = 16;
     private const int CursorReadoutOffsetY = 20;
-
-    /// <summary>
-    /// Where the size pill for a detected element sits, in the same space as the rectangle it
-    /// labels, CLAMPED inside <paramref name="bounds"/> the way <see cref="DrawLabel"/> clamps
-    /// it inside the client area. Paint and hit-test both call this, so the pill you can click
-    /// is exactly the pill you can see — with the clamp only on the paint side, an element
-    /// flush with the right or bottom edge of a monitor painted its pill pulled inward while
-    /// the hit rect stayed off screen, so the shutter was dead in exactly that corner.
-    /// </summary>
-    public static SD.Rectangle SizePillRect(
-        SD.Rectangle labelled, SD.Size pill, SD.Rectangle bounds, double scale)
-    {
-        int gap = Px(PillGap, scale);
-        int left = Math.Clamp(labelled.Right + gap, bounds.Left, Math.Max(bounds.Left, bounds.Right - pill.Width));
-        int top = Math.Clamp(labelled.Bottom + gap, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - pill.Height));
-        return new SD.Rectangle(left, top, pill.Width, pill.Height);
-    }
-
-    /// <summary>
-    /// The size pill cross-fading into a camera glyph as the pointer moves onto it. Same
-    /// geometry throughout — the pill is not a new control, it is the existing readout
-    /// admitting that clicking it takes the shot.
-    ///
-    /// The pill ground is painted ONCE at full alpha and only the two foregrounds cross-fade.
-    /// Fading a whole label out under a whole label fading in composed two 235-alpha grounds
-    /// down to about 180 at the midpoint, so the chrome visibly thinned over whatever was
-    /// behind it for the ~70 ms it was changing — the one moment it is being looked at.
-    /// </summary>
-    public static void DrawShutterPill(
-        SD.Graphics g, SD.Size clientSize, string text, SD.Point at, double swap, double scale)
-    {
-        double amount = Math.Clamp(swap, 0d, 1d);
-        SD.Size pill = MeasureLabel(text, scale);
-        int left = Math.Clamp(at.X, 0, Math.Max(0, clientSize.Width - pill.Width));
-        int top = Math.Clamp(at.Y, 0, Math.Max(0, clientSize.Height - pill.Height));
-        var bounds = new SD.Rectangle(left, top, pill.Width, pill.Height);
-
-        var prev = g.SmoothingMode;
-        g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-        using (var path = GdiPaths.RoundedRect(bounds, Px(PillRadius, scale)))
-        using (var bgBrush = new SD.SolidBrush(SD.Color.FromArgb(235, ThemePalette.WindowBg)))
-            g.FillPath(bgBrush, path);
-        g.SmoothingMode = prev;
-
-        if (amount < 1d)
-        {
-            using var font = PillFont(scale);
-            DrawCenteredText(g, text, font, bounds,
-                SD.Color.FromArgb((int)Math.Round(255 * (1d - amount)), ThemePalette.TextPrimary));
-        }
-
-        if (amount > 0d)
-        {
-            using var glyphFont = ThemePalette.IconFontPx(
-                ThemePalette.PxForPt(ThemePalette.GlyphBadgePt, scale));
-            DrawCenteredText(g, "", glyphFont, bounds,
-                SD.Color.FromArgb((int)Math.Round(255 * amount), ThemePalette.TextPrimary));
-        }
-    }
 
     /// <summary>Where the hint/message pill sits by default: centred, one eighth down.</summary>
     public static SD.Rectangle HintPillRect(SD.Size clientSize, string text, double scale)

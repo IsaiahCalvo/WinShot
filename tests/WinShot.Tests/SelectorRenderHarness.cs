@@ -10,7 +10,7 @@ namespace WinShot.Tests;
 
 /// <summary>
 /// The selector's own render harness: it drives a real selector through idle, window hover,
-/// drag, pending selection and shutter hover at four monitor scales, paints each state into an
+/// drag, pending selection and element hover at four monitor scales, paints each state into an
 /// offscreen bitmap, and SCANS THE PIXELS. Nothing here is eyeballed — the sweep's standing
 /// landmine is that two different wrong versions of a highlight both looked fine in a PNG and
 /// were obviously off to Isaiah.
@@ -422,15 +422,10 @@ public class SelectorRenderHarness
             pointer.MoveTo(selector, 340, 260);
         });
 
-        yield return ("hover-shutter", static (selector, pointer) =>
+        yield return ("hover-element", static (selector, pointer) =>
         {
-            Set(selector, "_mode", FastRegionSelectorDialog.SelectorMode.Window);
             Set(selector, "_paneHover", true);
             Set(selector, "_hoverPane", new SD.Rectangle(90, 70, 260, 170));
-            Set(selector, "_hoverWindow", new WindowInfo(new IntPtr(1), "Notepad", new SD.Rectangle(90, 70, 260, 170)));
-            Set(selector, "_hoverAppName", "Notepad");
-            Set(selector, "_hoverWash", 1d);
-            Set(selector, "_pressedShutter", false);
             pointer.MoveTo(selector, 200, 150);
         });
     }

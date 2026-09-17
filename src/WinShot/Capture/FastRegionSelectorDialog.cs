@@ -37,9 +37,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// <summary>Where the left button went down, for telling a click from a drag at release.</summary>
     private SD.Point _pressScreen;
 
-    /// <summary>True while the left button is held on the detected element's shutter pill.</summary>
-    private bool _pressedShutter;
-
     /// <summary>Set by <c>Complete</c> and cleared by <c>ResetForUse</c>. A pooled selector is
     /// parked, not destroyed, and keeps keyboard focus, so keys keep arriving after the
     /// session is over.</summary>
@@ -624,7 +621,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         RecordingChoice = null;
         _hoverBarButton = -1;
         _pressedBarButton = -1;
-        _pressedShutter = false;
         _resizeHandle = -1;
         _movingPending = false;
         _pressedEdge = MarqueeSide.None;
@@ -648,10 +644,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _barTween = null;
         Array.Clear(_barHover);
         Array.Clear(_barPress);
-        _pillTween?.Dispose();
-        _pillTween = null;
-        _pillHover = false;
-        _pillSwap = 0d;
         _pendingGlideTween?.Dispose();
         _pendingGlideTween = null;
         _pendingGlide.Stop();
@@ -749,8 +741,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             _hintHold = null;
             _barTween?.Dispose();
             _barTween = null;
-            _pillTween?.Dispose();
-            _pillTween = null;
             _pendingGlideTween?.Dispose();
             _pendingGlideTween = null;
             _edgeTween?.Dispose();
@@ -1117,17 +1107,12 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             _barTween = null;
             Array.Clear(_barHover);
             Array.Clear(_barPress);
-            _pressedShutter = false;
-            // The selection these three animate is gone as of this keystroke. Every other
+            // The selection these two animate is gone as of this keystroke. Every other
             // teardown path drops them explicitly; leaving them running kept the process-wide
             // 1 ms clock raised for up to 140 ms against a rect nobody can see.
             _handleTween?.Dispose();
             _handleTween = null;
             _handleScale = 1d;
-            _pillTween?.Dispose();
-            _pillTween = null;
-            _pillHover = false;
-            _pillSwap = 0d;
             _pendingGlideTween?.Dispose();
             _pendingGlideTween = null;
             _pendingGlide.Stop();
@@ -1208,16 +1193,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // from the detector, and downstream probe refinement is only correct for those.
         SelectedByPaneClick = false;
         _pressScreen = screen;
-
-        // The size pill IS the shutter — it cross-fades to a camera glyph and swaps in the
-        // camera cursor, so it reads as a button. It must never be the ground a marquee
-        // starts on: a press there with a few pixels of trackpad wobble used to confirm a
-        // 4x4 capture of the pill's own corner instead of taking the element it labels.
-        if (ShutterPillScreenRect() is SD.Rectangle shutter && shutter.Contains(screen))
-        {
-            _pressedShutter = true;
-            return;
-        }
 
         if (_recordingHud)
         {
@@ -1462,58 +1437,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// <summary>0..1 growth of the pending selection's handles (overshoots past 1).</summary>
     private double _handleScale = 1d;
     private IDisposable? _handleTween;
-
-    /// <summary>True while the pointer is over the detected element's size pill.</summary>
-    private bool _pillHover;
-    /// <summary>0..1 cross-fade from the size text to the camera glyph on that pill.</summary>
-    private double _pillSwap;
-    private IDisposable? _pillTween;
-
-    /// <summary>
-    /// The size pill for the currently detected element, in screen pixels — or null when
-    /// there is no detected element to label. Paint and hit-test share it so the pill you can
-    /// click is exactly the pill you can see.
-    /// </summary>
-    private SD.Rectangle? ShutterPillScreenRect()
-    {
-        if (!_paneHover || _pendingScreen is not null || _dragging || _hoverPane is not SD.Rectangle pane)
-            return null;
-        string text = $"{pane.Width} × {pane.Height}";
-        // Clamped to the monitor the element is on, matching how the painted pill is clamped
-        // to its surface's client area — otherwise an element against the right or bottom
-        // edge hit-tests somewhere the pill is not drawn. Sized at that monitor's scale for
-        // the same reason: the pill you can click has to be the pill you can see.
-        SD.Rectangle pillMonitor = WF.Screen.FromRectangle(pane).Bounds;
-        double pillScale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(pillMonitor);
-        return SelectorChrome.SizePillRect(
-            pane, SelectorChrome.MeasureLabel(text, pillScale), pillMonitor, pillScale);
-    }
-
-    /// <summary>
-    /// Cross-fades the pill between its size text and a camera glyph. The capture half of
-    /// this already worked — a bare click takes the detected element — but nothing on screen
-    /// said the highlighted thing was clickable.
-    /// </summary>
-    private void SetPillHover(bool hovering)
-    {
-        if (_pillHover == hovering)
-            return;
-        _pillHover = hovering;
-
-        double from = _pillSwap;
-        double to = hovering ? 1d : 0d;
-        _pillTween?.Dispose();
-        _pillTween = WinShot.Core.Motion.Run(
-            WinShot.Core.Motion.QuickMs,
-            WinShot.Core.Motion.EaseOutCubic,
-            progress =>
-            {
-                _pillSwap = from + ((to - from) * progress);
-                if (ShutterPillScreenRect() is SD.Rectangle pill)
-                    InvalidateScreenRect(Inflated(pill));
-            },
-            () => _pillTween = null);
-    }
 
     /// <summary>0..1 opacity of the hint/confirmation pill; 0 means it is not on screen.</summary>
     private double _hintOpacity;
@@ -1945,19 +1868,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // the moment the overlay opens, no modifier to discover. Click it to take it;
         // click-drag instead and the marquee wins — a drawn rect is never second-guessed.
         if (_paneHover && _pendingScreen is null && !_dragging)
-        {
-            // Moving onto the pill must not re-resolve the element out from under it — the
-            // pill sits outside the rect it labels, so re-resolving would swap the highlight
-            // the instant you reached for the shutter.
-            bool onPill = ShutterPillScreenRect() is SD.Rectangle pill && pill.Contains(_currentScreen);
-            SetPillHover(onPill);
-            if (!onPill)
-                UpdateHoverElement(_currentScreen);
-        }
-        else if (_pillHover)
-        {
-            SetPillHover(false);
-        }
+            UpdateHoverElement(_currentScreen);
 
         // Area mode, idle: keep the crosshair + loupe glued to the cursor. Repaint only the
         // old+new crosshair bands and loupe box (not the whole monitor), so a large external
@@ -2091,20 +2002,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                     else
                         FlashMessage("The selection already reaches the edge of the screen.");
                 }
-            }
-            return;
-        }
-
-        if (_pressedShutter)
-        {
-            _pressedShutter = false;
-            // Released on the pill it was pressed on: take the element the pill labels.
-            if (ShutterPillScreenRect() is SD.Rectangle shutter &&
-                shutter.Contains(_currentScreen) &&
-                _hoverPane is SD.Rectangle shot)
-            {
-                SelectedByPaneClick = true;
-                Confirm(VirtualFromScreen(shot));
             }
             return;
         }
@@ -2309,7 +2206,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         // The active selection (drawing / adjustable pending / hovered window) shows the
         // frozen pixels at full brightness with an accent border.
         SD.Rectangle? brightScreen = null;
-        SD.Rectangle? labelScreen = null;
         bool showHandles = false;
         if (_dragging && _dragMoved)
         {
@@ -2324,16 +2220,12 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         {
             // Mid-glide the border, the wash and the app-name pill all ride the interpolated
             // rect — they are one object, so anything left behind on the settled window
-            // reads as the highlight coming apart. The readout does not: it follows the
-            // cursor in this mode, and the capture still takes _hoverWindow.Bounds.
+            // reads as the highlight coming apart. The capture still takes _hoverWindow.Bounds.
             brightScreen = tweening ? _hoverTween.Current : _hoverWindow.Bounds;
         }
         else if (_paneHover && _hoverPane is SD.Rectangle hoverPane)
         {
-            // Mid-glide the border rides the interpolated rect, but the readout stays on the
-            // real one - spinning digits for 200 ms reads as a glitch, not as motion.
             brightScreen = tweening ? _hoverTween.Current : hoverPane;
-            labelScreen = hoverPane;
         }
 
         if (brightScreen is SD.Rectangle bright)
@@ -2397,41 +2289,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
 
             if (showHandles)
                 DrawHandles(g, monitorBounds, bright);
-
-            if (cursorOnThisSurface)
-            {
-                SD.Rectangle sized = labelScreen ?? bright;
-                // The readout is placed off the rect it LABELS, never off the interpolated
-                // border. `local` rides _hoverTween mid-retarget while ShutterPillScreenRect()
-                // — the thing a press is tested against — always uses the settled element, so
-                // deriving the position from `local` painted the shutter somewhere it could
-                // not be clicked for the whole 200 ms glide.
-                SD.Rectangle labelLocal = ToLocal(sized, monitorBounds);
-                string sizeText = $"{sized.Width} × {sized.Height}";
-                int pillGap = WinShot.Recording.RecordingMonitorDpi.Px(8, s);
-                SD.Point at = new(labelLocal.Right + pillGap, labelLocal.Bottom + pillGap);
-                if (_mode == SelectorMode.Window && _hoverWindow is not null && _pendingScreen is null && !_dragging)
-                {
-                    SD.Point atCursor = ToLocal(_currentScreen, monitorBounds);
-                    SD.Size follow = SelectorChrome.ReadoutOffset(s);
-                    at = new SD.Point(atCursor.X + follow.Width, atCursor.Y + follow.Height);
-                }
-                else if (_pendingScreen is not null)
-                {
-                    // The Cancel/Done bar owns the space below a pending region — on a narrow
-                    // selection the pill would land on Cancel — so the readout rides the
-                    // selection's top-right, flipped just inside when the region touches the
-                    // monitor top.
-                    SD.Size pill = SelectorChrome.MeasureLabel(sizeText, s);
-                    int pillTop = labelLocal.Top - pill.Height - pillGap;
-                    if (pillTop < 0) pillTop = labelLocal.Top + pillGap;
-                    at = new SD.Point(Math.Max(0, labelLocal.Right - pill.Width), pillTop);
-                }
-                if (labelScreen is not null)
-                    SelectorChrome.DrawShutterPill(g, clientSize, sizeText, at, _pillSwap, s);
-                else
-                    SelectorChrome.DrawLabel(g, clientSize, sizeText, at.X, at.Y, s);
-            }
         }
 
         // Ask for the next frame. Self-sustaining for the 200 ms of the glide, then it stops
@@ -2501,8 +2358,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             }
             else if (dragSize.IsEmpty)
             {
-                // Mid-drag the selection's own size pill already sits at the corner the
-                // cursor is on; a second copy 16 px away is the same number twice.
+                // Idle only. The readout answers "where am I"; mid-drag the magnifier is the
+                // surface that reports the extent, and a following pill that swells to a
+                // w × h figure is the dimension chrome this selector no longer draws.
                 SelectorChrome.DrawCursorReadout(g, clientSize,
                     SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds), s);
             }
@@ -2902,14 +2760,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         int edge = WinShot.Recording.RecordingMonitorDpi.Px(4, scale); // border pen width + antialiasing
         union.Inflate(edge, edge);
         InvalidateScreenRect(union);
-        // The size label hanging off the bottom-right corner. Logical px, scaled: the pill's
-        // font and padding grow with the monitor, so a fixed device-pixel box is the same bug
-        // the loupe had — it clips the label's own repaint from 125 % up.
-        InvalidateScreenRect(new SD.Rectangle(
-            union.Right,
-            union.Bottom,
-            WinShot.Recording.RecordingMonitorDpi.Px(250, scale),
-            WinShot.Recording.RecordingMonitorDpi.Px(64, scale)));
     }
 
     /// <summary>Innermost snappable rect under the point. The list is deepest-first, so the
@@ -3049,10 +2899,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _hintIsMessage = false;
         _barTween?.Dispose();
         _barTween = null;
-        _pillTween?.Dispose();
-        _pillTween = null;
-        _pillHover = false;
-        _pillSwap = 0d;
         _pendingGlideTween?.Dispose();
         _pendingGlideTween = null;
         _pendingGlide.Stop();
@@ -3189,7 +3035,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (_mode == SelectorMode.Measure)
             return MeasureCursor();
 
-        if (_mode == SelectorMode.Window || _pillHover)
+        if (_mode == SelectorMode.Window)
         {
             // Sized for the monitor the pointer is actually on: a custom HCURSOR is drawn at
             // its native pixel size, so a cursor built for the primary reads wrong the moment
