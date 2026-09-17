@@ -89,11 +89,14 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/assets/icons/callout-arrow-outline.svg, verbatim. That file's owner rule:
+         nothing inside the bubble — no underscore, no "T" — so the two inner lines this
+         used to carry are gone, and the leader is a 5-unit, 90-degree open arrowhead. -->
     <Viewbox x:Key="SurveyIcon.Callout" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M20,4 H4 C2.9,4 2,4.9 2,6 V18 C2,19.1 2.9,20 4,20 H18 L22,24 V6 C22,4.9 21.1,4 20,4 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,12 H17"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M7,8 H13"/>
+            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="6.75" Canvas.Top="2.95" Width="14.5" Height="11" RadiusX="2.5" RadiusY="2.5"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.6 13.95 2.95 21.05"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M7.95 20.89 2.95 21.05 2.79 16.05"/>
         </Canvas>
     </Viewbox>
 
@@ -129,11 +132,17 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/assets/icons/counter-outline.svg, verbatim. All geometry now, no TextBlock:
+         a font glyph in an icon neither scales nor recolours with the rest of the set.
+         The ring is the Ellipse glyph's exact circle (12,12 r10) so the two read as
+         siblings, and it stays hollow when selected (owner rule). The numeral is 2.0, not
+         1.5 — the optical sizing rule for a small form — and its stem sits 0.7 right of the
+         ring centre on purpose: the eye reads a "1" by its stem, so that is what centred
+         looks like. -->
     <Viewbox x:Key="SurveyIcon.Counter" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="5" Canvas.Top="3" Width="16" Height="16"/>
-            <TextBlock Canvas.Left="5" Canvas.Top="3" Width="16" Height="16" Text="1" FontSize="10" FontWeight="Bold"
-                       TextAlignment="Center" Padding="0,1,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"/>
+            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M10.7 9.5 12.7 7.6V16.4"/>
         </Canvas>
     </Viewbox>
 
