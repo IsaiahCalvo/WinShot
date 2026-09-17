@@ -186,7 +186,7 @@
 
            Survey                     WinShot token           role
            #181c24 bar/sub-row    ->  ToolbarBg               panel material
-           #12151c right rail     ->  WindowBg                recessed, deeper than the bar
+           #12151c right rail     ->  ToolbarBg               see ChromeRailBrush below
            #0d0f14 popovers       ->  Elevated                popups elevate here, they do not sink
            #2a3140 hairlines      ->  Border
            #3a4252 control fills  ->  SurfaceAlt              inputs / toggles / tracks
@@ -196,7 +196,16 @@
            gold #d8a84e           ->  Accent                  ONE accent in this app
          ================================================================== -->
     <SolidColorBrush x:Key="ChromeBgBrush"           Color="{StaticResource ToolbarBgColor}"/>
-    <SolidColorBrush x:Key="ChromeRailBrush"         Color="{StaticResource WindowBgColor}"/>
+    <!-- The editor's right rail. Survey sinks it BELOW its bar (#12151c against #181c24)
+         because in Survey that column is a collapsed PANEL — a place pages and spaces live
+         — and a panel recedes. WinShot's rail is not a panel: it is four zoom controls and
+         nothing else, i.e. chrome, and every other control in that window sits on ToolbarBg.
+         So it takes the bar's material, and the top bar, the right rail and the bottom bar
+         become ONE continuous frame of one value around ONE recessed field — the desk. Two
+         materials in the whole window, and every control in it lands on the same one.
+         (Sinking the rail while the desk also sank left the rail's controls floating on the
+         work surface with only a hairline to say otherwise.) -->
+    <SolidColorBrush x:Key="ChromeRailBrush"         Color="{StaticResource ToolbarBgColor}"/>
     <SolidColorBrush x:Key="ChromePopoverBrush"      Color="{StaticResource ElevatedColor}"/>
     <SolidColorBrush x:Key="ChromeHairlineBrush"     Color="{StaticResource BorderColor}"/>
     <SolidColorBrush x:Key="ChromeControlBrush"      Color="{StaticResource SurfaceAltColor}"/>

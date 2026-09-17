@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -43,17 +43,37 @@ public class EditorChromeJoinTests
             $"the rail's left hairline covers {r.RailLeftRun}/{r.RailHeight} px at {dpi} DPI.");
 
         // 3. Each rule is the theme's Border token, not a hand-picked grey.
-        // Border is #1FFFFFFF — a 12%-white WASH, not an opaque colour — so the three rules
-        // legitimately paint to different values over their own surfaces, and comparing the
-        // painted pixels to each other (or to the raw token) would be a category error.
-        // What must hold is that each one is that token composited over its own background,
-        // which is the same rule tools/scan-editor-palette.py applies to the whole strip.
-        // A missing border is ~26/255 away per channel; the tolerance is 3.
-        AssertIsBorderWashOver(r.ToolbarRuleColor, r.ToolbarSurface, "toolbar bottom", dpi);
-        AssertIsBorderWashOver(r.RailRuleColor, r.RailSurface, "rail left", dpi);
-        AssertIsBorderWashOver(r.BottomBarRuleColor, r.BottomBarSurface, "bottom bar top", dpi);
+        // Border is #1FFFFFFF — a 12%-white WASH, not an opaque colour — so what must hold
+        // is that each rule is that token composited over the ground it is painted on. A
+        // WPF Border paints its Background INSIDE its BorderThickness, so a chrome band's
+        // rule composites over whatever is behind the band, which is the window's root
+        // Grid: the FIELD. Until the design pass the field was ChromeBg, the same value as
+        // the bands themselves, and each rule happened to match its own band's fill. Now
+        // the field is WindowBg and the three bands are ToolbarBg, so all three rules land
+        // on one ground and paint ONE pixel value — which is what "one hairline in one
+        // token" was always supposed to mean, and is now literally true rather than
+        // true-by-derivation. A missing border is ~26/255 away per channel; tolerance is 3.
+        var field = (Color)Application.Current!.Resources["WindowBgColor"];
+        int fieldRgb = (field.R << 16) | (field.G << 8) | field.B;
+        AssertIsBorderWashOver(r.ToolbarRuleColor, fieldRgb, "toolbar bottom", dpi);
+        AssertIsBorderWashOver(r.RailRuleColor, fieldRgb, "rail left", dpi);
+        AssertIsBorderWashOver(r.BottomBarRuleColor, fieldRgb, "bottom bar top", dpi);
 
-        // 5. The corner itself: the rail's rule and the toolbar's rule must actually MEET.
+        // 4. And because they share one ground, they are the same pixel. This is the
+        // assertion the old per-surface check could not make.
+        Assert.True(r.ToolbarRuleColor == r.RailRuleColor && r.RailRuleColor == r.BottomBarRuleColor,
+            $"the three chrome rules paint #{r.ToolbarRuleColor:X6} / #{r.RailRuleColor:X6} / " +
+            $"#{r.BottomBarRuleColor:X6} at {dpi} DPI; they frame one field and must be one value.");
+
+        // 5. The bands themselves are the chrome material, and the field is not.
+        Assert.True(r.ToolbarSurface == r.RailSurface && r.RailSurface == r.BottomBarSurface,
+            $"top bar #{r.ToolbarSurface:X6}, rail #{r.RailSurface:X6} and bottom bar " +
+            $"#{r.BottomBarSurface:X6} must all be the one chrome material at {dpi} DPI.");
+        Assert.True(r.ToolbarSurface != fieldRgb,
+            $"the chrome bands are painted #{r.ToolbarSurface:X6}, the same value as the field, " +
+            $"at {dpi} DPI: the editor is back to four bands of one grey.");
+
+        // 6. The corner itself: the rail's rule and the toolbar's rule must actually MEET.
         // A gap here is exactly the "dies into the toolbar" look, and it is what a
         // rounded-away fractional-DPI edge produces.
         Assert.True(r.CornerGap <= Math.Ceiling(scale),
