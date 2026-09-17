@@ -137,6 +137,22 @@ internal sealed class AnnotationData
     /// </summary>
     public long? CreatedAt { get; set; }
 
+    /// <summary>
+    /// Counter (Step) only: which SERIES this pin belongs to. Survey numbers each series
+    /// independently — pins are grouped by this id, sorted by <see cref="CreatedAt"/>, and the
+    /// i-th of a group shows <c>SeriesStart + i</c> (counterNumbering.js:25-65). Null in
+    /// projects written before series existed; <see cref="CounterSeries"/> buckets those
+    /// together so they still read back as one running count.
+    /// </summary>
+    public string? SeriesId { get; set; }
+
+    /// <summary>
+    /// The first displayed number of this pin's series. Mirrored onto every pin of the series
+    /// on each renumber, so any one survivor can reconstruct where the count began. Null reads
+    /// as <see cref="CounterSeries.DefaultStart"/>.
+    /// </summary>
+    public int? SeriesStart { get; set; }
+
     /// <summary>Index into the project's embedded images/{n}.png entries.</summary>
     [JsonPropertyName("image")]
     public int? ImageIndex { get; set; }
@@ -328,12 +344,15 @@ internal sealed class AnnotationData
     };
 
     public static AnnotationData ForStep(
-        Point topLeft, int number, Color color, double thickness, long createdAt = 0) => new()
+        Point topLeft, int number, Color color, double thickness, long createdAt = 0,
+        string? seriesId = null, int? seriesStart = null) => new()
     {
         Type = TypeStep,
         Points = ToArray(new[] { topLeft }),
         Number = number,
         CreatedAt = createdAt,
+        SeriesId = seriesId,
+        SeriesStart = seriesStart,
         Color = ToHex(color),
         Thickness = thickness,
         PointerAngle = CounterGeometry.DefaultPointerAngle,

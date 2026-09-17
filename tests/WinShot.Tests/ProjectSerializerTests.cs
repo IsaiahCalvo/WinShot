@@ -56,6 +56,70 @@ public class ProjectSerializerTests
         Assert.Null(failure);
     }
 
+    /// <summary>
+    /// A counter's SERIES has to survive a save/load or the counts split apart on reopen:
+    /// numbering is derived from seriesId + createdAt + seriesStart, so losing any of the three
+    /// renumbers the whole document. Also covers the legacy shape — a pin with no seriesId
+    /// reads back as null rather than as some invented id.
+    /// </summary>
+    [Fact]
+    public void SaveAndLoad_PreservesCounterSeriesIdentity()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"winshot-series-project-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "series.winshot");
+        try
+        {
+            using var source = new SD.Bitmap(4, 3);
+            var doc = new ProjectDocument
+            {
+                Annotations =
+                {
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 1d, 1d } },
+                        Number = 5, CreatedAt = 1700, SeriesId = "series-a", SeriesStart = 5,
+                        Color = "#FFEF4444", Thickness = 4,
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 2d, 2d } },
+                        Number = 6, CreatedAt = 1800, SeriesId = "series-a", SeriesStart = 5,
+                        Color = "#FFEF4444", Thickness = 4,
+                    },
+                    new AnnotationData
+                    {
+                        Type = AnnotationData.TypeStep,
+                        Points = new[] { new[] { 3d, 3d } },
+                        Number = 1, CreatedAt = 1900,
+                        Color = "#FF00FF00", Thickness = 4,
+                    },
+                },
+            };
+
+            ProjectSerializer.Save(path, source, doc, Array.Empty<BitmapSource>());
+            var loaded = ProjectSerializer.Load(path);
+            using var loadedSource = loaded.Source;
+            var pins = loaded.Doc.Annotations;
+
+            Assert.Equal("series-a", pins[0].SeriesId);
+            Assert.Equal("series-a", pins[1].SeriesId);
+            Assert.Equal(5, pins[0].SeriesStart);
+            Assert.Equal(new long?[] { 1700, 1800, 1900 }, pins.Select(p => p.CreatedAt).ToArray());
+            Assert.Null(pins[2].SeriesId);   // legacy pin stays legacy
+
+            // And the reloaded pins renumber to exactly what was saved.
+            CounterSeries.Renumber(pins);
+            Assert.Equal(new int?[] { 5, 6, 1 }, pins.Select(p => p.Number).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public void SaveAndLoad_PreservesArrowAndLetterStepStyleMetadata()
     {

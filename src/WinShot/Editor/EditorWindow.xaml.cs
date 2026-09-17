@@ -1274,6 +1274,10 @@ public partial class EditorWindow : Window
                 chrome is EditorTool.Text or EditorTool.Callout || _activeText is not null);
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        // The series rows are derived from the pins on the canvas, so they are rebuilt whenever
+        // the counter row comes into view — that covers a freshly loaded project, whose pins
+        // arrive with their series ids already stamped, without a load-path hook of its own.
+        if (StepModePanel.Visibility == Visibility.Visible) RefreshCounterSeriesChrome();
         LineStylePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         FillStrokeTabPanel.Visibility = Show(Has(EditorContextControls.FillStrokeTabs));
         ColorWellLabel.Visibility = Visibility.Collapsed;
@@ -2368,10 +2372,12 @@ public partial class EditorWindow : Window
     private void CommitStepStart()
     {
         if (StepStartInput is null) return;
-        // Survey clamps the start number to >= 1 (AppShell.jsx:2540-2556).
-        _nextStep = int.TryParse(StepStartInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v)
-            ? Math.Max(1, v)
-            : _nextStep;
+        // Survey clamps the start number to >= 1 (AppShell.jsx:2540-2556). Since counters
+        // became series-numbered, the field sets the ACTIVE series' seriesStart — the number
+        // its first pin shows — rather than a free-floating "next number", because every pin's
+        // number is now derived from its position in its series and cannot be set directly.
+        if (int.TryParse(StepStartInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v))
+            SetCounterSeriesStart(Math.Max(1, v));
         StepStartInput.Text = _nextStep.ToString(CultureInfo.InvariantCulture);
     }
 

@@ -649,7 +649,14 @@ public partial class EditorWindow : Window
             _stepLetters = string.Equals(tag, "Letter", StringComparison.Ordinal);
     }
 
-    private void OnResetStepCounter(object sender, RoutedEventArgs e) => _nextStep = 1;
+    /// <summary>
+    /// "Reset" puts the ACTIVE count back to 1. It used to set a free-floating _nextStep, which
+    /// a series-numbered counter has no room for: a pin's number is derived from where it sits
+    /// in its series, so the only thing left to reset is where that series starts. To begin a
+    /// genuinely separate run from 1, "+ New Count" in the series picker is the control.
+    /// </summary>
+    private void OnResetStepCounter(object sender, RoutedEventArgs e) =>
+        SetCounterSeriesStart(CounterSeries.DefaultStart);
 
     private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
     {

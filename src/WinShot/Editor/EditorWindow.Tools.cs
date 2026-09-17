@@ -1262,18 +1262,23 @@ public partial class EditorWindow : Window
 
         if (drag.IsNew)
         {
+            // Every pin joins a SERIES. Survey starts the first one implicitly rather than
+            // making the user press "+ New Count" before the first pin can be dropped.
             var data = AnnotationData.ForStep(
-                new Point(left, top), _nextStep, _color, _thickness, ++_stepClock);
+                new Point(left, top), _nextStep, _color, _thickness, ++_stepClock,
+                EnsureCounterSeries(), _counterSeriesStart);
             data.PointerAngle = drag.Angle;
             if (_stepLetters) data.Style = "Letter";
             badge.Tag = data;
             Push(new EditorAction(
-                undo: () => AnnotationCanvas.Children.Remove(badge),
+                undo: () => { AnnotationCanvas.Children.Remove(badge); RenumberCounters(); },
                 redo: () =>
                 {
                     if (!AnnotationCanvas.Children.Contains(badge))
                         AnnotationCanvas.Children.Add(badge);
+                    RenumberCounters();
                 }));
+            RenumberCounters();
             return;
         }
 
@@ -1319,23 +1324,36 @@ public partial class EditorWindow : Window
     /// stored monotonically. Sort every pin by creation time and assign 1..n, so deleting #2 of
     /// 5 leaves 1,2,3,4 rather than 1,3,4,5. Runs after every add, delete, undo and redo.
     /// </summary>
+    /// <summary>
+    /// Every counter's displayed number, derived from its position within ITS SERIES. The
+    /// rules live in <see cref="CounterSeries.Renumber"/> (Survey's counterNumbering.js); this
+    /// is only the part that has to touch WPF — repainting the badges whose number moved, and
+    /// advancing the active series' "next number" so the Start field still reads true.
+    ///
+    /// Before series existed this numbered the whole canvas 1..n. That is now what the legacy
+    /// bucket does on its own, so a project written by an older build renumbers identically.
+    /// </summary>
     private void RenumberCounters()
     {
         var pins = AnnotationCanvas.Children.OfType<Grid>()
             .Where(g => g.Tag is AnnotationData { Type: AnnotationData.TypeStep })
             .Select(g => (Badge: g, Meta: (AnnotationData)g.Tag))
-            .OrderBy(p => p.Meta.CreatedAt ?? 0)
-            .ThenBy(p => p.Meta.Number ?? 0)
             .ToArray();
-        for (int i = 0; i < pins.Length; i++)
-        {
-            var (badge, meta) = pins[i];
-            int number = i + 1;
-            if (meta.Number == number) continue;
-            meta.Number = number;
-            AnnotationFactory.SetStepCaption(badge, number, meta.Style == "Letter");
-        }
-        _nextStep = pins.Length + 1;
+
+        var moved = CounterSeries.Renumber(pins.Select(p => p.Meta)).ToHashSet();
+        foreach (var (badge, meta) in pins)
+            if (moved.Contains(meta))
+                AnnotationFactory.SetStepCaption(badge, meta.Number ?? 1, meta.Style == "Letter");
+
+        // The Start field shows where the NEXT pin of the active series lands. An empty series
+        // (just created, or all its pins deleted) keeps the start the user typed.
+        var active = pins.Select(p => p.Meta)
+            .Where(m => m.SeriesId == _counterSeriesId && !string.IsNullOrEmpty(m.SeriesId))
+            .ToArray();
+        _nextStep = active.Length == 0
+            ? _counterSeriesStart
+            : active.Max(m => m.Number ?? 0) + 1;
+        RefreshCounterSeriesChrome();
     }
 
     // ------------------------------------------------------------------ blur
