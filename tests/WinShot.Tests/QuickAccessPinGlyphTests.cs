@@ -9,24 +9,22 @@ using WF = System.Windows.Forms;
 namespace WinShot.Tests;
 
 /// <summary>
-/// The approved pin swap: outlined among its stroked siblings until this capture is actually
-/// pinned, solid after. Shares the Motion refcount collection because the assertion that the
-/// swap takes NO tween is checked against a process-global holder count.
+/// The card's pin: one glyph, and one pin per capture.
+///
+/// The sweep shipped an outline/filled PAIR here — a stroked pushpin swapped for a solid twin
+/// the moment a capture was pinned. It was reverted: the card's own pin is the FILLED angled
+/// thumbtack it has always been, so the "outline" half of the pair was a new drawing on a
+/// pinned surface, and at 16-32 px the swap between two solid marks says nothing. What is
+/// left is the part that was a real fix — the card's exit is animated, so it is still on
+/// screen after a pin and a second press must not pin the same shot twice.
 /// </summary>
 [Collection("MotionRefcount")]
 public class QuickAccessPinGlyphTests
 {
-    private const string Outline = "quick-access-pin.svg";
-    private const string Filled = "quick-access-pin-filled.svg";
+    private const string PinAsset = "quick-access-pin.svg";
 
-    /// <summary>
-    /// A pin dismisses the card — that is the card's own shipped behaviour and it is pinned,
-    /// so the swap has to be done by the time the handler runs the pin and the exit starts.
-    /// Instant, and holding no high-resolution clock: a 140 ms cross-fade here would play on
-    /// a surface already flying off screen.
-    /// </summary>
     [Fact]
-    public void PinningSwapsTheOutlineForTheSolidMark_BeforeTheHandlerRuns()
+    public void TheCardDrawsTheShippedPinAndNeverSwapsIt()
     {
         RunSta(() =>
         {
@@ -35,17 +33,14 @@ public class QuickAccessPinGlyphTests
 
             SD.Bitmap? before = PinIcon(overlay);
             Assert.NotNull(before);
-            SD.Color glyph = GlyphColor(overlay);
-            Assert.Same(SvgIcons.Get(Outline, before!.Width, glyph), before);
+            Assert.Same(SvgIcons.Get(PinAsset, before!.Width, GlyphColor(overlay)), before);
 
             SD.Bitmap? whenHandlerRan = null;
             overlay.PinRequested += o => whenHandlerRan = PinIcon(o);
-
             InvokeKey(overlay, WF.Keys.P);
 
-            // The App handler closes the card in this same call, so "solid by then" is the
-            // only thing that can ever be seen.
-            Assert.Same(SvgIcons.Get(Filled, before.Width, glyph), whenHandlerRan);
+            Assert.Same(before, whenHandlerRan);
+            Assert.Same(before, PinIcon(overlay));
             Assert.Equal(0, Motion.Holders);
         });
     }
@@ -65,41 +60,22 @@ public class QuickAccessPinGlyphTests
             overlay.PinRequested += _ => requests++;
 
             InvokeKey(overlay, WF.Keys.P);
-            SD.Bitmap? afterFirst = PinIcon(overlay);
             InvokeKey(overlay, WF.Keys.P);
 
             Assert.Equal(1, requests);
-            Assert.Same(afterFirst, PinIcon(overlay));
             Assert.Equal(0, Motion.Holders);
         });
     }
 
-    [Fact]
-    public void APinnedCardRebuiltByAResizeKeepsTheSolidMark()
-    {
-        RunSta(() =>
-        {
-            using var bitmap = new SD.Bitmap(1200, 760);
-            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
-            InvokeKey(overlay, WF.Keys.P);
-
-            // What a resize does: the buttons are thrown away and remade.
-            typeof(FastQuickActionsWindow)
-                .GetMethod("BuildLayout", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .Invoke(overlay, [bitmap, 144]);
-
-            SD.Bitmap? icon = PinIcon(overlay);
-            Assert.NotNull(icon);
-            Assert.Same(SvgIcons.Get(Filled, icon!.Width, GlyphColor(overlay)), icon);
-        });
-    }
-
+    /// <summary>The pin button is the first one the card builds, at the top-left.</summary>
     private static SD.Bitmap? PinIcon(FastQuickActionsWindow overlay)
     {
-        object? button = typeof(FastQuickActionsWindow)
-            .GetField("_pinButton", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(overlay);
-        return button?.GetType().GetProperty("Icon")!.GetValue(button) as SD.Bitmap;
+        var buttons = (System.Collections.IList)typeof(FastQuickActionsWindow)
+            .GetField("_buttons", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+        object button = buttons[0]!;
+        Assert.Equal("Pin", button.GetType().GetProperty("AccessibleName")!.GetValue(button));
+        return button.GetType().GetProperty("Icon")!.GetValue(button) as SD.Bitmap;
     }
 
     private static SD.Color GlyphColor(FastQuickActionsWindow overlay)

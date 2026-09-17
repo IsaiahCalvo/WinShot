@@ -1003,15 +1003,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         int bottom = _cardRect.Bottom - layout.ControlPadding - layout.IconSize;
         // Preserve the user's verified action placement while using the selected HTML design.
         AddIconButton(PinAsset, "Pin to the screen", "Pin", "Pin", left, top, layout.IconSize, RequestPin);
-        // Rebuilt on every resize, so a capture pinned while the card is still on screen
-        // (its exit runs after the pin) keeps the solid mark.
-        _pinButton = _buttons[^1];
-        if (_pinned)
-        {
-            _pinButton.Icon =
-                CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? layout.IconSize, _visuals.Glyph)
-                ?? _pinButton.Icon;
-        }
         // No chord on Close and Save. A tooltip is a hover surface, and hover is exactly the
         // state where QuickActionsMenu.ClaimsKey deliberately does NOT claim Ctrl+W and
         // Ctrl+S — the hook passes them to the app underneath, so the card would be
@@ -1032,47 +1023,25 @@ public sealed class FastQuickActionsWindow : WF.Form
         _focusedButton = Math.Clamp(_focusedButton, -1, _buttons.Count - 1);
     }
 
-    // The one outline/filled pair in the icon set: the pin is outlined like its thirteen
-    // stroked siblings until this capture is actually pinned, and solid after — the same
-    // "empty until it means something" grammar a bookmark or a favourite uses.
+    /// <summary>The card's pin glyph. The sweep briefly shipped an outline/filled PAIR here,
+    /// swapping in a solid twin once a capture was pinned — dropped because the default pin
+    /// is a FILLED mark already (see <c>quick-access-pin.svg</c>), so the "state change" cost
+    /// the card its own angled thumbtack and bought nothing legible at 16-32 px. The card's
+    /// idle look is pinned; a state affordance on it needs a design decision, not a swap.</summary>
     private const string PinAsset = "quick-access-pin.svg";
-    private const string PinnedAsset = "quick-access-pin-filled.svg";
 
-    private ActionButton? _pinButton;
     private bool _pinned;
 
     /// <summary>Every route to pinning — the button, <c>P</c>, and the context menu row —
-    /// goes through here so the glyph can never disagree with what happened.</summary>
+    /// goes through here so one capture can only be pinned once.</summary>
     private void RequestPin()
     {
-        // Once per capture. A pin dismisses the card, but the dismissal is animated, and a
-        // second press landing inside that exit would put a second copy of the same shot on
-        // screen.
+        // A pin dismisses the card, but the dismissal is animated, and a second press landing
+        // inside that exit would put a second copy of the same shot on screen.
         if (_pinned)
             return;
-        MarkPinned();
-        PinRequested?.Invoke(this);
-    }
-
-    /// <summary>
-    /// Swaps the outline for the solid mark, with no tween: the card is dismissed by the
-    /// same gesture, so a 140 ms cross-fade would play on a surface already leaving. Marking
-    /// first and raising <see cref="PinRequested"/> second means the solid glyph is what the
-    /// exit carries off.
-    /// </summary>
-    private void MarkPinned()
-    {
-        if (_pinned || _pinButton is null || IsDisposed)
-            return;
-
         _pinned = true;
-        SD.Bitmap? solid = CreateSvgIcon(PinnedAsset, _pinButton.Icon?.Width ?? 16, _visuals.Glyph);
-        if (solid is null)
-            return;
-
-        _pinButton.Icon = solid;
-        Invalidate(_pinButton.Bounds);
-        Update();
+        PinRequested?.Invoke(this);
     }
 
     private void AddIconButton(
@@ -3892,7 +3861,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         public int CornerRadius { get; } = cornerRadius;
         public string? Label { get; set; }
         public SD.Font? LabelFont { get; init; }
-        public SD.Bitmap? Icon { get; set; } = icon;
+        public SD.Bitmap? Icon { get; } = icon;
 
         public void Dispose()
         {
