@@ -1889,9 +1889,12 @@
          (28 tall, 6px radius, 12x6 padding) instead of the 30px pill.
          ==================================================================== -->
     <Style x:Key="SurveyPrimaryButton" TargetType="Button">
-        <Setter Property="Height" Value="28"/>
-        <Setter Property="MinWidth" Value="64"/>
-        <Setter Property="Padding" Value="12,6"/>
+        <!-- Vertical padding is zero: the presenter centres the label, and 6+6 inside a
+             28 px button left 14 px for 13 px type, which clipped the descender and read
+             as a tiny word in a big pill. Height is the pill token every other primary uses. -->
+        <Setter Property="Height" Value="{StaticResource PillHeight}"/>
+        <Setter Property="MinWidth" Value="72"/>
+        <Setter Property="Padding" Value="16,0"/>
         <Setter Property="Margin" Value="4,0"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
