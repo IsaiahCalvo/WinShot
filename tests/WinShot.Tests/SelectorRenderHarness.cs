@@ -330,11 +330,11 @@ public class SelectorRenderHarness
             using (var g = SD.Graphics.FromImage(reference))
                 selector.PaintSurface(g, monitor);
 
-            SD.Rectangle ghost = FirstDifference(incremental, reference, out int differing);
+            SD.Rectangle ghost = GhostBounds(incremental, reference, out int differing, out string sample);
             Assert.True(
                 differing == 0,
-                $"{differing} stale pixels left behind at {scale:0.##}x, first at {ghost.Location} — " +
-                "the follow invalidation does not cover what the loupe draws");
+                $"{differing} stale pixels left behind at {scale:0.##}x, inside {ghost} — " +
+                $"the follow invalidation does not cover what the loupe draws.{sample}");
         }
         finally
         {
@@ -342,22 +342,230 @@ public class SelectorRenderHarness
         }
     }
 
-    private static SD.Rectangle FirstDifference(SD.Bitmap a, SD.Bitmap b, out int differing)
+    // ---- and neither does anything else the pointer drags ---------------------------
+
+    /// <summary>Every follow-drawn thing a drag moves, at the four scales the app meets.</summary>
+    public static TheoryData<string, double> DragSweeps
+    {
+        get
+        {
+            var data = new TheoryData<string, double>();
+            foreach (string sweep in new[] { "marquee", "crosshair", "window-glide", "element-glide" })
+            {
+                foreach (double scale in new[] { 1.0d, 1.25d, 1.5d, 2.0d })
+                    data.Add(sweep, scale);
+            }
+            return data;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="TheLoupeLeavesNoPixelsBehindAsThePointerMoves"/> generalised to the whole
+    /// drag path: the marquee growing and shrinking with its handles, the crosshair and its
+    /// coordinate readout with the magnifier off, and the two glides -- the window highlight
+    /// with its wash and app-name pill, and the element highlight -- sliding between targets.
+    ///
+    /// Same method, because the bug class is not the loupe's: an invalidation rect computed
+    /// in unscaled logical px, or from a rect that has since moved, leaves a trail for
+    /// whatever it clips. The size pill that used to hang off the marquee was the newest
+    /// instance -- the repaint erasing the pill that FOLLOWED the pointer in window mode was
+    /// measured from the coordinate readout's string ("1234, 567"), so the wider size string
+    /// ("1920 x 1080") hung outside its own dirty rect at every DPI. It is deleted rather than
+    /// patched, and this sweep is here so the next element to grow cannot repeat it.
+    ///
+    /// The glide runs on the PAINT clock, so each step is drained frame by frame -- painting
+    /// only the region the previous frame asked for. A frame the glide forgets to ask for is
+    /// exactly the trail being looked for.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DragSweeps))]
+    public void NothingTheDragPathDrawsIsLeftBehind(string sweep, double scale)
+    {
+        var previousScale = WinShot.Recording.RecordingMonitorDpi.ScaleSource;
+        Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        WinShot.Recording.RecordingMonitorDpi.ScaleSource = _ => scale;
+        // The wash ramp and the handle pop are Motion tweens on their own timers, and a frame
+        // of either landing between the incremental image and the reference would read as a
+        // ghost that is really just a clock. Off, they settle inline. The RECT glide is not a
+        // Motion tween -- it reads a stopwatch on the paint clock -- and is what is under test.
+        Motion.AnimationsEnabled = () => false;
+        try
+        {
+            // Roomy enough that the loupe is not clamped against an edge at 200 %.
+            var monitor = new SD.Rectangle(0, 0, 1000, 760);
+            var start = new SD.Point(180, 140);
+            var first = new SD.Rectangle(120, 100, 300, 200);
+            var second = new SD.Rectangle(520, 380, 380, 260);
+            var third = new SD.Rectangle(300, 300, 160, 120);
+
+            using var pointer = new Pointer();
+            using SD.Bitmap frozen = SyntheticDesktop(monitor.Width, monitor.Height);
+            using var selector = Seed(frozen, monitor, start, magnifier: sweep == "marquee");
+            selector.MonitorsForRender = new[] { monitor };
+            Set(selector, "_lastFollowScreen", start);
+
+            var steps = new List<Action>();
+            switch (sweep)
+            {
+                case "marquee":
+                    steps.Add(() => selector.HandleMouseDown(Left()));
+                    foreach (SD.Point to in new SD.Point[]
+                        { new(430, 300), new(700, 210), new(250, 520), new(620, 600), new(200, 160) })
+                    {
+                        SD.Point at = to;
+                        steps.Add(() => pointer.MoveTo(selector, at.X, at.Y));
+                    }
+                    break;
+
+                case "crosshair":
+                    foreach (SD.Point to in new SD.Point[]
+                        { new(430, 300), new(250, 480), new(620, 210), new(360, 560), new(840, 660) })
+                    {
+                        SD.Point at = to;
+                        steps.Add(() => pointer.MoveTo(selector, at.X, at.Y));
+                    }
+                    break;
+
+                case "window-glide":
+                    Set(selector, "_mode", FastRegionSelectorDialog.SelectorMode.Window);
+                    NameWindows(selector, 1, 2, 3);
+                    steps.Add(() => selector.SetHoverWindow(Window(1, first)));
+                    steps.Add(() => pointer.MoveTo(selector, 600, 430));
+                    steps.Add(() => selector.SetHoverWindow(Window(2, second)));
+                    steps.Add(() => pointer.MoveTo(selector, 360, 340));
+                    steps.Add(() => selector.SetHoverWindow(Window(3, third)));
+                    steps.Add(() => selector.SetHoverWindow(Window(1, first)));
+                    break;
+
+                case "element-glide":
+                    Set(selector, "_paneHover", true);
+                    steps.Add(() => HoverPane(selector, first));
+                    steps.Add(() => pointer.MoveTo(selector, 600, 430));
+                    steps.Add(() => HoverPane(selector, second));
+                    steps.Add(() => pointer.MoveTo(selector, 360, 340));
+                    steps.Add(() => HoverPane(selector, third));
+                    steps.Add(() => HoverPane(selector, first));
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(sweep), sweep, "unknown sweep");
+            }
+
+            using var incremental = new SD.Bitmap(
+                monitor.Width, monitor.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(incremental))
+                selector.PaintSurface(g, monitor);
+
+            var log = new List<SD.Rectangle>();
+            selector.InvalidationLog = log;
+            RectangleTween glide = HoverTween(selector);
+            foreach (Action step in steps)
+            {
+                step();
+                // Paint until nothing is invalid, which is all WinForms ever does. Draining on
+                // `glide.IsActive` alone is not the same thing and hid a real defect: the frame
+                // that SETTLES the tween paints the final rect inside a clip that was computed
+                // from two mid-glide rects, and then asks for the settled rect's own region --
+                // an ask that the app honours and a tween-shaped loop dropped, so the border
+                // ring of the landed highlight was missing from the incremental image.
+                for (int frame = 0; (log.Count > 0 || glide.IsActive) && frame < 900; frame++)
+                    PaintOnlyWhatWasAskedFor(selector, incremental, monitor, log);
+            }
+            selector.InvalidationLog = null;
+
+            using var reference = new SD.Bitmap(
+                monitor.Width, monitor.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(reference))
+                selector.PaintSurface(g, monitor);
+
+            SD.Rectangle ghost = GhostBounds(incremental, reference, out int differing, out string sample);
+            Assert.True(
+                differing == 0,
+                $"{differing} stale pixels left behind by the {sweep} sweep at {scale:0.##}x, " +
+                $"inside {ghost} -- the invalidation does not cover what that state draws.{sample}");
+        }
+        finally
+        {
+            WinShot.Recording.RecordingMonitorDpi.ScaleSource = previousScale;
+            Motion.AnimationsEnabled = previousAnimations;
+        }
+    }
+
+    /// <summary>One frame, clipped to exactly the region the selector asked to have repainted --
+    /// which is all WinForms would hand it. The log is taken and cleared FIRST, because
+    /// PaintSurface itself asks for the next frame's region while it paints.</summary>
+    private static void PaintOnlyWhatWasAskedFor(
+        FastRegionSelectorDialog selector, SD.Bitmap surface, SD.Rectangle monitor, List<SD.Rectangle> log)
+    {
+        SD.Rectangle[] asked = log.ToArray();
+        log.Clear();
+        using var g = SD.Graphics.FromImage(surface);
+        using var dirty = new System.Drawing.Region(SD.Rectangle.Empty);
+        foreach (SD.Rectangle rect in asked)
+            dirty.Union(rect);
+        g.Clip = dirty;
+        selector.PaintSurface(g, monitor);
+    }
+
+    private static RectangleTween HoverTween(FastRegionSelectorDialog selector) =>
+        (RectangleTween)typeof(FastRegionSelectorDialog)
+            .GetField("_hoverTween", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(selector)!;
+
+    /// <summary>The one place the hovered ELEMENT changes, driven directly: the resolution in
+    /// front of it reads the real desktop, and what is under test is the repaint behind it.</summary>
+    private static void HoverPane(FastRegionSelectorDialog selector, SD.Rectangle rect) =>
+        typeof(FastRegionSelectorDialog)
+            .GetMethod("SetHoverPane", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(selector, new object?[] { rect });
+
+    private static WindowInfo Window(int handle, SD.Rectangle bounds) =>
+        new(new IntPtr(handle), $"Window {handle}", bounds);
+
+    /// <summary>Pre-resolves the app names, so the pill's text cannot change under the sweep
+    /// from a background lookup landing between two frames.</summary>
+    private static void NameWindows(FastRegionSelectorDialog selector, params int[] handles)
+    {
+        var names = (Dictionary<IntPtr, string>)typeof(FastRegionSelectorDialog)
+            .GetField("_appNames", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(selector)!;
+        foreach (int handle in handles)
+            names[new IntPtr(handle)] = $"Window {handle}";
+    }
+
+    /// <summary>
+    /// The box every differing pixel falls inside, plus the first few of them with both
+    /// colours. Together those name the element that was left behind; one "first at" point
+    /// does not, because a 1 px hairline of leftover pill and a whole missing highlight read
+    /// identically from a single coordinate. The 1 px column of pill ground at the right edge
+    /// of the coordinate readout — GDI+ antialiasing reaching one pixel past the rect the
+    /// repaint was computed from — was found by reading exactly this.
+    /// </summary>
+    private static SD.Rectangle GhostBounds(SD.Bitmap a, SD.Bitmap b, out int differing, out string sample)
     {
         differing = 0;
-        var first = SD.Rectangle.Empty;
+        var samples = new System.Text.StringBuilder();
+        int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1;
         for (int y = 0; y < a.Height; y++)
         {
             for (int x = 0; x < a.Width; x++)
             {
                 if (a.GetPixel(x, y).ToArgb() == b.GetPixel(x, y).ToArgb())
                     continue;
-                if (differing == 0)
-                    first = new SD.Rectangle(x, y, 1, 1);
+                if (differing < 6)
+                {
+                    samples.Append(
+                        $" ({x},{y}) got {a.GetPixel(x, y).ToArgb():X8}, want {b.GetPixel(x, y).ToArgb():X8};");
+                }
                 differing++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
             }
         }
-        return first;
+        sample = samples.ToString();
+        return maxX < 0 ? SD.Rectangle.Empty : SD.Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
     }
 
     // ---- selector states -----------------------------------------------------------

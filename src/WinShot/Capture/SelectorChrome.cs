@@ -196,6 +196,24 @@ internal static class SelectorChrome
             pill.Height);
     }
 
+    /// <summary>
+    /// The ground that readout actually covers, which is its rect plus one pixel on every
+    /// side. <see cref="DrawLabel"/> fills a rounded path with SmoothingMode.AntiAlias, and
+    /// GDI+ antialiasing puts ink one pixel PAST each edge of the path it is given — so a
+    /// repaint clipped to the pill's own rect erased everything except a one-pixel outline of
+    /// it. That outline is a trail: one dark hairline left at every position the pointer
+    /// passed through, which is the same defect the loupe had and the same defect the deleted
+    /// size pill had, arriving by a third route. Every erase of a following pill goes through
+    /// here, so the margin is stated once.
+    /// </summary>
+    public static SD.Rectangle CursorReadoutDirtyRect(
+        SD.Size clientSize, string text, SD.Point cursor, double scale)
+    {
+        SD.Rectangle pill = CursorReadoutRect(clientSize, text, cursor, scale);
+        pill.Inflate(1, 1);
+        return pill;
+    }
+
     /// <summary>The pointer-follow offset in LOGICAL px. Callers want
     /// <see cref="ReadoutOffset"/>, which scales it for the monitor it lands on.</summary>
     private const int CursorReadoutOffsetX = 16;

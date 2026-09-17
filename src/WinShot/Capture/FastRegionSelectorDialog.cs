@@ -813,7 +813,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             InvalidateScreenRect(new SD.Rectangle(
                 loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
 
-        SD.Rectangle readout = SelectorChrome.CursorReadoutRect(
+        SD.Rectangle readout = SelectorChrome.CursorReadoutDirtyRect(
             mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
         InvalidateScreenRect(new SD.Rectangle(
             readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
