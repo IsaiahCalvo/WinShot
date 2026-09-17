@@ -116,6 +116,57 @@ public class SelectorRenderHarness
             : SD.Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
     }
 
+    /// <summary>
+    /// "That icon of the camera needs to be filled in" — the Segoe Fluent camera is a stroked
+    /// OUTLINE glyph, so the cursor was a white wireframe with a transparent middle and the
+    /// window under it showed straight through. The camera is drawn from a path now: a scan
+    /// across the body has to be unbroken ink, and the ink inside the contour has to be the
+    /// dark token rather than nothing at all.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Scales))]
+    public void TheCameraCursorBodyIsFilledWithTheDarkToken(double scale)
+    {
+        using SD.Bitmap bmp = SelectorCursors.BuildCameraBitmap(scale);
+        SD.Rectangle ink = InkBounds(bmp);
+        Assert.False(ink.IsEmpty, $"the camera drew nothing at {scale:0.##}x");
+
+        // A row through the body, below the lens: every pixel between the contour's two edges
+        // must be drawn. On the outline glyph this row was ink, gap, ink.
+        int row = ink.Top + (int)Math.Round(ink.Height * 0.8);
+        int first = -1, last = -1, holes = 0;
+        for (int x = ink.Left; x < ink.Right; x++)
+        {
+            bool inkHere = bmp.GetPixel(x, row).A > 8;
+            if (inkHere)
+            {
+                if (first < 0) first = x;
+                last = x;
+            }
+        }
+        Assert.True(first >= 0, $"no camera body on row {row} at {scale:0.##}x");
+        for (int x = first; x <= last; x++)
+            if (bmp.GetPixel(x, row).A <= 8)
+                holes++;
+        Assert.Equal(0, holes);
+
+        // And what fills it is the palette token, not white and not a hand-picked grey.
+        SD.Color token = ThemePalette.ToolbarBg;
+        int filled = 0;
+        for (int y = ink.Top; y < ink.Bottom; y++)
+        {
+            for (int x = ink.Left; x < ink.Right; x++)
+            {
+                SD.Color px = bmp.GetPixel(x, y);
+                if (px.A == 255 && px.R == token.R && px.G == token.G && px.B == token.B)
+                    filled++;
+            }
+        }
+        Assert.True(filled > ink.Width * ink.Height / 5,
+            $"only {filled} of {ink.Width * ink.Height} ink pixels are ToolbarBg at {scale:0.##}x — " +
+            "the body is not filled with the token");
+    }
+
     // ---- chrome that has to grow with the monitor ----------------------------------
 
     /// <summary>

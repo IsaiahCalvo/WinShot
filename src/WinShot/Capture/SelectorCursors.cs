@@ -1,12 +1,12 @@
-﻿using WinShot.Core;
+using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
 namespace WinShot.Capture;
 
 /// <summary>
-/// Cursors the selectors swap in to say what a click will do. Drawn at runtime from the
-/// icon font, so the repo carries no .cur assets and the glyph tracks the app's icon family.
+/// Cursors the selectors swap in to say what a click will do. Drawn at runtime, so the repo
+/// carries no .cur assets and the mark tracks the app's own palette.
 /// </summary>
 internal static class SelectorCursors
 {
@@ -58,67 +58,79 @@ internal static class SelectorCursors
         }
     }
 
+    // The camera on its own design grid: 24 wide by 18 tall, body from y=4 down with the
+    // viewfinder hump standing on it, and the lens in the middle of the body.
+    private const float GridW = 24f;
+    private const float GridH = 18f;
+    private const float LensCx = 12f;
+    private const float LensCy = 11.2f;
+    private const float LensR = 4.2f;
+
     /// <summary>
     /// The cursor image before it becomes an HCURSOR, exposed so a test can read its pixels.
     ///
-    /// The glyph goes through GDI+ <c>DrawString</c>, never <c>TextRenderer.DrawText</c>.
-    /// TextRenderer is a GDI (DrawTextW) wrapper and GDI does not write the alpha byte of a
-    /// 32-bpp DIB, so a glyph drawn that way onto a surface cleared to Transparent stays at
-    /// A=0 — and <c>GetHicon</c> derives the icon's AND mask from alpha, so the cursor came
-    /// out invisible (or, if GDI+ forced A=255 on ReleaseHdc, a black square trailing the
-    /// pointer). <see cref="SelectorChrome"/> documents the same trap for the fading labels.
+    /// Drawn from a PATH, not from the icon font. Segoe Fluent's Camera (U+E722) is a stroked
+    /// outline glyph: painted white with a dark halo it is a hollow wireframe, and over a busy
+    /// window the reporter could not see where the camera was — "it's just an outline". There
+    /// is no filled twin of that codepoint to swap in, and asking DrawString for a fill only
+    /// fills the strokes. A silhouette solves it outright, and it also retires the whole
+    /// point-font-versus-process-DPI trap that clipped this cursor at every scale: geometry
+    /// here is device pixels the whole way down, so what fits is arithmetic rather than a
+    /// property of an installed font.
+    ///
+    /// Dark body (<see cref="ThemePalette.ToolbarBg"/>) inside a white contour, so it reads
+    /// both ways round: the fill carries it over a light window, the contour over a dark one.
     /// </summary>
     internal static SD.Bitmap BuildCameraBitmap(double scale)
     {
         int size = WinShot.Recording.RecordingMonitorDpi.Px(CameraLogicalPx, scale);
-        int inset = WinShot.Recording.RecordingMonitorDpi.Px(4, scale);
+        // The contour, in whole device pixels — a sub-pixel pen on a 150 % display reads as a
+        // blur rather than an edge, the same rounding the selector's guide lines take.
+        float stroke = Math.Max(2f, (float)Math.Round(2d * scale));
+
+        // Fit the grid to the bitmap with the contour's own width counted in, and a pixel of
+        // margin so no ink lands on the outermost row or column. Solving for the wider axis is
+        // enough: the grid is wider than it is tall. Ink is then exactly
+        // (24k + stroke) x (18k + stroke), which is what centres it — the old build measured
+        // a font's ink with a throwaway render because it could not know it any other way.
+        // Two pixels of margin per side, not one: the contour's outer edge lands on an exact
+        // pixel boundary and antialiasing still tints the column past it, so a one-pixel
+        // budget put ink in the last column at every scale.
+        float k = (size - 4 - stroke) / GridW;
+        float originX = ((size - ((GridW * k) + stroke)) / 2f) + (stroke / 2f);
+        float originY = ((size - ((GridH * k) + stroke)) / 2f) + (stroke / 2f);
+
         var bmp = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
         try
         {
             using var g = SD.Graphics.FromImage(bmp);
             g.Clear(SD.Color.Transparent);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-            // PIXELS, not points. A point-unit font resolves against the surface's DPI, and a
-            // new Bitmap inherits the PROCESS's — WinShot declares PerMonitorV2, so on a 150%
-            // primary that is 144, not the 96 this code used to claim. The glyph therefore came
-            // out 15*scale*144/72 = 30*scale px wide instead of 20*scale, and ran off the right
-            // and bottom of its own bitmap at every scale: measured ink reached the last column
-            // at 100/125/150/200%, cutting 3-5 px off the camera's right side. That is the
-            // "right side of the icon is a little cut off" report. ThemePalette documents this
-            // exact trap; this was the last selector surface still building a Point font.
-            int em = ThemePalette.PxForPt(ThemePalette.GlyphActionPt, scale);
-            using var font = ThemePalette.IconFontPx(em);
-            using var format = new SD.StringFormat(SD.StringFormat.GenericTypographic)
+            g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
+
+            using var silhouette = CameraSilhouette();
+            using var toDevice = new SD.Drawing2D.Matrix(k, 0f, 0f, k, originX, originY);
+            silhouette.Transform(toDevice);
+
+            // Fill first, contour second: the pen straddles the edge, so stroking afterwards
+            // puts white on both sides of it and the dark body never bleeds through it.
+            using (var body = new SD.SolidBrush(SD.Color.FromArgb(255, ThemePalette.ToolbarBg)))
+                g.FillPath(body, silhouette);
+            using (var contour = new SD.Pen(SD.Color.White, stroke)
             {
-                Alignment = SD.StringAlignment.Center,
-                LineAlignment = SD.StringAlignment.Center,
-                // NoClip kept, not overwritten: GenericTypographic carries it, and without it
-                // GDI+ hard-clips the string to the layout rect instead of letting a glyph whose
-                // black box overhangs its advance width finish drawing.
-                FormatFlags = SD.StringFormatFlags.NoWrap | SD.StringFormatFlags.NoClip,
-            };
-            // Centred in the box, not anchored at its top-left. Anchoring is how the clipping
-            // survived: the box is inset equally on all four sides, but a glyph pinned to the
-            // corner only ever consumes the LEFT inset and spends whatever the font asks for on
-            // the right. The inset is the halo's room now, on all four sides.
-            var box = GlyphBox(size, inset);
-            // Centring the LAYOUT box is not centring the glyph: the box is the font's line
-            // box (ascent plus descent) and the camera's ink sits above the baseline, so
-            // layout-centred ink measured 6 px from the top and 8 from the bottom at 125%.
-            // Two px of droop is exactly the kind of thing that reads as "off" without being
-            // nameable, so the ink is measured and the box moved to put it in the middle.
-            var (dx0, dy0) = CentringOffset(size, box, font, format);
-            box.Offset(dx0, dy0);
-            // A symmetric halo, not one offset copy: a single dark pass down-and-right left
-            // the top-left edge of a white camera with no contrast at all over light screen
-            // content, and the cursor has to read on any wallpaper.
-            using (var halo = new SD.SolidBrush(SD.Color.Black))
+                LineJoin = SD.Drawing2D.LineJoin.Round,
+            })
+                g.DrawPath(contour, silhouette);
+
+            // The lens: a white ring on the dark body, which is what makes the silhouette read
+            // as a camera rather than a rounded box with a tab.
+            using (var lensPath = new SD.Drawing2D.GraphicsPath())
             {
-                foreach (var (dx, dy) in Halo)
-                    g.DrawString(CameraGlyph, font, halo, Offset(box, dx, dy), format);
+                lensPath.AddEllipse(LensCx - LensR, LensCy - LensR, LensR * 2f, LensR * 2f);
+                lensPath.Transform(toDevice);
+                using var lens = new SD.Pen(SD.Color.White, Math.Max(1.5f, stroke * 0.75f));
+                g.DrawPath(lens, lensPath);
             }
-            using (var brush = new SD.SolidBrush(SD.Color.White))
-                g.DrawString(CameraGlyph, font, brush, box, format);
+
             return bmp;
         }
         catch
@@ -128,60 +140,26 @@ internal static class SelectorCursors
         }
     }
 
-    /// <summary>The glyph's content box inside a <paramref name="size"/>-px cursor bitmap:
-    /// inset on all four sides, so the extent loses TWO insets, not one. As
-    /// <c>size - inset</c> the box ran one inset past the bitmap on the right and bottom —
-    /// invisible while only the origin is read, a silent shift the moment anything centres
-    /// in it.</summary>
-    internal static SD.Rectangle GlyphBox(int size, int inset) =>
-        new(inset, inset, Math.Max(1, size - inset * 2), Math.Max(1, size - inset * 2));
-
-    private static SD.RectangleF Offset(SD.Rectangle box, int dx, int dy) =>
-        new(box.X + dx, box.Y + dy, box.Width, box.Height);
-
     /// <summary>
-    /// How far to move <paramref name="box"/> so the glyph's INK lands in the middle of a
-    /// <paramref name="size"/>-px cursor. Draws once into a throwaway surface and reads the
-    /// alpha bounds, because the offset between a font's line box and its ink is a property of
-    /// the font that nothing else here can be told. Cheap: one draw per distinct monitor scale
-    /// for the life of the process, and the cursors are cached.
+    /// One closed contour on the 24x18 grid — body and viewfinder hump in a single figure, not
+    /// two overlapping rectangles. Two figures would be a union for the FILL and two separate
+    /// outlines for the STROKE, which draws a white line across the body where the hump sits
+    /// on it.
     /// </summary>
-    private static (int Dx, int Dy) CentringOffset(
-        int size, SD.Rectangle box, SD.Font font, SD.StringFormat format)
+    private static SD.Drawing2D.GraphicsPath CameraSilhouette()
     {
-        using var probe = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppArgb);
-        using (var g = SD.Graphics.FromImage(probe))
-        {
-            g.Clear(SD.Color.Transparent);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-            using var white = new SD.SolidBrush(SD.Color.White);
-            g.DrawString(CameraGlyph, font, white, box, format);
-        }
-
-        int minX = size, minY = size, maxX = -1, maxY = -1;
-        for (int y = 0; y < size; y++)
-        {
-            for (int x = 0; x < size; x++)
-            {
-                // Same antialiasing floor the harness scans with, so the two agree on what
-                // counts as ink.
-                if (probe.GetPixel(x, y).A <= 8) continue;
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-            }
-        }
-
-        if (maxX < 0)
-            return (0, 0); // no glyph (missing font): leave the box where it is
-
-        return ((size - 1 - maxX - minX) / 2, (size - 1 - maxY - minY) / 2);
+        var path = new SD.Drawing2D.GraphicsPath();
+        path.AddArc(0f, 4f, 6f, 6f, 180f, 90f);     // body top-left, ends (3,4)
+        path.AddLine(3f, 4f, 5f, 4f);               // body top edge up to the hump
+        path.AddLine(5f, 4f, 5f, 1.5f);             // hump left side
+        path.AddArc(5f, 0f, 3f, 3f, 180f, 90f);     // hump top-left, ends (6.5,0)
+        path.AddArc(9f, 0f, 3f, 3f, 270f, 90f);     // hump top-right, ends (12,1.5)
+        path.AddLine(12f, 1.5f, 12f, 4f);           // hump right side
+        path.AddLine(12f, 4f, 21f, 4f);             // body top edge, rest of it
+        path.AddArc(18f, 4f, 6f, 6f, 270f, 90f);    // body top-right
+        path.AddArc(18f, 12f, 6f, 6f, 0f, 90f);     // body bottom-right
+        path.AddArc(0f, 12f, 6f, 6f, 90f, 90f);     // body bottom-left, ends (0,15)
+        path.CloseFigure();
+        return path;
     }
-
-    /// <summary>Segoe Fluent Icons "Camera" (U+E722), the same family every other glyph uses.</summary>
-    private const string CameraGlyph = "";
-
-    private static readonly (int dx, int dy)[] Halo =
-        [(-1, 0), (1, 0), (0, -1), (0, 1)];
 }
