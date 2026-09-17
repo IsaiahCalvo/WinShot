@@ -56,10 +56,18 @@ public class SelectionHandleAlignmentTests
         {
             try
             {
-                // House rule for this assembly: exactly ONE System.Windows.Application, owned by
-                // whichever test reaches it first on its own STA thread. Stand down when someone
-                // else has it — the full suite stays green — and do the real work under a filter,
-                // which is how this harness is meant to be run.
+                // This assembly gets exactly ONE System.Windows.Application and the thread that
+                // creates it owns it for good. ThemedWindowTests is the established owner, and
+                // this class sorts ahead of it, so an ungated run here took the Application first
+                // and killed that test with "Cannot create more than one System.Windows.
+                // Application instance in the same AppDomain" — reproduced, not assumed. Every
+                // other editor-window class in here carries the same gate.
+                //
+                // It also fixes the masquerade: an ungated stand-down is a plain `return` that
+                // xunit 2.9.3 reports as a PASS, indistinguishable from real coverage (there is
+                // no runtime Assert.Skip before xunit v3). Gated, not running is an opt-out
+                // someone chose, not a green tick nobody earned.
+                if (Environment.GetEnvironmentVariable("WINSHOT_EDITOR_TESTS") != "1") return;
                 if (Application.Current is { } inherited && !inherited.CheckAccess()) return;
 
                 SynchronizationContext.SetSynchronizationContext(
@@ -108,6 +116,13 @@ public class SelectionHandleAlignmentTests
                     rows.Add($"counter-tip/{pointerAngle:0}deg={d:0.###}");
                     worst = Math.Max(worst, d);
                 }
+
+                // The cloud's glow ring is new chrome with no numeric position to assert, so
+                // guard the two ways it actually breaks: gone when it should be there, or stuck
+                // on over the next selection.
+                string? glow = CheckCloudGlow(editor, canvas);
+                if (glow is not null) { report.AppendLine(glow); worst = double.MaxValue; }
+                rows.Add($"cloud-glow={(glow is null ? "ok" : "BROKEN")}");
 
                 editor.Close();
                 Pump(4);
@@ -170,12 +185,23 @@ public class SelectionHandleAlignmentTests
         yield return new Probe("rectangle", BoxData(AnnotationData.TypeRectangle, rect, thickness),
             fe => LocalBox(fe, 0));
 
-        // Same rect with a revision-cloud border. Same authored box, so the same handles — but
-        // it renders as a Path whose crown bulges past that box, which is what used to drag the
-        // whole frame outward by (bump / 2 + strokeWidth / 2): 6 DIP at a 1 px border, 18 at 12.
+        // Same rect with a revision-cloud border — the one shape whose frame is NOT its box.
+        // Survey rides a cloud's grabbers on the crowns' hull padded by 1.5 * strokeWidth, never
+        // on the rectangle the crowns were built from, and that composes to exactly one stroke
+        // width outside the authored box. Worth keeping the two halves visible: CloudPath's
+        // FitInside insets the crown ring so the PAINTED hull lands on the box, leaving the
+        // geometry's own bounds at (box - sw / 2); SelectionFrame then adds 1.5 * sw, and
+        // (box - sw / 2) + 1.5 * sw = box + sw. So the padding below is Survey's deliberate
+        // clear gap measured off the crowns' ink, not slack.
+        //
+        // Put the other way, which is the claim that matters to the defect: the frame clears the
+        // painted cloud by the SAME distance on all four sides and that distance is a fixed
+        // multiple of the stroke. What this replaced drifted by (crown bulge + sw / 2) off a
+        // shape that was itself being clipped — 6 DIP at a 1 px border, 18 at 12 px — which is
+        // neither uniform against the ink nor intentional.
         var cloud = BoxData(AnnotationData.TypeRectangle, rect, thickness);
         cloud.LineStyle = "cloud";
-        yield return new Probe("rect-cloud", cloud, fe => LocalBox(fe, 0));
+        yield return new Probe("rect-cloud", cloud, fe => LocalBox(fe, thickness));
 
         // Ellipse: not border-flush — Survey pads the frame 2 page units.
         var oval = new Rect(300, 200, 260, 190);
@@ -340,6 +366,52 @@ public class SelectionHandleAlignmentTests
         Invoke(editor, "Select", null);
         canvas.Children.Remove(fe);
         return d;
+    }
+
+    /// <summary>
+    /// Survey paints a selected cloud with a glow RING — the crowns widened with the ink band
+    /// knocked out. Returns null when it behaves, or what went wrong.
+    /// </summary>
+    private static string? CheckCloudGlow(EditorWindow editor, Canvas canvas)
+    {
+        var rect = new Rect(300, 200, 320, 180);
+        var cloudData = BoxData(AnnotationData.TypeRectangle, rect, 6);
+        cloudData.LineStyle = "cloud";
+        var plainData = BoxData(AnnotationData.TypeRectangle, rect, 6);
+
+        Path? Glow() => (Path?)typeof(EditorWindow)
+            .GetField("_cloudGlow", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(editor);
+
+        FrameworkElement Add(AnnotationData d)
+        {
+            var el = (FrameworkElement)ProjectSerializer.CreateElement(d, Array.Empty<BitmapSource>());
+            el.Tag = d;
+            canvas.Children.Add(el);
+            canvas.UpdateLayout();
+            Invoke(editor, "Select", el);
+            Invoke(editor, "UpdateSelectionVisual");
+            Pump(2);
+            return el;
+        }
+
+        var cloud = Add(cloudData);
+        var lit = Glow();
+        string? problem =
+            lit is null ? "cloud glow was never created"
+            : lit.Visibility != Visibility.Visible ? "cloud glow is not visible on a selected cloud"
+            : lit.Data is null || lit.Data.IsEmpty() ? "cloud glow has empty geometry"
+            : null;
+        canvas.Children.Remove(cloud);
+
+        // Selecting a plain rectangle next must put it away again.
+        var plain = Add(plainData);
+        if (problem is null && Glow() is { Visibility: Visibility.Visible })
+            problem = "cloud glow stayed visible after selecting a non-cloud";
+        canvas.Children.Remove(plain);
+        Invoke(editor, "Select", null);
+        Pump(1);
+        return problem;
     }
 
     private static void SetZoom(EditorWindow editor, double zoom) =>

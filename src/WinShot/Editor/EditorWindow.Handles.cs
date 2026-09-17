@@ -108,6 +108,11 @@ public partial class EditorWindow : Window
             return;
         }
 
+        // The glow tracks the selection rather than each branch below, so no branch can forget
+        // to put it away.
+        PaintCloudGlow(fe is Path glowPath && glowPath.Data is not null
+            && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud ? glowPath : null);
+
         switch (meta.Type)
         {
             case AnnotationData.TypeArrow:
@@ -118,6 +123,17 @@ public partial class EditorWindow : Window
             case AnnotationData.TypeCallout:
                 LayoutCalloutHandles(meta);
                 HideRotateThumb(); // Survey callouts have no rotation handle
+                break;
+            // A revision cloud is the one mark whose frame is NOT its box. The crowns are the
+            // shape and the rectangle they were built on is scaffolding, so Survey rides the
+            // grabbers on the crowns' hull padded by 1.5 * strokeWidth and says so in as many
+            // words ("never the inner box the cloud was built from"). Padding 0 below because
+            // that pad is already inside the frame CloudPath hands back.
+            case AnnotationData.TypeRectangle
+                when fe is Path cloudPath && cloudPath.Data is not null
+                     && AnnotationStyle.LineStyleFrom(meta) == LineBorderStyle.Cloud:
+                LayoutBoxHandles(
+                    CloudSelectionFrameInCanvas(cloudPath), AnnotationTransform.AngleOf(fe), 0);
                 break;
             // Survey isBorderFlush (SVGAnnotationLayer.jsx:5469-5470, :5659-5660): rect and
             // text put their handles ON the shape's own stroke (padding 0); everything else
@@ -285,6 +301,57 @@ public partial class EditorWindow : Window
         double top = Canvas.GetTop(fe); if (double.IsNaN(top)) top = 0;
         Vector off = AnnotationTransform.OffsetOf(fe);
         return new Rect(local.X + left + off.X, local.Y + top + off.Y, local.Width, local.Height);
+    }
+
+    /// <summary>
+    /// The cloud's selection frame in canvas coordinates. <see cref="CloudPath.SelectionFrame"/>
+    /// computes the padded crown hull in the shape's OWN space, so this only has to say where
+    /// the shape sits. The hull is symmetric about the authored box, so the frame's centre is
+    /// still the centre the render rotates about and the two cannot drift apart.
+    /// </summary>
+    private static Rect CloudSelectionFrameInCanvas(Path cloud)
+    {
+        Rect frame = CloudPath.SelectionFrame(cloud.Data, cloud.StrokeThickness);
+        if (frame.IsEmpty) return UnrotatedCanvasBounds(cloud);
+        double left = Canvas.GetLeft(cloud); if (double.IsNaN(left)) left = 0;
+        double top = Canvas.GetTop(cloud); if (double.IsNaN(top)) top = 0;
+        Vector off = AnnotationTransform.OffsetOf(cloud);
+        return new Rect(frame.X + left + off.X, frame.Y + top + off.Y, frame.Width, frame.Height);
+    }
+
+    /// <summary>Selected cloud only: Survey's glow RING, or nothing.</summary>
+    private Path? _cloudGlow;
+
+    /// <summary>
+    /// Survey's cloud glow (<see cref="CloudPath.HoverGlowRing"/>): the crowns widened, with the
+    /// ink band knocked straight out, so a translucent cloud keeps its own colour instead of
+    /// reading purple through the blue. No blur.
+    /// <para>CloudPath says to paint it under the ink; this hangs it in InteractionCanvas just
+    /// below HoverHalo, i.e. over the mark but under every other piece of selection chrome.
+    /// That is equivalent HERE because the ring is a knockout — it shares a boundary with the
+    /// ink and covers none of it, which is the whole reason the bleed-through the "under" rule
+    /// guards against cannot happen either way. The alternative, splicing chrome into
+    /// AnnotationCanvas, would put a non-annotation into the collection that serialisation,
+    /// marquee selection, z-order and export all read as the annotation list.</para>
+    /// </summary>
+    private void PaintCloudGlow(Path? cloud)
+    {
+        if (cloud?.Data is not PathGeometry crowns || HoverHalo is null)
+        {
+            if (_cloudGlow is not null) _cloudGlow.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (_cloudGlow is null)
+        {
+            _cloudGlow = new Path { Stroke = null, IsHitTestVisible = false };
+            InteractionCanvas.Children.Insert(
+                InteractionCanvas.Children.IndexOf(HoverHalo), _cloudGlow);
+        }
+        _cloudGlow.Fill = new SolidColorBrush(AnnotationStyle.SelectionRingColor);
+        _cloudGlow.Opacity = CloudPath.HoverGlowOpacity;
+        _cloudGlow.Data = ToCanvasSpace(cloud,
+            CloudPath.HoverGlowRing(crowns, cloud.StrokeThickness));
+        _cloudGlow.Visibility = Visibility.Visible;
     }
 
     private static Point RotationCentre(FrameworkElement fe)
@@ -548,6 +615,7 @@ public partial class EditorWindow : Window
         HandleLayer.Visibility = Visibility.Collapsed;
         foreach (var t in _handleThumbs) t.Visibility = Visibility.Collapsed;
         HideRotateThumb();
+        PaintCloudGlow(null);
     }
 
     /// <summary>Index of the handle near a content point, or -1. Endpoint/box share the same thumb list.</summary>
