@@ -224,7 +224,7 @@ public class PolyDraftTests
     {
         Point[] triangle = [new(0, 0), new(200, 0), new(0, 200)];
         var cloud = CloudPath.ForPolygon(triangle);
-        Assert.NotEmpty(cloud.Figures);
+        Assert.False(cloud.IsEmpty());
 
         // The far corner of the bounding box (200,200) is outside the triangle. A box-derived
         // cloud would put crowns there; a ring-derived one leaves it empty.
@@ -240,7 +240,7 @@ public class PolyDraftTests
         Point[] run = [new(0, 0), new(200, 0), new(200, 200)];
         var open = CloudPath.ForPolyline(run);
         var closed = CloudPath.ForPolygon(run);
-        Assert.NotEmpty(open.Figures);
+        Assert.False(open.IsEmpty());
         // The interior of the triangle the run would enclose is painted by the polygon and not
         // by the polyline.
         Assert.True(closed.FillContains(new Point(150, 60)));

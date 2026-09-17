@@ -5,7 +5,8 @@ namespace WinShot.Editor;
 
 /// <summary>
 /// The WPF side of Survey's revision cloud: <see cref="RevisionCloud"/> does the geometry,
-/// this turns it into a <see cref="PathGeometry"/> and carries the selection-chrome numbers.
+/// this streams it into a frozen <see cref="StreamGeometry"/> and carries the selection-chrome
+/// numbers.
 ///
 /// Cloud is a BORDER STYLE, not a stroke decoration — the shape is REPLACED by the engine's
 /// crowns. Survey offers it on rectangle / ellipse / polygon / polyline only (never arrow,
@@ -52,7 +53,7 @@ internal static class CloudPath
     /// reaches half a stroke further out than the geometry. See <see cref="FitInside"/>.
     /// It is still NOT part of the scallop SIZE, see <see cref="ScallopSize"/>.
     /// </param>
-    public static PathGeometry ForRectangle(Rect bounds, double intensity = DefaultIntensity,
+    public static Geometry ForRectangle(Rect bounds, double intensity = DefaultIntensity,
         double strokeWidth = 1) =>
         For(CloudKind.Rectangle, Corners(FitInside(CloudKind.Rectangle, bounds, intensity, strokeWidth)), intensity);
 
@@ -60,7 +61,7 @@ internal static class CloudPath
     /// The engine reads an ellipse cloud straight off the bounding box of the points it is
     /// handed, so it takes the same four corners a rectangle does (ellipseCloudPoints).
     /// </summary>
-    public static PathGeometry ForEllipse(Rect bounds, double intensity = DefaultIntensity,
+    public static Geometry ForEllipse(Rect bounds, double intensity = DefaultIntensity,
         double strokeWidth = 1) =>
         For(CloudKind.Ellipse, Corners(FitInside(CloudKind.Ellipse, bounds, intensity, strokeWidth)), intensity);
 
@@ -116,7 +117,7 @@ internal static class CloudPath
     /// the ellipse cloud unreachable: the decision was spelled out five times, all of them
     /// saying "rectangle".
     /// </summary>
-    public static PathGeometry ForBox(string type, Rect bounds, double intensity = DefaultIntensity,
+    public static Geometry ForBox(string type, Rect bounds, double intensity = DefaultIntensity,
         double strokeWidth = 1) =>
         type == AnnotationData.TypeEllipse
             ? ForEllipse(bounds, intensity, strokeWidth)
@@ -134,11 +135,11 @@ internal static class CloudPath
     /// way a line or an arrow is, so nothing clips its crowns and pulling the ring in would
     /// only shrink the shape the user drew.</para>
     /// </summary>
-    public static PathGeometry ForPolygon(IReadOnlyList<Point> ring, double intensity = DefaultIntensity) =>
+    public static Geometry ForPolygon(IReadOnlyList<Point> ring, double intensity = DefaultIntensity) =>
         For(CloudKind.Polygon, ring, intensity);
 
     /// <summary>The same, left open: no body figure, so no phantom chord closing the run.</summary>
-    public static PathGeometry ForPolyline(IReadOnlyList<Point> run, double intensity = DefaultIntensity) =>
+    public static Geometry ForPolyline(IReadOnlyList<Point> run, double intensity = DefaultIntensity) =>
         For(CloudKind.Polyline, run, intensity);
 
     /// <summary>
@@ -146,36 +147,37 @@ internal static class CloudPath
     /// fill is the scalloped region and the ink is only the crowns; an open shape has no
     /// interior, so it gets no body figure.
     /// </summary>
-    public static PathGeometry For(CloudKind kind, IReadOnlyList<Point> points,
+    public static Geometry For(CloudKind kind, IReadOnlyList<Point> points,
         double intensity = DefaultIntensity)
     {
-        var geometry = new PathGeometry { FillRule = FillRule.Nonzero };
         List<CloudCommand> outline = RevisionCloud.Outline(kind, points, ScallopSize(intensity));
-        if (outline.Count == 0) return geometry;
+        var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
+        if (outline.Count == 0) { geometry.Freeze(); return geometry; }
 
-        if (kind != CloudKind.Polyline)
+        using (StreamGeometryContext ctx = geometry.Open())
         {
-            var body = new PathFigure { StartPoint = points[0], IsClosed = true, IsFilled = true };
-            for (int i = 1; i < points.Count; i++)
-                body.Segments.Add(new LineSegment(points[i], isStroked: false));
-            geometry.Figures.Add(body);
-        }
-
-        PathFigure? crown = null;
-        foreach (CloudCommand command in outline)
-        {
-            if (command.Verb == 'M')
+            if (kind != CloudKind.Polyline)
+            {
+                ctx.BeginFigure(points[0], isFilled: true, isClosed: true);
+                for (int i = 1; i < points.Count; i++)
+                    ctx.LineTo(points[i], isStroked: false, isSmoothJoin: false);
+            }
+            foreach (CloudCommand command in outline)
             {
                 // One M per crown: each is its own open subpath, which is what keeps the
                 // rounded end of every full-size scallop.
-                crown = new PathFigure { StartPoint = command.P1, IsClosed = false, IsFilled = true };
-                geometry.Figures.Add(crown);
-            }
-            else
-            {
-                crown!.Segments.Add(new BezierSegment(command.P1, command.P2, command.P3, isStroked: true));
+                if (command.Verb == 'M')
+                    ctx.BeginFigure(command.P1, isFilled: true, isClosed: false);
+                else
+                    ctx.BezierTo(command.P1, command.P2, command.P3,
+                        isStroked: true, isSmoothJoin: false);
             }
         }
+        // Nothing ever edits a cloud in place — every call site REPLACES Path.Data with a fresh
+        // build, and the one reader that needs the figures back (HoverGlowRing) converts rather
+        // than mutates. So freeze it: a frozen geometry drops its change-notification plumbing
+        // and renders without a per-frame dirty check.
+        geometry.Freeze();
         return geometry;
     }
 
@@ -221,12 +223,20 @@ internal static class CloudPath
     /// Paint it UNDER the ink at <see cref="HoverGlowOpacity"/> in
     /// <see cref="AnnotationStyle.SelectionRingColor"/>; there is no blur.
     /// </summary>
-    public static Geometry HoverGlowRing(PathGeometry cloud, double strokeWidth)
+    public static Geometry HoverGlowRing(Geometry cloud, double strokeWidth)
     {
         // The body figure fills but is never stroked, so it must not glow either; only the
-        // open crown figures carry ink.
+        // open crown figures carry ink. Measured, not assumed: widening the WHOLE cloud yields
+        // 403 figures against the crowns' 402 on a 3000x2000 bump-2 box — WPF widens that
+        // closed body despite every segment being unstroked, which would lay a rectangular
+        // band of glow along the inside of the box.
+        //
+        // <see cref="For"/> emits a StreamGeometry, which has no Figures to walk, so this
+        // converts back. That costs about as much as building a PathGeometry did (1.7 ms on
+        // the box above) and is why it must not happen per frame: the glow is chrome on a
+        // settled selection, and <c>PaintCloudGlow</c> puts it away for the duration of a drag.
         var crowns = new PathGeometry();
-        foreach (PathFigure figure in cloud.Figures)
+        foreach (PathFigure figure in PathGeometry.CreateFromGeometry(cloud).Figures)
             if (!figure.IsClosed) crowns.Figures.Add(figure);
 
         double ink = strokeWidth > 0 ? strokeWidth : 1;
@@ -236,11 +246,16 @@ internal static class CloudPath
             crowns.GetWidenedPathGeometry(RoundPen(ink)));
     }
 
-    private static Pen RoundPen(double width) => new()
+    private static Pen RoundPen(double width)
     {
-        Thickness = width,
-        StartLineCap = PenLineCap.Round,
-        EndLineCap = PenLineCap.Round,
-        LineJoin = PenLineJoin.Round,
-    };
+        var pen = new Pen
+        {
+            Thickness = width,
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round,
+        };
+        pen.Freeze();
+        return pen;
+    }
 }
