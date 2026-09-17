@@ -1349,8 +1349,9 @@
                         ToolTip="Drag this image into another app" AutomationProperties.Name="Drag and drop"
                         AutomationProperties.HelpText="Press and drag to drop the edited image as a file into another application.">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
-                                   VerticalAlignment="Center" Opacity="0.7" Margin="0,0,8,0"/>
+                        <Viewbox Width="15" Height="15" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <ContentControl Content="{StaticResource SurveyIcon.Grip}"/>
+                        </Viewbox>
                         <!-- Every `.btn` label in Survey chrome is weight 500 (styles.css:77-81). -->
                         <TextBlock Text="Drag &amp; Drop" VerticalAlignment="Center" FontFamily="Segoe UI" FontSize="{StaticResource TextBodyLg}" FontWeight="Medium"/>
                     </StackPanel>

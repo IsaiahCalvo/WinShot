@@ -614,6 +614,15 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Bottom bar: the Drag & Drop grab handle. It was the one Segoe MDL2 glyph left in a
+         window holding fifty-three ported paths, and at 0.7 opacity beside a full-strength
+         label it read as a disabled control rather than part of the button. -->
+    <Viewbox x:Key="SurveyIcon.Grip" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M4.5,8 H19.5 M4.5,12 H19.5 M4.5,16 H19.5"/>
+        </Canvas>
+    </Viewbox>
+
     <!-- Bottom bar: fit and centre the view. Four arrows out of the middle — the same
          mark every viewer uses for "fit" — not the FitPage sheet, which is a document. -->
     <Viewbox x:Key="SurveyIcon.FitScreen" x:Shared="False" Width="18" Height="18">
