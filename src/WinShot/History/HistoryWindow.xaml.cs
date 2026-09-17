@@ -1286,6 +1286,8 @@ public partial class HistoryWindow : Window
         // this track merged the two into. SortDirectionButton keeps its name in step the same way.
         AutomationProperties.SetName(AllSelectionButton, SelectAllText.Text);
         SelectionSummaryText.Text = count == 0 ? string.Empty : $"{count:N0} selected    {HistoryItem.FormatFileSize(bytes)}";
+        // The divider comes and goes with the summary it divides.
+        SelectionSummaryDivider.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
         bool hasSelection = count > 0;
         CopyToButton.IsEnabled = hasSelection;
         ShareButton.IsEnabled = hasSelection;

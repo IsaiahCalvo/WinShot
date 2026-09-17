@@ -296,9 +296,9 @@ public sealed class ScrollControlsBar : WF.Form
     public event Action<bool>? AutoScrollToggled;
 
     private readonly WF.Label _status;
-    private readonly WF.Button _start;
-    private readonly WF.Button _auto;
-    private readonly WF.Button _done;
+    private readonly DarkButton _start;
+    private readonly DarkButton _auto;
+    private readonly DarkButton _done;
     private readonly SD.Rectangle _region;
     private bool _started;
     private bool _autoOn;
@@ -559,38 +559,34 @@ public sealed class ScrollControlsBar : WF.Form
         Announce(_status.Text);
     }
 
-    private WF.Button MakeButton(string text, string name, string accessibleName,
-        string accessibleDescription, SD.Color back, SD.Color fore)
+    /// <summary>
+    /// A DarkButton, not a WF.Button with FlatStyle.Flat. Flat cannot round a corner, so this
+    /// bar shipped four hard-edged rectangles — including a square blue Done — in an app whose
+    /// every other button is a 6 px rounded one, and it was the only WinForms surface still
+    /// doing it. DarkButton also owns the hover and press ladder rather than having it handed
+    /// in, which is how the neutral buttons here used to hover to a different shade from every
+    /// other neutral WinForms surface, and how press used to be pixel-identical to hover.
+    /// </summary>
+    private DarkButton MakeButton(string text, string name, string accessibleName,
+        string accessibleDescription, SD.Color fill, SD.Color fore)
     {
-        var b = new WF.Button
+        return new DarkButton
         {
             Name = name,
             Text = text,
+            Scale = _scale,
             AutoSize = true,
-            AutoSizeMode = WF.AutoSizeMode.GrowAndShrink,
-            FlatStyle = WF.FlatStyle.Flat,
-            BackColor = back,
+            BackColor = ThemePalette.Elevated,
+            FillColor = fill,
             ForeColor = fore,
             Padding = new WF.Padding(S(14), S(6), S(14), S(6)),
             Margin = new WF.Padding(S(8), 0, 0, 0),
-            Cursor = WF.Cursors.Hand,
             Anchor = WF.AnchorStyles.None,
             Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
             MinimumSize = new SD.Size(0, S(40)),
             AccessibleName = accessibleName,
             AccessibleDescription = accessibleDescription,
-            AccessibleRole = WF.AccessibleRole.PushButton,
         };
-        b.FlatAppearance.BorderSize = 0;
-        // Both states come from the one function DarkButton paints with. Hover used to be a
-        // colour hand-passed by the caller, so the neutral buttons here hovered to SurfaceHover
-        // while every other neutral WinForms surface lifted +18 — the same button role wearing
-        // two hover shades, decided in two places. And press used to BE the hover colour, so
-        // holding down Start Capture, Done, Cancel or Auto-Scroll was pixel-identical to merely
-        // pointing at it: four commit actions that acknowledged nothing.
-        b.FlatAppearance.MouseOverBackColor = DarkControlPalette.StateFill(back, 1d, 0d);
-        b.FlatAppearance.MouseDownBackColor = DarkControlPalette.StateFill(back, 1d, 1d);
-        return b;
     }
 
     private void Announce(string text)

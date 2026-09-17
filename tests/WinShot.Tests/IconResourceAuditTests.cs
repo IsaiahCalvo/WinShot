@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using Xunit;
@@ -71,6 +72,95 @@ public class IconResourceAuditTests
             "StripToolButton sets no FontFamily, so a font code point as Content renders as a "
             + "tofu box. Give these a SurveyIcon.* path resource instead: "
             + string.Join(", ", offenders));
+    }
+
+    /// <summary>
+    /// The general case of the test above, and the one that would have caught the nine that
+    /// were still there after it passed: NO control anywhere may draw a font code point as its
+    /// Content. Even on a style that does set FontFamily — where the glyph renders rather than
+    /// tofus — a Segoe MDL2 code point beside a ported path icon is a second icon family on
+    /// the same row, with its own stroke weight, corner radius and optical size. That is the
+    /// loudest tell a UI was not drawn by one hand, and the bottom bar shipped three of them.
+    /// </summary>
+    [Fact]
+    public void NoControlAnywhereRendersAFontCodePointAsItsContent()
+    {
+        var offenders = new List<string>();
+        foreach (string f in SourceFiles(RepoRoot()).Where(f => f.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)))
+        {
+            foreach (string tag in File.ReadAllText(f).Split('<'))
+            {
+                if (!Regex.IsMatch(tag, @"Content=""&#x[0-9A-Fa-f]{4};""")) continue;
+                string name = Regex.Match(tag, @"x:Name=""([A-Za-z0-9_]+)""") is { Success: true } n
+                    ? n.Groups[1].Value : tag.Split('\n')[0].Trim();
+                offenders.Add($"{Path.GetFileName(f)}:{name}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "A font code point as Content is a second icon family on the row. Draw it as a "
+            + "SurveyIcon.* path on the 24-unit grid instead: " + string.Join(", ", offenders));
+    }
+
+    /// <summary>
+    /// One family means ONE line weight. Every glyph in SurveyToolIcons.xaml is a Viewbox of a
+    /// fixed pixel size wrapping a Canvas of grid units, so what actually gets painted is
+    /// StrokeThickness x (viewbox px / canvas units) x (any scale the glyph carries inside).
+    /// This computes that for every stroked path and asserts they all land on one number.
+    ///
+    /// It used to be nine numbers — 1.0 to 2.625 px — and because the dictionary did not hold
+    /// a weight, each consumer compensated by resizing the HOST: the toolbar wrapped Undo at
+    /// 14 px, Crop at 20 and Select at 22 to fake a matching line, and the sizes then did not
+    /// match either. Undo's arrow measured two thirds the size of Crop's frame beside it.
+    /// </summary>
+    [Fact]
+    public void EveryGlyphInTheIconFamilyPaintsTheSameStrokeWeight()
+    {
+        string dict = Path.Combine(RepoRoot(), "src", "WinShot", "Theme", "SurveyToolIcons.xaml");
+        string xaml = File.ReadAllText(dict);
+
+        double houseUnits = double.Parse(
+            Regex.Match(xaml, @"Property=""StrokeThickness"" Value=""([\d.]+)""").Groups[1].Value,
+            CultureInfo.InvariantCulture);
+
+        var painted = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (string block in Regex.Split(xaml, @"(?=<Viewbox x:Key=)").Skip(1))
+        {
+            string key = Regex.Match(block, @"x:Key=""([^""]+)""").Groups[1].Value;
+            var vb = Regex.Match(block, @"<Viewbox[^>]*?\sWidth=""([\d.]+)""");
+            var canvas = Regex.Match(block, @"<Canvas[^>]*\sWidth=""([\d.]+)""");
+            Assert.True(vb.Success, $"{key}: no Viewbox size, so it stretches to whatever host "
+                + "it lands in and its stroke stretches with it.");
+            if (!canvas.Success) continue;                       // fill-only glyph on no grid
+
+            double host = double.Parse(vb.Groups[1].Value, CultureInfo.InvariantCulture);
+            double grid = double.Parse(canvas.Groups[1].Value, CultureInfo.InvariantCulture);
+            double inner = Regex.Match(block, @"<ScaleTransform ScaleX=""([\d.]+)""") is { Success: true } sc
+                ? double.Parse(sc.Groups[1].Value, CultureInfo.InvariantCulture) : 1.0;
+
+            foreach (string tag in block.Split('<'))
+            {
+                if (!tag.Contains("SurveyIconStroke", StringComparison.Ordinal)) continue;
+                var own = Regex.Match(tag, @"StrokeThickness=""([\d.]+)""");
+                double units = own.Success
+                    ? double.Parse(own.Groups[1].Value, CultureInfo.InvariantCulture)
+                    : houseUnits;
+                // An inner scale only applies where the glyph declares one; a path outside it
+                // would be measured wrong, but no glyph in this dictionary mixes the two.
+                double scale = own.Success && inner != 1.0 ? inner : 1.0;
+                painted[$"{key} ({units})"] = Math.Round(units * scale * host / grid, 2);
+            }
+        }
+
+        Assert.NotEmpty(painted);
+        var weights = painted.Values.Distinct().OrderBy(v => v).ToList();
+        double house = painted.Values.GroupBy(v => v).OrderByDescending(g => g.Count()).First().Key;
+        Assert.True(weights.Count == 1,
+            $"The icon family paints {weights.Count} different line weights ("
+            + string.Join(", ", weights) + $" px) where {house} px is the house. Set each "
+            + "glyph's StrokeThickness so it paints the house weight on its own grid: "
+            + string.Join("; ", painted.Where(kv => kv.Value != house)
+                                       .Select(kv => $"{kv.Key} -> {kv.Value} px")));
     }
 
     private static IEnumerable<string> SourceFiles(string repo)
