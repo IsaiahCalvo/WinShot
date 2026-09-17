@@ -962,6 +962,32 @@
                                           Opacity="0.45" Color="#FF000000" RenderingBias="Performance"/>
                     </Border.Effect>
                 </Border>
+                <!-- THE SHEET'S SECOND EDGE, and the one thing in this window that is not
+                     Survey's. A screenshot editor is the one design problem where the
+                     CONTENT'S VALUE IS UNKNOWN AT DESIGN TIME: Isaiah captures a white spec
+                     PDF and his own dark IDE in the same minute. A drop shadow separates a
+                     bright sheet from the desk and disappears entirely under a dark one — so
+                     on half of what this app captures, the shadow above is the only edge
+                     treatment and it is invisible.
+
+                     This is already the house answer to that exact problem, everywhere else:
+                     the crop thirds-guides are "a dark hairline one screen pixel under a light
+                     one, so the guides read over a white region as well as a dark one", the
+                     scroll indicators pair the same way, and so does the selector's loupe
+                     frame. Every piece of chrome in this app that sits over arbitrary picture
+                     content is two-tone — except, until now, the frame around the picture.
+
+                     So the sheet gets both halves, each quiet where the other is working: the
+                     shadow lifts a bright capture, this hairline bounds a dark one. It is
+                     BorderBrush — the SAME 12%-white token as the top bar's bottom rule, the
+                     rail's left rule and the bottom bar's top rule, so one token draws every
+                     edge in the window, chrome and content alike. (BorderStrong was the first
+                     draft and measures 7.0:1 against the desk, which is a drawn box, not an
+                     edge.) SyncCaptureShadow sizes it one DIP PROUD of the image on every
+                     side, so the stroke lands entirely on the desk and never covers the
+                     outermost row of the user's own pixels. -->
+                <Border x:Name="CaptureEdge" IsHitTestVisible="False" Visibility="Collapsed"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
                 <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
                       Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
                     <Grid.RenderTransform>
