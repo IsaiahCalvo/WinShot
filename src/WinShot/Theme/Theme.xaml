@@ -2317,6 +2317,13 @@
          RIGHT RAIL — Survey's footer buttons: 28x28, transparent, 4px radius,
          muted glyph, and no hover or pressed state whatsoever.
          ==================================================================== -->
+    <!-- The rail's zoom buttons. They were the only controls in the app with NO hover
+         state and NO keyboard focus ring: Background sat at Transparent with nothing to
+         change it, so zoom in, zoom out and the fit trigger never once acknowledged the
+         pointer, and a Tab through the editor went invisible for three stops. Both are
+         floor items, not polish. They now carry the same Hover / Press / FocusRing stack
+         and the same shared cross-fade storyboards as every other button in this file,
+         so nothing here snaps either. -->
     <Style x:Key="RailButton" TargetType="Button">
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
@@ -2328,11 +2335,29 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                    <Grid>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="4"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="4"
+                                Background="{StaticResource PressedShadeBrush}"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                        <Border x:Name="FocusRing" CornerRadius="4"
+                                BorderBrush="Transparent" BorderThickness="2"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.35"/>
                             <Setter Property="Cursor" Value="No"/>
@@ -2359,10 +2384,30 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="2">
+                    <Grid>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="2"/>
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="2"
+                                Background="{StaticResource HoverFillBrush}"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="2"
+                                Background="{StaticResource PressedShadeBrush}"/>
                         <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                        <Border x:Name="FocusRing" CornerRadius="2"
+                                BorderBrush="Transparent" BorderThickness="2"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="FocusRing" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -2385,7 +2430,10 @@
         <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
+        <!-- 1, not 0, with a transparent brush: the focus ring below swaps the COLOUR and
+             never the geometry, so the percentage does not shift by a pixel when it is
+             tabbed into. -->
+        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -2395,8 +2443,16 @@
                         <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="0"/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- Focused, this stops being a label and starts being a field, and
+                             it has to LOOK like one: the cursor swap was the only thing that
+                             changed, which is invisible to a keyboard and invisible in a
+                             screenshot. It takes the app's input fill and the same InfoBrush
+                             ring every other focused control in the file wears. -->
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter Property="Cursor" Value="IBeam"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
