@@ -48,15 +48,18 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Highlighter: Survey ships a 128px PNG mask, which goes blotchy at 20px. This is a
-         vector trace of that marker (chisel tip lower-left, body, cap band) in the same
-         1.5px stroked style as the rest of the set, so it stays crisp at any DPI. -->
+    <!-- Survey src/assets/icons/highlighter-tool.svg, verbatim. It is a mask icon there, so
+         the file's stroke="#fff" carries no colour — every opaque pixel takes the icon
+         colour. Kept on its native 128 grid so the numbers stay literal; the Viewbox
+         normalises. Paths 2 and 3 are stroke-linecap="butt" in the source, not round. -->
     <Viewbox x:Key="SurveyIcon.Highlighter" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.5,16.5 L15.5,10.5 L19.5,14.5 L13.5,20.5 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M15.5,10.5 L17,9 A1.5,1.5 0 0 1 19.1,9 L21,10.9 A1.5,1.5 0 0 1 21,13 L19.5,14.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9.5,16.5 L5.5,18.5 L3.5,21 L6.5,20 L13.5,20.5"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M3.5,21 L2.5,21.5"/>
+        <Canvas Width="128" Height="128">
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="7.2"
+                  Data="M93 16.8 Q94.8 16.8 96.6 18.6 L112.5 34.5 Q116.2 38.2 112.8 42.3 L63.3 102.1 Q60.3 105.7 55.9 103 L52 100.6 Q46 96.9 37 103 L31 110 Q30 110 29.2 109.7 L15.5 102.8 L27 92 Q34 85 29.2 77.2 L27.1 73.9 Q24.5 69.2 29 65.4 L90.1 17.7 Q91.6 16.7 93 16.8Z"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="7.2"
+                  StrokeStartLineCap="Flat" StrokeEndLineCap="Flat" Data="M40.7 55.5L70.4 90.1"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="7.2"
+                  StrokeStartLineCap="Flat" StrokeEndLineCap="Flat" Data="M27 92L37 103"/>
         </Canvas>
     </Viewbox>
 
