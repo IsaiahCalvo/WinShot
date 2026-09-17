@@ -519,10 +519,10 @@ public partial class EditorWindow : Window
     // --------------------------------------------------------- view (zoom/pan)
 
     /// <summary>
-    /// Fits the WHOLE image into the viewport, centered. Small captures scale up so the
-    /// paper is the focal point; tall scrolling captures scale down so top-to-bottom is
-    /// visible. Use <see cref="FitToWidth"/> to read a long capture at full width and
-    /// scroll down it. Ctrl+0 / Center button / open all route here.
+    /// Fits the WHOLE image into the viewport, centered. Tall scrolling captures scale down
+    /// so top-to-bottom is visible; a capture that already fits opens at 100%, never blown up
+    /// (see <see cref="FitWidthScale"/>). Use <see cref="FitToWidth"/> to read a long capture
+    /// at full width and scroll down it. Ctrl+0 / Center button / open all route here.
     /// </summary>
     private void FitToView()
     {
@@ -532,7 +532,7 @@ public partial class EditorWindow : Window
         double fit = Math.Min(FitWidthScale(vw), FitHeightScale(vh));
         // Fit may go below MinZoom (a 32000px scroll capture in a 650px viewport fits at
         // ~0.02) — clamping it to MinZoom left only the middle band visible. MinZoom still
-        // floors user zooming. Small captures scale UP so Fit is not a postage stamp at 100%.
+        // floors user zooming.
         _zoom = Math.Clamp(fit, Math.Min(MinZoom, Math.Max(fit, 0.001)), MaxZoom);
         _viewFitMode = ViewFitMode.Fit;
         ViewScale.ScaleX = ViewScale.ScaleY = _zoom;
@@ -584,11 +584,30 @@ public partial class EditorWindow : Window
     private const double FitPadX = 20;
     private const double FitGap = 16;
 
+    /// <summary>
+    /// Fit SHRINKS ONLY. Survey's arithmetic is unchanged below; this is the one place the
+    /// result is capped at 1.0, so every fit mode inherits it instead of three call sites
+    /// each remembering to.
+    ///
+    /// <para>Survey never needs the cap because a PDF page is always about 612x792pt, so its
+    /// fit lands near 100% on any real viewport. A screenshot is whatever size it is, and
+    /// Survey's formula applied to a small one magnifies it: a 300x200 capture opened at
+    /// <b>331%</b> in a 1337x768 viewport, and an 80x50 one at over 900%. Upscaling a bitmap
+    /// cannot add detail — it just serves blurry pixels and makes the annotation you draw on
+    /// top land on a soft target. Isaiah, 2026-09-17: "fit-to-page and how the page fits is
+    /// weird"; this was it.</para>
+    ///
+    /// <para>So a capture smaller than the viewport opens at 100%, centred by the callers'
+    /// existing translate maths. Zooming past 100% is still a thing the user can ask for —
+    /// the rail, Ctrl+wheel and the %-box all go to MaxZoom 40. Fit just stops volunteering.</para>
+    /// </summary>
+    private static double ShrinkOnly(double scale) => Math.Min(1.0, scale);
+
     /// <summary>Survey's getFitWidthForContainer / pw (PdfjsViewerContainer.jsx:137-140, :1891).</summary>
-    private double FitWidthScale(double vw) => Math.Max(1, vw - FitPadX * 2) / _sourceWidth;
+    private double FitWidthScale(double vw) => ShrinkOnly(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
 
     /// <summary>Survey's fh: clientHeight / (ph + 2*gap) (PdfjsViewerContainer.jsx:1892-1893).</summary>
-    private double FitHeightScale(double vh) => vh / (_sourceHeight + 2 * FitGap);
+    private double FitHeightScale(double vh) => ShrinkOnly(vh / (_sourceHeight + 2 * FitGap));
 
     /// <summary>The pan bound used by <see cref="ClampView"/>; unrelated to the fit insets.</summary>
     private const double ViewMargin = 12;
