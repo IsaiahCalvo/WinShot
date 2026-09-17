@@ -315,6 +315,22 @@ public sealed class DarkButton : WF.Control, WF.IButtonControl
         return base.ProcessDialogKey(keyData);
     }
 
+    /// <summary>
+    /// Label plus Padding plus a pixel each side for the rounded edge. Without it AutoSize
+    /// measured a DarkButton as an empty control, so any bar that lays its buttons out by
+    /// their text had to use a raw WF.Button instead — which is why the scrolling-capture
+    /// control bar was still painting square corners in an app of 6 px rounded ones.
+    /// </summary>
+    public override SD.Size GetPreferredSize(SD.Size proposedSize)
+    {
+        var text = WF.TextRenderer.MeasureText(
+            Text, Font, new SD.Size(int.MaxValue, int.MaxValue),
+            WF.TextFormatFlags.SingleLine | WF.TextFormatFlags.NoPadding);
+        return new SD.Size(
+            Math.Max(MinimumSize.Width, text.Width + Padding.Horizontal + 2),
+            Math.Max(MinimumSize.Height, text.Height + Padding.Vertical + 2));
+    }
+
     protected override void OnPaint(WF.PaintEventArgs e)
     {
         var g = e.Graphics;

@@ -79,24 +79,24 @@ public class ScrollCaptureChromeTests
             "ScrollCaptureStart", "ScrollCaptureAuto", "ScrollCaptureDone", "ScrollCaptureCancel",
         })
         {
-            var b = (WF.Button)Assert.Single(controls.Controls.Find(name, searchAllChildren: true));
-            SD.Color over = b.FlatAppearance.MouseOverBackColor;
-            SD.Color down = b.FlatAppearance.MouseDownBackColor;
+            // A DarkButton, not a WF.Button: Flat cannot round a corner, so these four used to
+            // be the only hard-edged rectangles in an app of 6 px rounded ones, and the ladder
+            // below was three hand-passed colours instead of one function.
+            var b = Assert.IsType<DarkButton>(
+                Assert.Single(controls.Controls.Find(name, searchAllChildren: true)));
+            SD.Color over = DarkControlPalette.StateFill(b.FillColor, 1d, 0d);
+            SD.Color down = DarkControlPalette.StateFill(b.FillColor, 1d, 1d);
 
             Assert.True(over.ToArgb() != down.ToArgb(), $"{name} presses to its own hover colour");
-            // Both ends of the ramp, not just press: hover was a colour the caller handed in,
-            // so the neutral buttons hovered to SurfaceHover while every other neutral
-            // WinForms surface lifted +18 — one button role, two hover shades.
-            Assert.Equal(DarkControlPalette.StateFill(b.BackColor, 1d, 0d), over);
-            Assert.Equal(DarkControlPalette.StateFill(b.BackColor, 1d, 1d), down);
             // Press darkens, whichever track the button is on.
             Assert.True(
                 Luminance(down) < Luminance(over),
                 $"{name} lightens on press ({down}) instead of darkening from hover ({over})");
         }
 
-        var start = (WF.Button)Assert.Single(controls.Controls.Find("ScrollCaptureStart", searchAllChildren: true));
-        Assert.Equal(ThemePalette.AccentPressed, start.FlatAppearance.MouseDownBackColor);
+        var start = Assert.IsType<DarkButton>(
+            Assert.Single(controls.Controls.Find("ScrollCaptureStart", searchAllChildren: true)));
+        Assert.Equal(ThemePalette.AccentPressed, DarkControlPalette.StateFill(start.FillColor, 1d, 1d));
     }
 
     private static double Luminance(SD.Color c) => (0.2126d * c.R) + (0.7152d * c.G) + (0.0722d * c.B);
