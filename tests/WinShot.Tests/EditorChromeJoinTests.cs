@@ -95,15 +95,16 @@ public class EditorChromeJoinTests
         {
             try
             {
-                // This assembly gets exactly ONE System.Windows.Application and whichever test
-                // reaches it first owns it on its own STA thread. Touching it from here would
-                // throw "the calling thread cannot access this object", and building an
-                // EditorWindow against a dispatcher that is not running lays out windows that
-                // never resolve their theme. So stand down when someone else owns it — the
-                // full suite stays green — and do the real work when run under a filter, which
-                // is how the handoff says to run it. OnExplicitShutdown because the default
-                // OnLastWindowClose would shut the Application down when this test closes its
-                // window, poisoning every later test in the host.
+                // This assembly gets exactly ONE System.Windows.Application, and the thread
+                // that creates it owns it for good — after that thread exits, Application.Current
+                // still points at a Dispatcher nobody is running, so a later test can neither
+                // reuse it nor replace it. ThemedWindowTests is the established owner (it builds
+                // one and shuts it down), so claiming it here would fail that test with "Cannot
+                // create more than one System.Windows.Application instance in the same AppDomain"
+                // — which is exactly what these tests did to it. Same reason every render harness
+                // in this suite is env-gated: one editor-window class per host, run deliberately.
+                // The handoff lists the command.
+                if (Environment.GetEnvironmentVariable("WINSHOT_EDITOR_TESTS") != "1") return;
                 if (Application.Current is { } inherited && !inherited.CheckAccess())
                     return;
                 var app = Application.Current ?? new Application();

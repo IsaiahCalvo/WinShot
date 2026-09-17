@@ -123,9 +123,16 @@ public class EditorArrowheadTests
         {
             try
             {
-                // One Application per assembly, owned by whichever test got there first on
-                // its own STA thread. Stand down rather than reach across threads; run under
-                // a filter to do the real work. See EditorPropsClusterTests for the long note.
+                // This assembly gets exactly ONE System.Windows.Application, and the thread
+                // that creates it owns it for good — after that thread exits, Application.Current
+                // still points at a Dispatcher nobody is running, so a later test can neither
+                // reuse it nor replace it. ThemedWindowTests is the established owner (it builds
+                // one and shuts it down), so claiming it here would fail that test with "Cannot
+                // create more than one System.Windows.Application instance in the same AppDomain"
+                // — which is exactly what these tests did to it. Same reason every render harness
+                // in this suite is env-gated: one editor-window class per host, run deliberately.
+                // The handoff lists the command.
+                if (Environment.GetEnvironmentVariable("WINSHOT_EDITOR_TESTS") != "1") return;
                 if (Application.Current is { } inherited && !inherited.CheckAccess())
                     return;
                 var app = Application.Current ?? new Application();
