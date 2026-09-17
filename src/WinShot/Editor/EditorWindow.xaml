@@ -79,11 +79,19 @@
                             <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Redo}"/></Viewbox>
                         </Button>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                        <!-- 20, not the resource's own 18. Crop is one of the two glyphs in
+                             this toolbar Survey has no counterpart for, and at 18 its house
+                             1.5-unit stroke painted 1.125 px — the lightest thing in the row,
+                             against Rotate's 1.5 px right beside it. At 20 it paints 1.25 px,
+                             which is Pan's weight exactly and inside the band the five
+                             Survey-ported glyphs occupy. Same trick Survey uses: hold the
+                             stroke, move the host size. -->
                         <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}"
                                 Click="OnCropClick" ToolTip="Crop"
                                 AutomationProperties.Name="Crop and resize"
-                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C."
-                                Content="{StaticResource SurveyIcon.Crop}"/>
+                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C.">
+                            <Viewbox Width="20" Height="20"><ContentControl Content="{StaticResource SurveyIcon.Crop}"/></Viewbox>
+                        </Button>
                         <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}"
                                 ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
                                 AutomationProperties.Name="Rotate clockwise"
@@ -115,8 +123,12 @@
                                      AutomationProperties.Name="Pan"
                                      AutomationProperties.HelpText="Drag to move the view. Middle-drag or hold Space works with any tool."
                                      Content="{StaticResource SurveyIcon.Pan}"/>
+                        <!-- FontSize is the glyph size (see SurveyIconToggle). 22, not the
+                             style's 20: live Survey renders the select cursor's mask span at
+                             22x22 where Pan's is 20x20 — a pointed glyph reads smaller than a
+                             blunt one, so it is drawn bigger to look the same size. -->
                         <RadioButton x:Name="SelectToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
-                                     Tag="Select" Checked="OnToolChecked" IsChecked="True"
+                                     Tag="Select" Checked="OnToolChecked" IsChecked="True" FontSize="22"
                                      ToolTip="Select" AutomationProperties.Name="Select"
                                      AutomationProperties.HelpText="Select annotations, drag a marquee, move, resize, or delete. Shortcut V."
                                      Content="{StaticResource SurveyIcon.Cursor}"/>
@@ -1204,7 +1216,7 @@
                          mark, which can be moved, resized and restyled after it is drawn. -->
                     <StackPanel x:Name="EffectsGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="RedactToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Redact" Content="&#xE7E6;" Checked="OnToolChecked" ToolTip="Redact (X)"
+                                     Tag="Redact" Content="{StaticResource SurveyIcon.Pixelate}" Checked="OnToolChecked" ToolTip="Redact (X)"
                                      AutomationProperties.Name="Redact"
                                      AutomationProperties.HelpText="Cover a dragged region with a movable, re-styleable redaction. Shortcut X."/>
                         <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
@@ -1213,7 +1225,7 @@
                                      AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
                                      Content="{StaticResource SurveyIcon.Spotlight}"/>
                         <RadioButton x:Name="MagnifierToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Magnifier" Content="&#xE71E;" Checked="OnToolChecked" ToolTip="Magnify (M)"
+                                     Tag="Magnifier" Content="{StaticResource SurveyIcon.Magnifier}" Checked="OnToolChecked" ToolTip="Magnify (M)"
                                      AutomationProperties.Name="Magnify"
                                      AutomationProperties.HelpText="Drag a bubble that shows a piece of the picture blown up. Drag its ring to aim it somewhere else. Shortcut M."/>
                     </StackPanel>
@@ -1229,7 +1241,7 @@
                                      ToolTip="Crop &amp; resize (C)"
                                      AutomationProperties.Name="Crop and resize"
                                      AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut C."/>
-                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xEE71;"
+                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddImage}"
                                 Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                 AutomationProperties.Name="Add screenshot or image"
                                 AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
@@ -1237,7 +1249,7 @@
                                 Click="OnAddCapture" ToolTip="Add capture…"
                                 AutomationProperties.Name="Add capture"
                                 AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
-                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE790;"
+                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Background}"
                                 Click="OnAddBackground" ToolTip="Add background (B)"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>

@@ -135,21 +135,6 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Survey src/Icons.jsx `text`. Its group transform translate(12 12) scale(1.2)
-         translate(-12 -12) was missing here, so the serif T rendered 20% small. -->
-    <Viewbox x:Key="SurveyIcon.Text" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Canvas Width="24" Height="24">
-                <Canvas.RenderTransform>
-                    <ScaleTransform ScaleX="1.2" ScaleY="1.2" CenterX="12" CenterY="12"/>
-                </Canvas.RenderTransform>
-                <Path Style="{StaticResource SurveyIconStroke}" Data="M4,7 L4,4 L20,4 L20,7"/>
-                <Path Style="{StaticResource SurveyIconStroke}" Data="M9,20 L15,20"/>
-                <Path Style="{StaticResource SurveyIconStroke}" Data="M12,4 L12,20"/>
-            </Canvas>
-        </Canvas>
-    </Viewbox>
-
     <!-- Survey src/assets/icons/callout-arrow-outline.svg, verbatim. That file's owner rule:
          nothing inside the bubble — no underscore, no "T" — so the two inner lines this
          used to carry are gone, and the leader is a 5-unit, 90-degree open arrowhead. -->
@@ -164,13 +149,6 @@
     <Viewbox x:Key="SurveyIcon.Rect" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="18" Height="18" RadiusX="2" RadiusY="2"/>
-        </Canvas>
-    </Viewbox>
-
-    <Viewbox x:Key="SurveyIcon.FilledRect" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconFill}"
-                       Canvas.Left="3" Canvas.Top="3" Width="18" Height="18" RadiusX="2" RadiusY="2"/>
         </Canvas>
     </Viewbox>
 
@@ -193,13 +171,6 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Survey src/assets/icons/counter-outline.svg, verbatim. All geometry now, no TextBlock:
-         a font glyph in an icon neither scales nor recolours with the rest of the set.
-         The ring is the Ellipse glyph's exact circle (12,12 r10) so the two read as
-         siblings, and it stays hollow when selected (owner rule). The numeral is 2.0, not
-         1.5 — the optical sizing rule for a small form — and its stem sits 0.7 right of the
-         ring centre on purpose: the eye reads a "1" by its stem, so that is what centred
-         looks like. -->
     <!-- Shape tool: Polygon. Survey src/Icons.jsx `polygon`, verbatim: the owner-approved
          934-unit artwork (a closed run with round vertex nubs) as ONE filled path inside the
          file's own transform, translate(-3.4572 -1.9089) scale(0.0267). It is a silhouette,
@@ -259,10 +230,37 @@
         </Canvas>
     </Viewbox>
 
+    <!-- Survey src/assets/icons/counter.svg, verbatim: the SOLID pin with the numeral
+         knocked out. This replaces the hollow ring drawn from counter-outline.svg — that
+         file is dead code in Survey (its live renderer uses this 936x934 mask), and a ring
+         with a 1 in it reads as an info badge, not a numbered step.
+
+         The SVG is one white blob plus a mask whose black numeral subtracts from it. WPF
+         says the same thing with a GeometryGroup at FillRule EvenOdd: the numeral figure
+         overlaps the blob, so it is removed. The numeral keeps its own source transform on
+         its own PathGeometry rather than having it baked into the coordinates, so the path
+         data below is byte-for-byte the file's.
+
+         It paints far more ink than the outlined glyphs beside it in the shapes sub-row.
+         That is Survey's own look for this mark and it stays. -->
     <Viewbox x:Key="SurveyIcon.Counter" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"/>
-            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="2" Data="M10.7 9.5 12.7 7.6V16.4"/>
+        <Canvas Width="936" Height="934">
+            <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}">
+                <Path.Data>
+                    <GeometryGroup FillRule="EvenOdd">
+                        <PathGeometry Figures="M16.64 14.53C32.51 16.06 48.52 16.04 64.42 17.17C84.3 18.58 104.24 19.47 124.15 20.54C172.46 23.14 221 24.9 269.21 28.79C311.2 32.18 353.46 32.81 395.47 35.77C437.49 38.73 479.63 39.7 521.62 43C562.5 46.22 604.72 56.56 642.66 72C785.02 129.91 889.46 257.4 913.66 410.03C920.35 452.22 920.36 494.92 915.01 537.24C910.4 573.68 901 610.28 886.95 644.23C866.32 694.11 836.9 740.48 799.81 779.75C766.71 814.79 728.26 842.48 686.57 866.19C659.41 881.64 629.18 892.19 599.35 900.86C567.56 910.1 535.15 914.56 502.15 916.64C334.46 927.2 173.19 832.76 94.22 686.11C70.5 642.04 55.77 594.61 47.28 545.43C41.58 512.41 41.99 478.36 39.82 444.99C35.52 379.05 33.34 312.95 28.8 247.02C25.11 193.32 22.63 139.51 19.72 85.75C18.82 69.26 17.52 52.77 16.94 36.26C16.7 29.6 14.39 20.75 16.64 14.53Z"/>
+                        <PathGeometry Figures="M541.49 329.78C536.4 328.3 530.52 329 525.17 329C515.21 329 505.26 329 495.3 329C489.24 329 479.66 327.71 474.01 329.26C470.59 330.19 466.96 333.66 464.05 335.64C458.12 339.69 452.06 343.55 446.13 347.59C435.1 355.08 423.64 361.97 412.61 369.5C403.86 375.47 395.05 381.87 385.78 386.94C385.78 406.85 385.78 426.75 385.78 446.65C393.27 443.86 400.07 438.12 406.82 433.78C421.4 424.42 435.9 415.01 450.5 405.7C456.22 402.06 468.28 392.51 474.24 391.72C474.24 478.84 474.24 565.96 474.24 653.07C488.94 653.19 503.64 653.1 518.34 653.1C525.69 653.1 534.5 654.36 541.49 652.31C541.49 544.8 541.49 437.29 541.49 329.78Z">
+                            <PathGeometry.Transform>
+                                <TransformGroup>
+                                    <TranslateTransform X="-463.64" Y="-491.04"/>
+                                    <ScaleTransform ScaleX="1.35" ScaleY="1.35"/>
+                                    <TranslateTransform X="463.64" Y="491.04"/>
+                                </TransformGroup>
+                            </PathGeometry.Transform>
+                        </PathGeometry>
+                    </GeometryGroup>
+                </Path.Data>
+            </Path>
         </Canvas>
     </Viewbox>
 
@@ -303,36 +301,78 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Effects group: svgrepo.com/svg/525418/magic-stick-3 (Isaiah's pick). -->
+    <!-- Effects group: svgrepo.com/svg/525418/magic-stick-3 (Isaiah's pick), redrawn as
+         STROKE work on the house 24-unit grid. Why, and the rule it is following:
+
+         Survey's own Shapes glyph carries the law in its file header — a top-toolbar glyph
+         should paint about the ink its neighbours do, and Survey's owner rejected their
+         previous Shapes artwork for exactly this reason ("the filled version painted ~2x
+         the ink of its top-toolbar neighbours ... it read bigger AND heavier than
+         everything beside it"). WinShot had shipped the identical mistake here: the
+         svgrepo source is five SOLID fills, so Effects was the only filled glyph in a row
+         of outlines. Measured at 18 px it painted 78.6 px2 of ink against a top-row band of
+         50-66, and the three solid sparkles collapsed into noise below 20 px — on a 150 %
+         screen the button read as a grey smudge rather than a wand.
+
+         Same composition, same reading: head at the top-left, shaft running to the
+         bottom-right tip, three sparkles at the same three positions. Stroke 1.8 on the
+         24-grid is 1.35 px at the 18 px host — inside the 1.25 (Pan) to 1.60 (Select) band
+         its neighbours occupy. The sparkles are crossed strokes rather than solid stars
+         because a filled 4-point star under 3 units across is a dot at this size; lucide's
+         own wand-sparkles makes the same call. -->
     <Viewbox x:Key="SurveyIcon.Effects" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconFill}" Data="M3.84453 3.84453C2.71849 4.97056 2.71849 6.79623 3.84453 7.92226L5.43227 9.51C5.44419 9.49622 5.45669 9.48276 5.46978 9.46967L9.46978 5.46967C9.48284 5.45662 9.49625 5.44415 9.50999 5.43226L7.92226 3.84453C6.79623 2.71849 4.97056 2.71849 3.84453 3.84453Z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M10.5679 6.49012C10.556 6.50386 10.5435 6.51728 10.5304 6.53033L6.53044 10.5303C6.51735 10.5434 6.5039 10.5559 6.49011 10.5678L16.0777 20.1555C17.2038 21.2815 19.0294 21.2815 20.1555 20.1555C21.2815 19.0294 21.2815 17.2038 20.1555 16.0777L10.5679 6.49012Z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M16.1 2.30719C16.261 1.8976 16.8385 1.8976 16.9994 2.30719L17.4298 3.40247C17.479 3.52752 17.5776 3.62651 17.7022 3.67583L18.7934 4.1078C19.2015 4.26934 19.2015 4.849 18.7934 5.01054L17.7022 5.44252C17.5776 5.49184 17.479 5.59082 17.4298 5.71587L16.9995 6.81115C16.8385 7.22074 16.261 7.22074 16.1 6.81116L15.6697 5.71587C15.6205 5.59082 15.5219 5.49184 15.3973 5.44252L14.3061 5.01054C13.898 4.849 13.898 4.26934 14.3061 4.1078L15.3973 3.67583C15.5219 3.62651 15.6205 3.52752 15.6697 3.40247L16.1 2.30719Z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M19.9672 9.12945C20.1281 8.71987 20.7057 8.71987 20.8666 9.12945L21.0235 9.5288C21.0727 9.65385 21.1713 9.75284 21.2959 9.80215L21.6937 9.95965C22.1018 10.1212 22.1018 10.7009 21.6937 10.8624L21.2959 11.0199C21.1713 11.0692 21.0727 11.1682 21.0235 11.2932L20.8666 11.6926C20.7057 12.1022 20.1281 12.1022 19.9672 11.6926L19.8103 11.2932C19.7611 11.1682 19.6625 11.0692 19.5379 11.0199L19.14 10.8624C18.732 10.7009 18.732 10.1212 19.14 9.95965L19.5379 9.80215C19.6625 9.75284 19.7611 9.65385 19.8103 9.5288L19.9672 9.12945Z"/>
-            <Path Style="{StaticResource SurveyIconFill}" Data="M5.1332 15.3072C5.29414 14.8976 5.87167 14.8976 6.03261 15.3072L6.18953 15.7065C6.23867 15.8316 6.33729 15.9306 6.46188 15.9799L6.85975 16.1374C7.26783 16.2989 7.26783 16.8786 6.85975 17.0401L6.46188 17.1976C6.33729 17.2469 6.23867 17.3459 6.18953 17.471L6.03261 17.8703C5.87167 18.2799 5.29414 18.2799 5.1332 17.8703L4.97628 17.471C4.92714 17.3459 4.82852 17.2469 4.70393 17.1976L4.30606 17.0401C3.89798 16.8786 3.89798 16.2989 4.30606 16.1374L4.70393 15.9799C4.82852 15.9306 4.92714 15.8316 4.97628 15.7065L5.1332 15.3072Z"/>
+            <!-- The wand: one outlined taper from the head cap to the tip, 3.0 half-width at
+                 the head and 1.9 at the tip, both ends capped on their own centre. -->
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.8"
+                  Data="M3.48,7.72 A3,3 0 0 1 7.72,3.48 L20.94,18.26 A1.9,1.9 0 0 1 18.26,20.94 Z"/>
+            <!-- Where the head meets the shaft; the taper's own width at that point. -->
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.8"
+                  Data="M7.28,11.12 L11.12,7.28"/>
+            <!-- Sparkles: big, medium, small, at the source artwork's three positions. -->
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.8"
+                  Data="M16.5,2.3 V6.7 M14.3,4.5 H18.7"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.8"
+                  Data="M20.6,8.8 V12 M19,10.4 H22.2"/>
+            <Path Style="{StaticResource SurveyIconStroke}" StrokeThickness="1.8"
+                  Data="M5.6,15.2 V18.4 M4,16.8 H7.2"/>
         </Canvas>
     </Viewbox>
 
-    <Viewbox x:Key="SurveyIcon.Blur" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}"
-                  Data="M12,3 C12,3 6.5,10.5 6.5,15 A5.5,5.5 0 0 0 17.5,15 C17.5,10.5 12,3 12,3 Z"/>
-        </Canvas>
-    </Viewbox>
+    <!-- The REDACT tool's glyph, and the only thing that renders it. It used to be a Segoe
+         MDL2 code point (&#xE7E6;) set as a ToggleButton's text Content, and StripToolButton
+         never sets FontFamily — so the code point fell back to the UI font and the button
+         rendered a literal tofu box. Every icon in this toolbar is a path now.
 
-    <!-- Source: Theme/Icons/pixelate.svg -->
+         Survey has no region-redaction glyph to port: its Blur and Pixelate tools do not
+         exist any more (they are two of the four STYLES of WinShot's re-editable redaction
+         mark), and its text-redact.svg is an "A under a black bar" for redacting selected
+         TEXT — the wrong idea for a dragged region. So this is WinShot's own mark, drawn to
+         the house rules, using the mosaic that was already in this file.
+
+         Rebalanced from the old 9-cell grid, which measured 113.8 px2 of ink at 18 px —
+         roughly double the 50-66 band its neighbours occupy, because it carried four solid
+         5-unit cells AND five stroked ones. A five-cell checkerboard says "pixelated" with
+         the ink of one glyph instead of two, and the empty cells do the same work the
+         stroked ones did without paying for them. -->
     <Viewbox x:Key="SurveyIcon.Pixelate" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.5" Canvas.Top="3" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="16" Canvas.Top="3" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3" Canvas.Top="9.5" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="9.5" Canvas.Top="9.5" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16" Canvas.Top="9.5" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="16" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.5" Canvas.Top="16" Width="5" Height="5"/>
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="16" Canvas.Top="16" Width="5" Height="5"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3.2"  Canvas.Top="3.2"  Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16.2" Canvas.Top="3.2"  Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="9.7"  Canvas.Top="9.7"  Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="3.2"  Canvas.Top="16.2" Width="4.6" Height="4.6"/>
+            <Rectangle Style="{StaticResource SurveyIconFill}" Canvas.Left="16.2" Canvas.Top="16.2" Width="4.6" Height="4.6"/>
+        </Canvas>
+    </Viewbox>
+
+    <!-- The MAGNIFIER tool's glyph. Same story as Redact: it was &#xE71E; as text Content and
+         rendered as a tofu box. Survey DOES have this one — src/Icons.jsx `search`, a circle
+         at (11,11) r8 with a M20,20 L16,16 handle, both stroke 1.5 — so it is ported verbatim
+         rather than invented. 1.5 at the sub-row's 20 px host is 1.25 px, the family weight. -->
+    <Viewbox x:Key="SurveyIcon.Magnifier" x:Shared="False" Width="18" Height="18">
+        <Canvas Width="24" Height="24">
+            <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="16" Height="16"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M20,20 L16,16"/>
         </Canvas>
     </Viewbox>
 
@@ -394,12 +434,6 @@
             <Path Style="{StaticResource SurveyIconStroke}" Data="M2,6 H18 V22"/>
         </Canvas>
     </Viewbox>
-    <Viewbox x:Key="SurveyIcon.Resize" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Rectangle Style="{StaticResource SurveyIconStroke}" Canvas.Left="3" Canvas.Top="3" Width="18" Height="18" RadiusX="2" RadiusY="2"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M9,15 L15,9 M15,9 H11 M15,9 V13"/>
-        </Canvas>
-    </Viewbox>
     <Viewbox x:Key="SurveyIcon.AddImage" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Path Style="{StaticResource SurveyIconStroke}" Data="M13,4 H5 A2,2 0 0 0 3,6 V18 A2,2 0 0 0 5,20 H19 A2,2 0 0 0 21,18 V12"/>
@@ -448,17 +482,7 @@
             <Path Style="{StaticResource SurveyIconStroke}" Data="M6,9 L12,15 L18,9"/>
         </Canvas>
     </Viewbox>
-    <Viewbox x:Key="SurveyIcon.ChevronLeft" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M15,6 L9,12 L15,18"/>
-        </Canvas>
-    </Viewbox>
 
-    <Viewbox x:Key="SurveyIcon.ChevronUp" x:Shared="False" Width="18" Height="18">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M18,15 L12,9 L6,15"/>
-        </Canvas>
-    </Viewbox>
     <Viewbox x:Key="SurveyIcon.Download" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Path Style="{StaticResource SurveyIconStroke}" Data="M21,15 V19 C21,19.5304 20.7893,20.0391 20.4142,20.4142 C20.0391,20.7893 19.5304,21 19,21 H5 C4.46957,21 3.96086,20.7893 3.58579,20.4142 C3.21071,20.0391 3,19.5304 3,19 V15"/>

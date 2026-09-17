@@ -255,6 +255,10 @@
     <!-- The category sub-row is 34 DIP tall and floats over the canvas, so its tools
          are a size down from the primary row's. Two sizes, not a free-for-all. -->
     <sys:Double x:Key="SubToolButtonSize">28</sys:Double>
+    <!-- Glyph size inside a `.btn-icon` toggle (Pan, Select, the fill radios), read off
+         live Survey: its Pan mask span is 20x20 in the same 28x28 box. Select overrides
+         this to 22 at its use site, which is Survey's number for that one glyph. -->
+    <sys:Double x:Key="SurveyIconToggleGlyph">20</sys:Double>
     <sys:Double x:Key="CategoryRowHeight">34</sys:Double>
     <sys:Double x:Key="CircleActionSize">34</sys:Double>
     <sys:Double x:Key="CircleGlyphSize">17</sys:Double>
@@ -1932,16 +1936,32 @@
     </Style>
 
     <!-- `.btn.btn-icon` as a ToggleButton/RadioButton — Pan, Select, the fill
-         radios. Survey's 28x28 box and 16px glyph; the checked state is the
-         app's neutral chip, so the box never changes size and the glyph never
-         changes colour. -->
+         radios. Survey's 28x28 box; the checked state is the app's neutral chip,
+         so the box never changes size and the glyph never changes colour.
+
+         GLYPH SIZE IS FontSize, not a constant baked into the template. It used
+         to be a hard-coded 16 carrying the comment "Survey draws these at 16px",
+         and that was measured wrong: live Survey @ c92c324a renders Pan's mask
+         span at 20x20 and Select's at 22x22 (both `mask-size: contain` over a
+         24-unit viewBox, read off the running app's computed styles). At 16 the
+         two glyphs ended up the smallest things in the centred cluster — Pan
+         painted 1.00 px of ink beside the Draw chip's 1.50, a 50 % weight step
+         between adjacent buttons, which is exactly what reads as "the hand looks
+         wrong". Survey's own Shapes glyph states the house law in its header:
+         a toolbar glyph should paint about the ink its neighbours do at its host
+         size, and Survey holds that line by varying the HOST SIZE per glyph, not
+         the stroke. So the host size has to be per-button here too.
+
+         FontSize is the knob because the template already binds it through to the
+         ContentPresenter, so a text glyph and a vector glyph now agree on what
+         "how big" means instead of disagreeing silently. -->
     <Style x:Key="SurveyIconToggle" TargetType="ToggleButton">
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="3,0"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
-        <Setter Property="FontSize" Value="{StaticResource GlyphBadge}"/>
+        <Setter Property="FontSize" Value="{StaticResource SurveyIconToggleGlyph}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
@@ -1972,9 +1992,10 @@
                                 </Border>
                                 <Border x:Name="Press" Opacity="0" CornerRadius="5"
                                         Background="{StaticResource PressedShadeBrush}"/>
-                                <!-- Survey draws these at 16px; the shared icon resources are
-                                     18px Viewboxes, so the content is scaled rather than reauthored. -->
-                                <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <!-- The shared icon resources are 18px Viewboxes; this one is the
+                                     size authority, so the content is scaled rather than reauthored. -->
+                                <Viewbox Width="{TemplateBinding FontSize}" Height="{TemplateBinding FontSize}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <ContentPresenter TextElement.FontFamily="{TemplateBinding FontFamily}"
                                                       TextElement.FontSize="{TemplateBinding FontSize}"
                                                       TextElement.Foreground="{TemplateBinding Foreground}"/>
@@ -2313,14 +2334,24 @@
         </Setter>
     </Style>
 
-    <!-- The fit trigger is a 36x28 cell with a 2px radius. -->
+    <!-- The fit trigger is a 36x28 cell with a 2px radius.
+
+         The ContentPresenter STRETCHES, and that is the whole point of this template.
+         Its content is a two-layer Grid — the chevron pinned to the left edge, the fit-mode
+         glyph independently centred — which is Survey's layout (its 36x28 cell puts the
+         12px chevron at x=2 and the 16px glyph at x=10, so their INK clears by ~6px). A
+         centred ContentPresenter measures that Grid to its own content instead, 16 DIP,
+         and then "pinned left" and "centred" mean the same place: the chevron drew straight
+         through the middle of the page glyph and the button rendered as an unreadable blob
+         with the page's three rules lost underneath a chevron. Alignment inside the content
+         only means anything once the content has the cell's full width to align within. -->
     <Style x:Key="RailFitButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
         <Setter Property="Width" Value="36"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="2">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Border>
                 </ControlTemplate>
