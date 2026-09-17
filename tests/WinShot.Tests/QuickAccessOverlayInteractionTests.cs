@@ -1009,6 +1009,127 @@ public class QuickAccessOverlayInteractionTests
         return bitmap;
     }
 
+    /// <summary>
+    /// Isaiah: "I took a screenshot on one of my bigger monitors and it got put into the
+    /// thumbnail in the bottom right-hand corner, properly sized. I went to edit it, and once
+    /// I got out of editing mode my mouse was on my main laptop screen. The thumbnail was a
+    /// lot smaller than it should have been."
+    ///
+    /// ComeBack runs PositionFromSettings, and that re-read Screen.FromPoint(Cursor.Position)
+    /// on EVERY re-show rather than only at birth. A card whose chrome, thumbnail and glyphs
+    /// were all built at the 100 % monitor's 96 dpi was therefore dropped onto the 150 %
+    /// laptop the pointer had wandered to, at two thirds the size it should be.
+    ///
+    /// Both monitors here are the placement seam's answer, so this runs on a one-screen
+    /// hidden desktop; the 150 % screen stands below the 100 % one on purpose, because
+    /// Isaiah's real topology puts the laptop under two larger monitors at negative Y and
+    /// Screen.FromRectangle has already been wrong about that seam twice.
+    /// </summary>
+    [Fact]
+    public void TheEditorRoundTripKeepsTheCardOnTheMonitorItWasBornOn()
+    {
+        RunSta(() =>
+        {
+            SD.Rectangle primary = WF.Screen.PrimaryScreen!.WorkingArea;
+            var bornOn = new SD.Rectangle(primary.Left, primary.Top, 1920, 1040);
+            var cursorMonitor = new SD.Rectangle(primary.Left, primary.Top - 812, 1280, 780);
+            SD.Rectangle active = bornOn;
+            FastQuickActionsWindow.BirthWorkingAreaProvider = () => active;
+            FastQuickActionsWindow? card = null;
+            try
+            {
+                using var source = CreateBusyCapture();
+                var settings = new SettingsService();
+                // The shipped default, and the one the report was made on: without it the
+                // card never asks about the cursor at all and the bug cannot reproduce.
+                settings.Current.OverlayMoveToActiveScreen = true;
+                card = new FastQuickActionsWindow((SD.Bitmap)source.Clone(), settings);
+                card.Show();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+                PumpUntilRenderIdle(card);
+                InstallPreviews(card, source);
+
+                SD.Rectangle boundsBefore = card.Bounds;
+                SD.Rectangle cardRectBefore = PrivateRect(card, "_cardRect");
+                SD.Rectangle thumbBefore = PrivateRect(card, "_thumbRect");
+                var glyphsBefore = GetButtons(card)
+                    .Select(b => Button(new[] { b }, (string)b.GetType().GetProperty("AccessibleName")!.GetValue(b)!))
+                    .Select(b => (b.Bounds, b.IconSize))
+                    .ToArray();
+                SD.Rectangle inkBefore;
+                using (SD.Bitmap painted = RenderCard(card))
+                    inkBefore = InkBounds(painted);
+
+                Assert.True(bornOn.Contains(boundsBefore), "the card did not land on the monitor it was born on");
+
+                // Annotate: App.AnnotateFromOverlay steps the card aside, the editor hands
+                // its composed image back, and the editor's Closed handler calls ComeBack —
+                // by which time the pointer is sitting on the 150 % laptop.
+                card.StepAside();
+                PumpUntil(() => !card.Visible, 3000);
+                active = cursorMonitor;
+                card.ReplaceImageFromEditor((SD.Bitmap)source.Clone());
+                PumpUntilRenderIdle(card);
+                card.ComeBack();
+                PumpUntil(() => Motion.Holders == 0, 4000);
+                PumpUntilRenderIdle(card);
+                InstallPreviews(card, source);
+
+                Assert.Equal(boundsBefore, card.Bounds);
+                Assert.Equal(cardRectBefore, PrivateRect(card, "_cardRect"));
+                Assert.Equal(thumbBefore, PrivateRect(card, "_thumbRect"));
+                Assert.Equal(bornOn, PrivateRect(card, "_placedWorkingArea"));
+                Assert.Equal(
+                    glyphsBefore,
+                    GetButtons(card)
+                        .Select(b => Button(new[] { b }, (string)b.GetType().GetProperty("AccessibleName")!.GetValue(b)!))
+                        .Select(b => (b.Bounds, b.IconSize))
+                        .ToArray());
+
+                // And the painted card really is the same size, not merely the same fields:
+                // the reported symptom was visual, so the evidence is a pixel scan.
+                using (SD.Bitmap painted = RenderCard(card))
+                    Assert.Equal(inkBefore, InkBounds(painted));
+
+                Assert.Equal(0, Motion.Holders);
+            }
+            finally
+            {
+                FastQuickActionsWindow.BirthWorkingAreaProvider = null;
+                if (card is not null)
+                {
+                    SetPrivate(card, "_allowImmediateClose", true);
+                    card.Close();
+                    card.Dispose();
+                }
+            }
+        });
+    }
+
+    private static SD.Rectangle PrivateRect(FastQuickActionsWindow overlay, string field)
+        => (SD.Rectangle)typeof(FastQuickActionsWindow)
+            .GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+
+    /// <summary>The bounding box of everything the card actually painted.</summary>
+    private static SD.Rectangle InkBounds(SD.Bitmap painted)
+    {
+        int left = painted.Width, top = painted.Height, right = -1, bottom = -1;
+        for (int y = 0; y < painted.Height; y++)
+        {
+            for (int x = 0; x < painted.Width; x++)
+            {
+                if (painted.GetPixel(x, y).A <= 8)
+                    continue;
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        }
+        return right < left ? SD.Rectangle.Empty : SD.Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+    }
+
     [Fact]
     public void TheEditorRoundTripKeepsTheCardAndUpdatesItInPlace()
     {
