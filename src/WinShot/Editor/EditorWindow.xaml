@@ -310,15 +310,19 @@
                                                                             </StackPanel>
                                                                         </Border>
                                                                     </DockPanel>
+                                                                    <!-- Fill first, then Border: Survey's order, measured on the running app
+                                                                         (Fill at x=724, Border at x=853, 129x30 each). Border stays the
+                                                                         one CHECKED on open, because a WinShot shape starts with no fill
+                                                                         and the first thing anyone edits on an outline is its outline. -->
                                                                     <StackPanel x:Name="FillStrokeTabPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,8">
-                                                                            <RadioButton x:Name="StrokeWellBtn" Style="{StaticResource StripTab}" GroupName="ColorWell" Tag="Stroke"
-                                                                                         Content="Border" IsChecked="True"
-                                                                                         Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
-                                                                                         AutomationProperties.HelpText="Edit the stroke or border color and opacity."/>
                                                                             <RadioButton x:Name="FillWellBtn" Style="{StaticResource StripTab}" GroupName="ColorWell" Tag="Fill"
                                                                                          Content="Fill"
                                                                                          Checked="OnColorWellChecked" AutomationProperties.Name="Fill color"
                                                                                          AutomationProperties.HelpText="Edit the fill color and opacity independently of the border."/>
+                                                                            <RadioButton x:Name="StrokeWellBtn" Style="{StaticResource StripTab}" GroupName="ColorWell" Tag="Stroke"
+                                                                                         Content="Border" IsChecked="True"
+                                                                                         Checked="OnColorWellChecked" AutomationProperties.Name="Border color"
+                                                                                         AutomationProperties.HelpText="Edit the stroke or border color and opacity."/>
                                                                     </StackPanel>
                                                                     <!-- Survey keeps the eyedropper with the colour it samples for. -->
                                                                     <RadioButton x:Name="EyedropperToolBtn" Style="{StaticResource StripToolButton}" GroupName="Tool"
@@ -503,17 +507,28 @@
                                                     
 
                                                     <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
+                                                        <!-- Width 112 is Survey's own trigger size, measured on the running app
+                                                             2026-09-17. Letting the ComboBox size itself to its widest row made it
+                                                             257 DIP, and a control more than twice as wide as it should be is what
+                                                             pushed the arrowhead into the overflow flyout at a 1400 DIP window. -->
                                                         <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="1"
+                                                                  Width="112"
                                                                   SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
                                                             <ComboBoxItem Content="None" Tag="none"/>
                                                             <ComboBoxItem Content="Solid triangle" Tag="solidTriangle"/>
                                                             <ComboBoxItem Content="V-shape" Tag="vShape"/>
                                                             <ComboBoxItem Content="Open circle" Tag="openCircle"/>
                                                             <ComboBoxItem Content="Open triangle" Tag="openTriangle"/>
-                                                            <!-- Survey's vocabulary is exactly these six ARROWHEAD_STYLE_LABELS:
-                                                                 one head, at the end point. The old CleanShot "Double" entry had no
-                                                                 Survey counterpart; the geometry still loads old .winshot files. -->
+                                                            <!-- Survey's vocabulary is these NINE ARROWHEAD_STYLE_LABELS: one head,
+                                                                 at the end point. It was six when this was ported; Diamond, Slash and
+                                                                 Square are PDF /LE endings Survey has offered since its line-endings
+                                                                 work, verified on the running app 2026-09-17. The old CleanShot
+                                                                 "Double" entry had no Survey counterpart; the geometry still loads
+                                                                 old .winshot files. -->
                                                             <ComboBoxItem Content="Horizontal line" Tag="horizontalLine"/>
+                                                            <ComboBoxItem Content="Diamond" Tag="diamond"/>
+                                                            <ComboBoxItem Content="Slash" Tag="slash"/>
+                                                            <ComboBoxItem Content="Square" Tag="square"/>
                                                             <!-- Survey's six are HEADS on a stroked shaft. WinShot's two are whole-arrow
                                                                  looks, so they live under them in the same menu rather than in a second
                                                                  control: Fancy is one filled silhouette, Curved arms the curved tool. -->

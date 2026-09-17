@@ -289,12 +289,10 @@ internal static class AnnotationFactory
 
         var endDir = new Vector(Math.Cos(endAngle), Math.Sin(endAngle));
         var startDir = new Vector(Math.Cos(startAngle), Math.Sin(startAngle));
-        Point endBase = end == ArrowheadStyle.None || end == ArrowheadStyle.HorizontalLine
-            ? to
-            : to - endDir * ShaftTrim(end, headSize);
-        Point startBase = start == ArrowheadStyle.None || start == ArrowheadStyle.HorizontalLine
-            ? from
-            : from + startDir * ShaftTrim(start, headSize);
+        // ShaftTrim already returns 0 for the endings that meet the shaft at the tip, so it
+        // is the single place that knows which those are.
+        Point endBase = to - endDir * ShaftTrim(end, headSize, thickness);
+        Point startBase = from + startDir * ShaftTrim(start, headSize, thickness);
 
         var geometry = LineGeometry(startBase, endBase, curved ? mid : null, render, seed);
         AppendHead(geometry, to, endAngle, headSize, thickness, end);
@@ -304,13 +302,25 @@ internal static class AnnotationFactory
     }
 
     /// <summary>
-    /// Survey shortens the shaft for the two triangle heads ONLY, by headSize/3
-    /// (lineRenderHelpers.js:261-268). The open circle is centred on the tip, so the shaft
-    /// runs into its centre rather than stopping at the rim like a lollipop stick.
+    /// Survey's <c>lineEndingBodyInset</c> (lineRenderHelpers.js:414-423) verbatim: a filled
+    /// triangle stops at its base; a hollow ending stops at its near edge PLUS half the pen,
+    /// so the round cap does not poke through the outline it is supposed to stop behind; and
+    /// V, bar and slash endings meet the shaft at the tip by design (an open "-&gt;", a "-|"
+    /// terminator, a "-/" tick).
+    ///
+    /// <para>This used to trim the two triangles by <c>headSize/3</c> and nothing else, which
+    /// was wrong twice: the open triangle lost its <c>width/2</c>, and the open circle got no
+    /// trim at all on the theory that it is "centred on the tip, so the shaft runs into its
+    /// centre" — a shaft drawn straight through a hollow ring, which Survey explicitly does
+    /// not do. Diamond and Square are centred on the tip the same way and need the same
+    /// treatment, so getting this right was a prerequisite for adding them.</para>
     /// </summary>
-    private static double ShaftTrim(ArrowheadStyle style, double headSize) => style switch
+    private static double ShaftTrim(ArrowheadStyle style, double headSize, double thickness) => style switch
     {
-        ArrowheadStyle.SolidTriangle or ArrowheadStyle.OpenTriangle => headSize / 3,
+        ArrowheadStyle.SolidTriangle => headSize / 3,
+        ArrowheadStyle.OpenTriangle => headSize / 3 + thickness / 2,
+        ArrowheadStyle.OpenCircle or ArrowheadStyle.Diamond or ArrowheadStyle.Square
+            => headSize / 2 + thickness / 2,
         _ => 0,
     };
 
@@ -323,6 +333,19 @@ internal static class AnnotationFactory
     /// floor, keeps the round join/cap shape, and — being a fill — is immune to the shaft's
     /// dash pattern, all without a second Path threaded through nine call sites.
     /// </summary>
+    /// <summary>
+    /// A closed hollow figure from points given in the head's own frame (x along the line,
+    /// y across it), rotated by <paramref name="angle"/> and centred on <paramref name="tip"/>.
+    /// </summary>
+    private static PathFigure Polygon(Point tip, double angle, double _, (double X, double Y)[] pts)
+    {
+        double c = Math.Cos(angle), s = Math.Sin(angle);
+        Point At((double X, double Y) p) => new(tip.X + p.X * c - p.Y * s, tip.Y + p.X * s + p.Y * c);
+        var fig = new PathFigure { StartPoint = At(pts[0]), IsClosed = true, IsFilled = false };
+        for (int i = 1; i < pts.Length; i++) fig.Segments.Add(new LineSegment(At(pts[i]), isStroked: true));
+        return fig;
+    }
+
     private static void AppendHead(
         PathGeometry geometry, Point tip, double angle, double headSize, double thickness, ArrowheadStyle style)
     {
@@ -384,6 +407,41 @@ internal static class AnnotationFactory
                 var perp = new Vector(-Math.Sin(angle), Math.Cos(angle)) * half;
                 var fig = new PathFigure { StartPoint = tip + perp, IsClosed = false, IsFilled = false };
                 fig.Segments.Add(new LineSegment(tip - perp, isStroked: true));
+                outline.Figures.Add(fig);
+                break;
+            }
+
+            // PDF /LE Diamond (lineRenderHelpers.js:207-224): a rhombus centred on the
+            // endpoint, oriented along the line, spanning headSize tip to tip — the same
+            // footprint as the open circle. Hollow, round joins.
+            case ArrowheadStyle.Diamond:
+            {
+                double half = headSize / 2;
+                outline.Figures.Add(Polygon(tip, angle, half,
+                    new[] { (half, 0.0), (0.0, half), (-half, 0.0), (0.0, -half) }));
+                break;
+            }
+
+            // PDF /LE Square (lineRenderHelpers.js:225-241): a square centred on the
+            // endpoint, sides along and across the line, headSize wide.
+            case ArrowheadStyle.Square:
+            {
+                double half = headSize / 2;
+                outline.Figures.Add(Polygon(tip, angle, half,
+                    new[] { (-half, -half), (half, -half), (half, half), (-half, half) }));
+                break;
+            }
+
+            // PDF /LE Slash (lineRenderHelpers.js:242-259, PDF 32000 12.5.6.7): a short
+            // stroke crossing the endpoint, 30 degrees clockwise from the perpendicular,
+            // headSize long. Meets the shaft at the tip, so no trim.
+            case ArrowheadStyle.Slash:
+            {
+                double halfL = headSize / 2;
+                double dir = angle + Math.PI / 2 + Math.PI / 6;
+                var arm = new Vector(Math.Cos(dir), Math.Sin(dir)) * halfL;
+                var fig = new PathFigure { StartPoint = tip + arm, IsClosed = false, IsFilled = false };
+                fig.Segments.Add(new LineSegment(tip - arm, isStroked: true));
                 outline.Figures.Add(fig);
                 break;
             }
