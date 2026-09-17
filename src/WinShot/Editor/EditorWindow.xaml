@@ -167,21 +167,34 @@
                     </StackPanel>
                     </Grid>
 
-                    <!-- Survey's props block is `position:absolute; left:100%` — it hangs off the
-                         cluster's right edge. This host used to spell that `Width="0"`, and that
-                         is what took every formatting control away: a horizontal StackPanel's
-                         ArrangeOverride grows its arrange size to the measured extent of its
-                         children (328 DIP here), WPF's ArrangeCore then compares that ink size
-                         against the explicit Width, finds 328 > 0, and applies a LAYOUT CLIP of
-                         zero width. The controls still measured, still arranged, still reported
-                         IsVisible — and painted 52 ink pixels instead of 4411. Measured, not
-                         reasoned: EditorPropsProbe renders the bar both ways and counts.
-                         The width was never needed. Both side columns are `*`, so the Grid
-                         centres the Auto column on its own: with this host at Auto the tool row
-                         sits at the SAME x for all 19 tools at every width from 1000 to 1600
-                         DIP — spread 0.000. PackFormatOverflow still keeps the cluster from
-                         running off the end of the bar. -->
-                    <StackPanel Grid.Column="2" HorizontalAlignment="Left"
+                    <!-- Survey's props block is `position:absolute; left:100%` — it hangs off
+                         the cluster's right edge and takes part in NO layout, which is what
+                         keeps the centred cluster still whatever the armed tool asks for.
+                         A Canvas is WPF's spelling of that: it measures to (0,0) however wide
+                         its children are, so the props never reach the star column's width.
+
+                         It used to be spelled `Width="0"` on this StackPanel, and that is what
+                         took every formatting control away. A horizontal StackPanel's
+                         ArrangeOverride GROWS its arrange size to the measured extent of its
+                         children (328 DIP here); ArrangeCore then compares that ink size to the
+                         explicit Width, finds 328 > 0, and applies a zero-width LAYOUT CLIP.
+                         The controls still measured, still arranged, still answered IsVisible —
+                         and painted 52 ink pixels instead of 4411. A Canvas does not clip,
+                         because its ArrangeOverride returns the slot it was given instead of
+                         growing to its content. Measured both ways by EditorPropsProbe.
+
+                         Letting the props take part in layout instead is not an option either:
+                         the two side columns are `*`, and at 150% DPI layout rounding splits
+                         them 576.00 / 575.33, so a props cluster wide enough to matter moves the
+                         centred row by one device pixel — the 0.67 DIP ToolRowStabilitySmoke
+                         catches. Zero width is the fix; zero width WITH a clip was the bug.
+
+                         The inner Grid exists only to hand the row's height down so the controls
+                         can still centre vertically: a Canvas ignores a child's VerticalAlignment. -->
+                    <Canvas Grid.Column="2" Width="0" HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch">
+                    <Grid Height="{Binding ActualHeight, ElementName=ToolbarPrimaryRow}">
+                    <StackPanel HorizontalAlignment="Left"
                                 Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
                             <Rectangle Style="{StaticResource ToolbarDivider}"/>
@@ -852,6 +865,8 @@
                         </Popup>
                         </StackPanel>
                     </StackPanel>
+                    </Grid>
+                    </Canvas>
                 </Grid>
             </StackPanel>
         </Border>
