@@ -1450,20 +1450,29 @@ public partial class EditorWindow : Window
                 if (inner is Popup) continue;
                 yield return inner;
             }
-        // Packed in the order they can be given up: the qualifiers first (a hand-drawn
-        // toggle and a redaction's strength are refinements of a choice made elsewhere on
-        // the row), then the choices themselves. The two the merge ADDED to this row —
-        // the hand-drawn checkbox and the redaction pair — have to be in here, or the row
-        // they widened is the one that runs off the end of the bar.
-        if (StrokePanel is not null) yield return StrokePanel;
-        if (RedactStrengthPanel is not null) yield return RedactStrengthPanel;
-        if (MagnifyPanel is not null) yield return MagnifyPanel;
-        if (LineStylePanel is not null) yield return LineStylePanel;
+        // Order here is KEEP priority, not give-up priority: WhoOverflows walks this list
+        // accumulating width and overflows everything that no longer fits, so whatever is
+        // yielded FIRST is the last thing to be taken away. The previous order said it was
+        // listing "the order they can be given up" and then yielded the qualifiers first,
+        // which is backwards — it kept them and overflowed the choices they qualify. With
+        // Arrow armed at a 1400 DIP window that put the ARROWHEAD dropdown into the "..."
+        // flyout (measured: slack 344.35, LineStyle 90 + Arrowhead 257.3 = 347.3, so it
+        // lost by 2.95 DIP) while the hand-drawn toggle kept its place. That is Isaiah's
+        // "I can't change arrow heads": the control was wired and working, just filed away
+        // behind an overflow button on the one tool that exists to use it.
+        //
+        // So: each tool's DEFINING control first, then the shared ones, then the qualifiers
+        // — a hand-drawn toggle and a redaction's strength are refinements of a choice made
+        // elsewhere on the row, and are the right things to lose first.
         if (ArrowStylePanel is not null) yield return ArrowStylePanel;
         if (RedactStylePanel is not null) yield return RedactStylePanel;
         if (StepModePanel is not null) yield return StepModePanel;
+        if (MagnifyPanel is not null) yield return MagnifyPanel;
         if (CropRatioPanel is not null) yield return CropRatioPanel;
+        if (LineStylePanel is not null) yield return LineStylePanel;
+        if (RedactStrengthPanel is not null) yield return RedactStrengthPanel;
         if (CropToolsPanel is not null) yield return CropToolsPanel;
+        if (StrokePanel is not null) yield return StrokePanel;
         if (CropPanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) != "Apply crop")
