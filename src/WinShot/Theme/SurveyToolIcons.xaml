@@ -107,16 +107,24 @@
         </Canvas>
     </Viewbox>
 
-    <!-- The Text GROUP button, distinct from the Text sub-tool's serif T. Survey
-         src/assets/icons/case-sensitive.svg (lucide case-sensitive), verbatim at the house weight. -->
+    <!-- The Text GROUP button, distinct from the Text sub-tool's serif T: a capital A and a
+         lowercase a, which is what Survey's src/assets/icons/case-sensitive.svg (lucide
+         case-sensitive) says. Redrawn on the family's optical size rather than pasted
+         verbatim: lucide authors this glyph between y 6 and y 16 of its 24-unit box, so
+         beside the Draw, Shapes, Effects and Image chips — which run y 3 to y 21 — its ink
+         measured 19 device px against their 32 at every DPI and the fifth chip in the row
+         read as a smaller, lighter thing than its four neighbours. Same letters, same
+         weight, same box; the ink now fills the box the way theirs do. -->
     <Viewbox x:Key="SurveyIcon.TextGroup" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="m2 16 4.039-9.69a.5.5 0 0 1 .923 0L11 16"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M22 9v7"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M3.304 13h6.392"/>
+            <!-- Capital A: apex, two legs, crossbar at two thirds of the height. -->
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M1.2,20 L6.6,3.6 L12,20"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M3.1,14.8 H10.1"/>
+            <!-- Lowercase a: round bowl and a right stem that drops to the same baseline. -->
             <Path Style="{StaticResource SurveyIconStroke}">
-                <Path.Data><EllipseGeometry Center="18.5,12.5" RadiusX="3.5" RadiusY="3.5"/></Path.Data>
+                <Path.Data><EllipseGeometry Center="17.4,15.2" RadiusX="4.8" RadiusY="4.8"/></Path.Data>
             </Path>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M22.2,9.6 V20"/>
         </Canvas>
     </Viewbox>
 

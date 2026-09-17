@@ -71,6 +71,13 @@ public class VisualAuditHarness
                 // nine windows one after another and the default OnLastWindowClose killed
                 // everything after the first.
                 Application.Current.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                // A real WPF UI thread runs inside a dispatcher loop, so an `await` in a
+                // handler resumes back on it. This thread drives the windows directly, where
+                // SynchronizationContext.Current is null and every continuation lands on the
+                // thread pool — the About tab's release-notes fetch then touched its status
+                // text from there and took the whole test host down.
+                SynchronizationContext.SetSynchronizationContext(
+                    new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
                 ThemeResources.EnsureLoaded();
                 var settings = new SettingsService();
                 settings.Current.SaveFolder = @"C:\Pictures\WinShot";
@@ -89,7 +96,10 @@ public class VisualAuditHarness
                         win.Show();
                         for (int i = 0; i < 12; i++) { Pump(); Thread.Sleep(20); }
                         arrange?.Invoke(win);
-                        for (int i = 0; i < 8; i++) { Pump(); Thread.Sleep(20); }
+                        // Long enough for a tab's reveal animation to finish: at eight rounds
+                        // the About cards were still sliding in and the first DPI pass measured
+                        // a half-drawn disclosure toggle as a clipped one.
+                        for (int i = 0; i < 30; i++) { Pump(); Thread.Sleep(20); }
                         win.UpdateLayout();
                         Pump();
 
@@ -129,17 +139,44 @@ public class VisualAuditHarness
         yield return ("editor", () => new EditorWindow(Shot(1200, 760), settings, history), null);
         yield return ("history", () => new HistoryWindow(history, settings), null);
         yield return ("settings-general", () => new SettingsWindow(settings), null);
+        yield return ("settings-shortcuts", () => new SettingsWindow(settings),
+            w => Select(w, "SectionList", 1));
         yield return ("settings-quick-access", () => new SettingsWindow(settings),
             w => Select(w, "SectionList", 2));
         yield return ("settings-recording", () => new SettingsWindow(settings),
             w => { Select(w, "SectionList", 3); Pump(); Select(w, "RecordingSubList", 0); });
         yield return ("settings-screenshots", () => new SettingsWindow(settings),
             w => Select(w, "SectionList", 4));
+        yield return ("settings-annotate", () => new SettingsWindow(settings),
+            w => Select(w, "SectionList", 5));
         yield return ("settings-advanced", () => new SettingsWindow(settings),
             w => Select(w, "SectionList", 6));
+        yield return ("settings-about", () => new SettingsWindow(settings),
+            w => Select(w, "SectionList", 7));
         yield return ("resize-dialog", () => new ResizeDialog(1200, 760), null);
         yield return ("background-composer",
             () => new WinShot.Editor.Background.BackgroundComposerWindow(Shot(800, 500), settings, history), null);
+        // Both editors open on an empty temp file: the chrome is what is being audited and no
+        // frame is ever decoded, so nothing of the user's is rendered.
+        yield return ("video-editor",
+            () => new WinShot.Recording.VideoEditorWindow(EmptyMedia("mp4"), settings, history), null);
+        yield return ("gif-editor",
+            () => new WinShot.Recording.GifEditorWindow(EmptyMedia("gif"), settings, history), null);
+        yield return ("recording-recovery", () => new WinShot.Recording.RecordingRecoveryWindow(
+            new[]
+            {
+                new WinShot.Recording.RecoverableRecordingTempFile(
+                    @"C:\Temp\WinShot\recording-1.mp4", ".mp4", 48_234_496, DateTime.UtcNow.AddHours(-2)),
+                new WinShot.Recording.RecoverableRecordingTempFile(
+                    @"C:\Temp\WinShot\recording-2.gif", ".gif", 3_145_728, DateTime.UtcNow.AddDays(-1)),
+            }), null);
+    }
+
+    private static string EmptyMedia(string ext)
+    {
+        string p = Path.Combine(Path.GetTempPath(), $"winshot-visual-audit-{Guid.NewGuid():N}.{ext}");
+        File.WriteAllBytes(p, Array.Empty<byte>());
+        return p;
     }
 
     private static void Select(Window w, string listName, int index)
@@ -245,10 +282,13 @@ public class VisualAuditHarness
             }
         }
 
-        var rowInkHeights = seen
+        var iconRows = seen
             .Where(m => m.Text.Length == 0 && m.Fe is ButtonBase)
             .GroupBy(m => m.RowName)
-            .ToDictionary(g => g.Key, g => Median(g.Select(m => (double)m.Ink.Height).ToList()));
+            .ToList();
+        var rowInkHeights = iconRows.ToDictionary(
+            g => g.Key, g => Median(g.Select(m => (double)m.Ink.Height).ToList()));
+        var rowCounts = iconRows.ToDictionary(g => g.Key, g => g.Count());
 
         double px = dpi / 96.0;
         foreach (var m in seen)
@@ -286,8 +326,11 @@ public class VisualAuditHarness
 
             // An icon is judged against its own row, not against a constant: what makes a row
             // look thrown together is one glyph drawn a different size from its neighbours.
+            // Four icons minimum: the zoom rail holds three, one of which is a minus sign, so
+            // its median said every other glyph in the rail was the odd one out.
             if (!isText && m.Fe is ButtonBase
                 && rowInkHeights.TryGetValue(m.RowName, out double med) && med > 0
+                && rowCounts[m.RowName] >= 4
                 && Math.Abs(m.Ink.Height - med) / med > 0.25)
                 flags.Add($"ODD-SIZE({m.Ink.Height}v{med:F0})");
 
