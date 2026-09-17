@@ -174,6 +174,15 @@ internal static class SelectorChrome
     public static void DrawCursorReadout(
         SD.Graphics g, SD.Size clientSize, string text, SD.Point cursor, double scale)
     {
+        SD.Rectangle pill = CursorReadoutRect(clientSize, text, cursor, scale);
+        DrawLabel(g, clientSize, text, pill.Left, pill.Top, scale);
+    }
+
+    /// <summary>Where <see cref="DrawCursorReadout"/> puts the pill — so the repaint that has
+    /// to erase it is computed from the same arithmetic that drew it, at the same scale.</summary>
+    public static SD.Rectangle CursorReadoutRect(
+        SD.Size clientSize, string text, SD.Point cursor, double scale)
+    {
         SD.Size pill = MeasureLabel(text, scale);
         SD.Size offset = ReadoutOffset(scale);
         int left = cursor.X + offset.Width;
@@ -182,7 +191,13 @@ internal static class SelectorChrome
             left = cursor.X - offset.Width - pill.Width;
         if (top + pill.Height > clientSize.Height)
             top = cursor.Y - offset.Height - pill.Height;
-        DrawLabel(g, clientSize, text, left, top, scale);
+        // Same clamp DrawLabel applies, so this is where the pill lands and not merely where
+        // it was asked to go.
+        return new SD.Rectangle(
+            Math.Clamp(left, 0, Math.Max(0, clientSize.Width - pill.Width)),
+            Math.Clamp(top, 0, Math.Max(0, clientSize.Height - pill.Height)),
+            pill.Width,
+            pill.Height);
     }
 
     /// <summary>The pointer-follow offset in LOGICAL px. Callers want

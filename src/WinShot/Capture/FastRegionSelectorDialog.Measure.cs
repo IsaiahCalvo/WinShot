@@ -1134,7 +1134,12 @@ public sealed partial class FastRegionSelectorDialog
         SD.Rectangle monitor = MonitorBoundsAt(cursor);
         SD.Rectangle strip = HintStripRect(monitor, cursor);
         strip.Offset(monitor.Location);
-        strip.Inflate(8, 12); // room for the 8 px entrance rise and the capsule's ends
+        // Room for the entrance rise and the capsule's ends — LOGICAL px, scaled like the
+        // rise itself. A device-pixel margin here is the bug the loupe's dirty rect had.
+        double scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitor);
+        strip.Inflate(
+            WinShot.Recording.RecordingMonitorDpi.Px(8, scale),
+            WinShot.Recording.RecordingMonitorDpi.Px(12, scale));
         InvalidateScreenRect(strip);
     }
 

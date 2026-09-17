@@ -26,10 +26,10 @@ public static class SvgIcons
 
     /// <summary>
     /// The box a glyph's ink occupies once it has been fitted into a
-    /// <paramref name="pixelSize"/> button — the renderer's own content bounds and scale.
-    /// Exposed because this is the only way to assert optical size: WPF's
-    /// <c>RenderTargetBitmap</c> draws nothing in a host that has never shown a window, so a
-    /// pixel scan in the test suite measures a blank bitmap and proves nothing.
+    /// <paramref name="pixelSize"/> button. Exposed because this is the only way to assert
+    /// optical size: WPF's <c>RenderTargetBitmap</c> draws nothing in a host that has never
+    /// shown a window, so a pixel scan in the test suite measures a blank bitmap and proves
+    /// nothing. <c>IconFamilyTests</c> pins the card's glyphs to these numbers.
     /// </summary>
     public static W.Size? OpticalExtent(string assetName, int pixelSize)
     {
@@ -37,28 +37,19 @@ public static class SvgIcons
         if (root is null)
             return null;
 
-        List<(WM.Geometry Geometry, WM.Brush? Fill, WM.Pen? Pen)> shapes = BuildShapes(root, WM.Brushes.White);
-        (W.Rect content, double scale) = Fit(root, shapes, pixelSize);
-        return new W.Size(content.Width * scale, content.Height * scale);
+        W.Rect ink = Ink(root);
+        double scale = Fit(root, pixelSize);
+        return new W.Size(ink.Width * scale, ink.Height * scale);
     }
 
     /// <summary>
-    /// The glyph's raw ink box on its own SVG grid, stroke included and before any fitting.
-    /// This is the only measurement of an asset that <see cref="Fit"/> has not already
-    /// normalized, so it is what a test compares two assets by — <see cref="OpticalExtent"/>
-    /// returns the post-fit size, whose long edge is the same number for every asset by
-    /// construction and therefore proves nothing about the art.
+    /// The glyph's raw ink box on its own SVG grid, stroke included and before any fitting —
+    /// what the art itself measures, independent of the button it lands in.
     /// </summary>
     public static W.Rect? ContentExtent(string assetName)
     {
         XElement? root = LoadRoot(assetName);
-        if (root is null)
-            return null;
-
-        W.Rect content = ContentBounds(BuildShapes(root, WM.Brushes.White));
-        return content.IsEmpty || content.Width <= 0 || content.Height <= 0
-            ? ParseViewBox(root.Attribute("viewBox")?.Value)
-            : content;
+        return root is null ? null : Ink(root);
     }
 
     private static XElement? LoadRoot(string assetName)
@@ -66,6 +57,14 @@ public static class SvgIcons
         using Stream? stream = typeof(SvgIcons).Assembly.GetManifestResourceStream(
             $"WinShot.Assets.{assetName}");
         return stream is null ? null : XDocument.Load(stream).Root;
+    }
+
+    private static W.Rect Ink(XElement root)
+    {
+        W.Rect content = ContentBounds(BuildShapes(root, WM.Brushes.White));
+        return content.IsEmpty || content.Width <= 0 || content.Height <= 0
+            ? ParseViewBox(root.Attribute("viewBox")?.Value)
+            : content;
     }
 
     private static List<(WM.Geometry Geometry, WM.Brush? Fill, WM.Pen? Pen)> BuildShapes(
@@ -104,51 +103,21 @@ public static class SvgIcons
     }
 
     /// <summary>
-    /// The share of the button a glyph's ink fills. Read off the card's own X rather than
-    /// chosen: <c>quick-access-close.svg</c>'s ink measures <see cref="CloseInkOnTheGrid"/>
-    /// on the 24-unit grid, and the old viewBox fit drew that grid at 88 % of the button
-    /// (a 6 % inset each side), so the X has always occupied 13.85 x 0.88 / 24 = 50.8 % of
-    /// its button. Every glyph is normalized to exactly that.
+    /// Fit by the declared viewBox — the grid the art was drawn on — inset 6 % on each side.
     ///
-    /// Content fitting on its own normalizes UPWARD, to whatever the button will hold, which
-    /// equalized the family by inflating the X 73 % and the lock 144 % — a restyle of the
-    /// pinned quick-actions card rather than a tidy-up. Normalizing DOWN is right, but a
-    /// fraction typed in by hand cannot be checked against anything — and a review of this
-    /// file read the X's ink as 15.65 rather than 13.85 and concluded the whole family had
-    /// been shrunk 11-22 %. Deriving the fraction, and locking the ink it comes from in
-    /// IconFamilyTests, is what makes that answerable.
+    /// Fitting by rendered CONTENT instead was tried and reverted. It normalizes every glyph
+    /// in the set to one optical size, which sounds like tidying a family and is in practice a
+    /// restyle of the pinned quick-actions card: the X is the smallest art in the set, so
+    /// every other glyph on the card — pin, edit, save, copy — got scaled DOWN to it, and the
+    /// card read as shrunken on the first build Isaiah ran. The viewBox fit keeps each asset
+    /// at the size its author drew it, which is what shipped and what the card is pinned to.
+    /// Do not "equalize" this again without an asset set redrawn to one optical size.
     /// </summary>
-    private const double ContentBoxFraction = CloseInkOnTheGrid * ViewBoxFitScale / 24.0;
-
-    /// <summary>Stroke-inclusive long edge of <c>quick-access-close.svg</c>'s art on its own
-    /// 24-unit grid: 12 units from corner to corner plus the 1.85 round-capped stroke, half
-    /// of it hanging off each end. Locked by <c>IconFamilyTests</c> — change the asset and
-    /// the test says so rather than letting all fourteen glyphs drift with it.</summary>
-    internal const double CloseInkOnTheGrid = 13.85;
-
-    /// <summary>What the pre-normalization fit scaled a 24-unit grid by: the button less a
-    /// 6 % inset on each side.</summary>
-    private const double ViewBoxFitScale = 0.88;
-
-    /// <summary>
-    /// Fit by CONTENT, not by the declared viewBox. Two icons drawn on the same 24-grid
-    /// rarely fill the same fraction of it — scaling by the box made the pin render ~75%
-    /// larger than the X beside it, which is the "vibe-coded" tell the audit named. The union
-    /// of the rendered (stroke-inclusive) bounds is the real optical extent, so fitting that
-    /// to <see cref="ContentBoxFraction"/> of the button gives every glyph the same visual
-    /// weight at the weight the card already had.
-    /// </summary>
-    private static (W.Rect Content, double Scale) Fit(
-        XElement root,
-        List<(WM.Geometry Geometry, WM.Brush? Fill, WM.Pen? Pen)> shapes,
-        int pixelSize)
+    private static double Fit(XElement root, int pixelSize)
     {
-        W.Rect content = ContentBounds(shapes);
-        if (content.IsEmpty || content.Width <= 0 || content.Height <= 0)
-            content = ParseViewBox(root.Attribute("viewBox")?.Value);
-
-        double box = pixelSize * ContentBoxFraction;
-        return (content, Math.Min(box / content.Width, box / content.Height));
+        W.Rect viewBox = ParseViewBox(root.Attribute("viewBox")?.Value);
+        double inset = Math.Max(1, pixelSize * 0.06);
+        return Math.Min((pixelSize - inset * 2) / viewBox.Width, (pixelSize - inset * 2) / viewBox.Height);
     }
 
     private static SD.Bitmap? RenderSvgIcon(string assetName, int pixelSize, SD.Color color)
@@ -159,19 +128,18 @@ public static class SvgIcons
             if (root is null)
                 return null;
 
-            var iconBrush = new WM.SolidColorBrush(WM.Color.FromArgb(color.A, color.R, color.G, color.B));
-            List<(WM.Geometry Geometry, WM.Brush? Fill, WM.Pen? Pen)> shapes = BuildShapes(root, iconBrush);
-
-            (W.Rect content, double scale) = Fit(root, shapes, pixelSize);
+            W.Rect viewBox = ParseViewBox(root.Attribute("viewBox")?.Value);
+            double scale = Fit(root, pixelSize);
             var transform = new WM.MatrixTransform(new WM.Matrix(scale, 0, 0, scale,
-                (pixelSize - content.Width * scale) / 2 - content.X * scale,
-                (pixelSize - content.Height * scale) / 2 - content.Y * scale));
+                (pixelSize - viewBox.Width * scale) / 2 - viewBox.X * scale,
+                (pixelSize - viewBox.Height * scale) / 2 - viewBox.Y * scale));
+            var iconBrush = new WM.SolidColorBrush(WM.Color.FromArgb(color.A, color.R, color.G, color.B));
 
             var visual = new WM.DrawingVisual();
             using (WM.DrawingContext context = visual.RenderOpen())
             {
                 context.PushTransform(transform);
-                foreach ((WM.Geometry geometry, WM.Brush? fill, WM.Pen? pen) in shapes)
+                foreach ((WM.Geometry geometry, WM.Brush? fill, WM.Pen? pen) in BuildShapes(root, iconBrush))
                     context.DrawGeometry(fill, pen, geometry);
                 context.Pop();
             }

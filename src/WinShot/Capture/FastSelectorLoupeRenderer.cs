@@ -95,6 +95,36 @@ internal static class FastSelectorLoupeRenderer
             loupe.Bounds.Left, loupe.Bounds.Top, loupe.Bounds.Right, pillTop + pillH);
     }
 
+    /// <summary>How far the drop shadow's outermost ring reaches past the box, in LOGICAL px.
+    /// <see cref="DrawShadow"/> walks i = 5..1 and inflates by <c>Px(i, scale)</c>.</summary>
+    private const int ShadowReach = 5;
+
+    /// <summary>
+    /// Every pixel a repaint has to cover to ERASE the loupe: its box, its label pill and its
+    /// drop shadow, in the caller's client space.
+    ///
+    /// This exists so the dirty rect and the drawing come from one calculation. The selector
+    /// invalidated a flat 250-px half-box around the cursor in logical px while the loupe grew
+    /// with the monitor, so from 125 % up the bottom of the box, the whole pill and the shadow
+    /// fell outside the repaint — the loupe left a trail of its own outer band everywhere the
+    /// pointer had been. At 192 dpi the box alone overran that half-box by 94 px.
+    /// </summary>
+    public static SD.Rectangle DirtyRect(
+        SD.Size clientSize, SD.Rectangle virtualScreen, SD.Point cursorClient, SD.Point cursorScreen,
+        double scale = 1d)
+    {
+        SD.Rectangle occupied = OccupiedRect(clientSize, virtualScreen, cursorClient, cursorScreen, scale);
+        if (occupied.IsEmpty)
+            return SD.Rectangle.Empty;
+
+        // The shadow's outermost ring plus its pen width, and the one logical px it is nudged
+        // down by. Applied on all four sides: over-invalidating a few px costs a repaint, and
+        // under-invalidating by one leaves a hairline of the old loupe on screen.
+        int margin = Px(ShadowReach, scale) + (int)Stroke(2, scale) + Px(1, scale);
+        occupied.Inflate(margin, margin);
+        return occupied;
+    }
+
     /// <summary>Crops the loupe's source region out of the frozen virtual-desktop bitmap,
     /// matching the size the live-capture path would have returned.</summary>
     private static SD.Bitmap CropFrozenSample(SD.Bitmap frozen, SD.Rectangle sourceScreen, SD.Rectangle virtualScreen)

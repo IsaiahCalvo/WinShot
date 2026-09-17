@@ -116,6 +116,57 @@ public class SelectorRenderHarness
             : SD.Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
     }
 
+    /// <summary>
+    /// "That icon of the camera needs to be filled in" — the Segoe Fluent camera is a stroked
+    /// OUTLINE glyph, so the cursor was a white wireframe with a transparent middle and the
+    /// window under it showed straight through. The camera is drawn from a path now: a scan
+    /// across the body has to be unbroken ink, and the ink inside the contour has to be the
+    /// dark token rather than nothing at all.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Scales))]
+    public void TheCameraCursorBodyIsFilledWithTheDarkToken(double scale)
+    {
+        using SD.Bitmap bmp = SelectorCursors.BuildCameraBitmap(scale);
+        SD.Rectangle ink = InkBounds(bmp);
+        Assert.False(ink.IsEmpty, $"the camera drew nothing at {scale:0.##}x");
+
+        // A row through the body, below the lens: every pixel between the contour's two edges
+        // must be drawn. On the outline glyph this row was ink, gap, ink.
+        int row = ink.Top + (int)Math.Round(ink.Height * 0.8);
+        int first = -1, last = -1, holes = 0;
+        for (int x = ink.Left; x < ink.Right; x++)
+        {
+            bool inkHere = bmp.GetPixel(x, row).A > 8;
+            if (inkHere)
+            {
+                if (first < 0) first = x;
+                last = x;
+            }
+        }
+        Assert.True(first >= 0, $"no camera body on row {row} at {scale:0.##}x");
+        for (int x = first; x <= last; x++)
+            if (bmp.GetPixel(x, row).A <= 8)
+                holes++;
+        Assert.Equal(0, holes);
+
+        // And what fills it is the palette token, not white and not a hand-picked grey.
+        SD.Color token = ThemePalette.ToolbarBg;
+        int filled = 0;
+        for (int y = ink.Top; y < ink.Bottom; y++)
+        {
+            for (int x = ink.Left; x < ink.Right; x++)
+            {
+                SD.Color px = bmp.GetPixel(x, y);
+                if (px.A == 255 && px.R == token.R && px.G == token.G && px.B == token.B)
+                    filled++;
+            }
+        }
+        Assert.True(filled > ink.Width * ink.Height / 5,
+            $"only {filled} of {ink.Width * ink.Height} ink pixels are ToolbarBg at {scale:0.##}x — " +
+            "the body is not filled with the token");
+    }
+
     // ---- chrome that has to grow with the monitor ----------------------------------
 
     /// <summary>
@@ -215,6 +266,100 @@ public class SelectorRenderHarness
         Assert.Equal(12, SelectorChrome.DimensionPillGapPx(2.0d));
     }
 
+    // ---- the loupe leaves nothing behind -------------------------------------------
+
+    /// <summary>
+    /// The reported defect: "it shows these weird artifacts … where that magnifier has been."
+    ///
+    /// The selector repaints only a dirty region as the pointer moves, and that region was a
+    /// flat 250-px half-box around the cursor in LOGICAL px, never scaled. `1c9b778` then made
+    /// the loupe grow with the monitor: 120 logical px is 180 device px at 150 % and 240 at
+    /// 200 %, so from 125 % up the bottom of the box, its whole label pill and its shadow fell
+    /// outside every repaint and the old loupe stayed on screen at each position the pointer
+    /// had passed through.
+    ///
+    /// This drives a real pointer path through the real seams, repaints ONLY what the selector
+    /// asked to be repainted — which is exactly what WinForms does with an invalidated region —
+    /// and compares the result against a full repaint of the same final state. One differing
+    /// pixel is one pixel of ghost.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Scales))]
+    public void TheLoupeLeavesNoPixelsBehindAsThePointerMoves(double scale)
+    {
+        var previousScale = WinShot.Recording.RecordingMonitorDpi.ScaleSource;
+        WinShot.Recording.RecordingMonitorDpi.ScaleSource = _ => scale;
+        try
+        {
+            // Roomy enough that the loupe is not clamped against an edge at 200 %, where it is
+            // 240 px square with a 104 px pointer offset and a pill under it.
+            var monitor = new SD.Rectangle(0, 0, 1000, 760);
+            SD.Point[] path =
+            [
+                new(180, 140), new(430, 300), new(250, 480), new(620, 210), new(360, 560),
+            ];
+
+            using var pointer = new Pointer();
+            using SD.Bitmap frozen = SyntheticDesktop(monitor.Width, monitor.Height);
+            using var selector = Seed(frozen, monitor, path[0], magnifier: true);
+            Set(selector, "_lastFollowScreen", path[0]);
+
+            using var incremental = new SD.Bitmap(
+                monitor.Width, monitor.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(incremental))
+                selector.PaintSurface(g, monitor);
+
+            var log = new List<SD.Rectangle>();
+            selector.InvalidationLog = log;
+            foreach (SD.Point step in path.Skip(1))
+            {
+                log.Clear();
+                pointer.MoveTo(selector, step.X, step.Y);
+
+                using var g = SD.Graphics.FromImage(incremental);
+                using var dirty = new System.Drawing.Region(SD.Rectangle.Empty);
+                foreach (SD.Rectangle rect in log)
+                    dirty.Union(rect);
+                g.Clip = dirty;
+                selector.PaintSurface(g, monitor);
+            }
+            selector.InvalidationLog = null;
+
+            using var reference = new SD.Bitmap(
+                monitor.Width, monitor.Height, SD.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = SD.Graphics.FromImage(reference))
+                selector.PaintSurface(g, monitor);
+
+            SD.Rectangle ghost = FirstDifference(incremental, reference, out int differing);
+            Assert.True(
+                differing == 0,
+                $"{differing} stale pixels left behind at {scale:0.##}x, first at {ghost.Location} — " +
+                "the follow invalidation does not cover what the loupe draws");
+        }
+        finally
+        {
+            WinShot.Recording.RecordingMonitorDpi.ScaleSource = previousScale;
+        }
+    }
+
+    private static SD.Rectangle FirstDifference(SD.Bitmap a, SD.Bitmap b, out int differing)
+    {
+        differing = 0;
+        var first = SD.Rectangle.Empty;
+        for (int y = 0; y < a.Height; y++)
+        {
+            for (int x = 0; x < a.Width; x++)
+            {
+                if (a.GetPixel(x, y).ToArgb() == b.GetPixel(x, y).ToArgb())
+                    continue;
+                if (differing == 0)
+                    first = new SD.Rectangle(x, y, 1, 1);
+                differing++;
+            }
+        }
+        return first;
+    }
+
     // ---- selector states -----------------------------------------------------------
 
     /// <summary>
@@ -312,15 +457,19 @@ public class SelectorRenderHarness
         }
     }
 
-    private static FastRegionSelectorDialog Seed(SD.Bitmap frozen)
+    private static FastRegionSelectorDialog Seed(SD.Bitmap frozen) =>
+        Seed(frozen, Monitor, new SD.Point(200, 150), magnifier: false);
+
+    private static FastRegionSelectorDialog Seed(
+        SD.Bitmap frozen, SD.Rectangle monitor, SD.Point cursor, bool magnifier)
     {
         var selector = new FastRegionSelectorDialog(
             () => Task.FromResult(new List<WindowInfo>()), settings: null);
         Set(selector, "_frozen", frozen);
-        Set(selector, "_vs", Monitor);
-        Set(selector, "_monitorBounds", Monitor);
-        Set(selector, "_currentScreen", new SD.Point(200, 150));
-        Set(selector, "_magnifierOn", false); // the loupe is its own tested surface
+        Set(selector, "_vs", monitor);
+        Set(selector, "_monitorBounds", monitor);
+        Set(selector, "_currentScreen", cursor);
+        Set(selector, "_magnifierOn", magnifier); // the loupe is its own tested surface
         return selector;
     }
 
@@ -329,22 +478,28 @@ public class SelectorRenderHarness
     /// so a scan can tell "the chrome is legible over anything" from "the chrome happens to
     /// contrast with one grey". Deterministic — no randomness in a test that asserts on pixels.
     /// </summary>
-    internal static SD.Bitmap SyntheticDesktop()
+    internal static SD.Bitmap SyntheticDesktop() => SyntheticDesktop(Width, Height);
+
+    internal static SD.Bitmap SyntheticDesktop(int width, int height)
     {
-        var bmp = new SD.Bitmap(Width, Height, SD.Imaging.PixelFormat.Format32bppArgb);
+        var bmp = new SD.Bitmap(width, height, SD.Imaging.PixelFormat.Format32bppArgb);
         using var g = SD.Graphics.FromImage(bmp);
         g.Clear(SD.Color.FromArgb(255, 40, 44, 52));
         for (int i = 0; i < 6; i++)
         {
             int v = 24 + (i * 40);
             using var band = new SD.SolidBrush(SD.Color.FromArgb(255, v, v, Math.Min(255, v + 18)));
-            g.FillRectangle(band, 0, i * (Height / 6), Width, Height / 6);
+            g.FillRectangle(band, 0, i * (height / 6), width, height / 6);
         }
 
+        // The two "windows" in the same proportions at any size — at 520x360 this is exactly
+        // the 60,40,200,140 and 300,190,190,130 the harness has always drawn.
+        int Wx(int v) => v * width / Width;
+        int Hy(int v) => v * height / Height;
         using var pale = new SD.SolidBrush(SD.Color.FromArgb(255, 236, 236, 240));
-        g.FillRectangle(pale, 60, 40, 200, 140);   // a light "window"
+        g.FillRectangle(pale, Wx(60), Hy(40), Wx(200), Hy(140));   // a light "window"
         using var dark = new SD.SolidBrush(SD.Color.FromArgb(255, 12, 12, 14));
-        g.FillRectangle(dark, 300, 190, 190, 130); // and a dark one
+        g.FillRectangle(dark, Wx(300), Hy(190), Wx(190), Hy(130)); // and a dark one
         return bmp;
     }
 
