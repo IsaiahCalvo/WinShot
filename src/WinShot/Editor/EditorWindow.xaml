@@ -1,16 +1,34 @@
 ﻿<Window x:Class="WinShot.Editor.EditorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WinShot Editor" Background="{StaticResource ChromePopoverBrush}"
+        Title="WinShot Editor" Background="{StaticResource WindowBgBrush}"
         MinWidth="980" MinHeight="520"
         AllowDrop="True" Drop="OnEditorDrop" DragOver="OnEditorDragOver"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
         AutomationProperties.Name="WinShot annotation editor">
-    <!-- Survey's canvas ground is #181c24 — the SAME token as the top bar and sub-row
-         (PDFViewer.jsx:23583/23607), which is why its chrome reads as one surface.
-         #0d0f14 is popovers/backdrop only, so it stays on the Window (Survey's `body`,
-         styles.css:23) and never on a chrome band. -->
-    <Grid Background="{StaticResource ChromeBgBrush}">
+    <!-- THE DESK. Survey's canvas ground is #181c24 — the SAME token as its top bar and
+         sub-row (PDFViewer.jsx:23583/23607), so its chrome and its page ground are one
+         value and the page is held off the backdrop by a shadow alone.
+
+         WinShot DIVERGES, under the same rule that already diverges on the top bar's
+         hairline: Survey wins mechanics, features and icons; WinShot wins palette,
+         materials and type. Painting the work surface in the FURNITURE colour is a
+         palette decision, so it is WinShot's to make, and every other window in this app
+         already made it the other way — History, Settings, the video and GIF editors, the
+         background composer and the resize dialog all ground on WindowBg and put ToolbarBg
+         on their bands. The editor was the only window in the app painting its canvas
+         backdrop in the chrome colour.
+
+         So the window is TWO materials and no more. CHROME is ToolbarBg (#262628): the top
+         bar, the group sub-row, the right zoom rail (see ChromeRailBrush) and the bottom
+         bar, which together make one continuous frame, and every control in this window
+         lands on it. The FIELD is WindowBg (#1C1C1E): this ground and the canvas viewport,
+         the one recessed thing in the middle, holding the one thing that is not chrome.
+         A 10-value step between them, so the three hairlines stop being the only thing
+         holding the window apart. WindowBg's own declaration in Theme.xaml has said
+         "deepest: window/canvas backdrop" since the file was written; this is that token
+         finally being used for the thing it is named after. -->
+    <Grid Background="{StaticResource WindowBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -927,7 +945,7 @@
                  centre column so the sub-row OVERLAYS the canvas without pushing it down —
                  "the viewer underneath keeps its full height" (AppShell.jsx:2727-2740).
                  One row, EditorGroupBar declared after Viewport so it paints on top. -->
-                <Grid x:Name="Viewport" Background="{StaticResource ChromeBgBrush}" ClipToBounds="True"
+                <Grid x:Name="Viewport" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
               MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
               MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
               AutomationProperties.Name="Annotation canvas"
@@ -935,7 +953,8 @@
             <Canvas x:Name="SurfaceHost">
                 <!-- Survey's page carries `box-shadow: 0 2px 14px rgba(0,0,0,0.45)` and NO border
                      ring; the desktop page div leaves boxShadow undefined so the canvas shadow is
-                     the only edge treatment (PdfjsViewerContainer.jsx:351, :2236-2238). -->
+                     the only edge treatment (PdfjsViewerContainer.jsx:351, :2236-2238). The
+                     geometry below is Survey's, unchanged — only the ground it falls on moved. -->
                 <Border x:Name="CaptureShadow" IsHitTestVisible="False" Visibility="Collapsed"
                         Background="#FF000000">
                     <Border.Effect>
@@ -943,6 +962,32 @@
                                           Opacity="0.45" Color="#FF000000" RenderingBias="Performance"/>
                     </Border.Effect>
                 </Border>
+                <!-- THE SHEET'S SECOND EDGE, and the one thing in this window that is not
+                     Survey's. A screenshot editor is the one design problem where the
+                     CONTENT'S VALUE IS UNKNOWN AT DESIGN TIME: Isaiah captures a white spec
+                     PDF and his own dark IDE in the same minute. A drop shadow separates a
+                     bright sheet from the desk and disappears entirely under a dark one — so
+                     on half of what this app captures, the shadow above is the only edge
+                     treatment and it is invisible.
+
+                     This is already the house answer to that exact problem, everywhere else:
+                     the crop thirds-guides are "a dark hairline one screen pixel under a light
+                     one, so the guides read over a white region as well as a dark one", the
+                     scroll indicators pair the same way, and so does the selector's loupe
+                     frame. Every piece of chrome in this app that sits over arbitrary picture
+                     content is two-tone — except, until now, the frame around the picture.
+
+                     So the sheet gets both halves, each quiet where the other is working: the
+                     shadow lifts a bright capture, this hairline bounds a dark one. It is
+                     BorderBrush — the SAME 12%-white token as the top bar's bottom rule, the
+                     rail's left rule and the bottom bar's top rule, so one token draws every
+                     edge in the window, chrome and content alike. (BorderStrong was the first
+                     draft and measures 7.0:1 against the desk, which is a drawn box, not an
+                     edge.) SyncCaptureShadow sizes it one DIP PROUD of the image on every
+                     side, so the stroke lands entirely on the desk and never covers the
+                     outermost row of the user's own pixels. -->
+                <Border x:Name="CaptureEdge" IsHitTestVisible="False" Visibility="Collapsed"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
                 <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
                       Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
                     <Grid.RenderTransform>
@@ -1327,14 +1372,29 @@
 
             <!-- Survey's collapsed right rail (48px): zoom in, click-to-type percentage, zoom
                  out, divider, then the fit trigger whose menu flies out to the left. -->
+            <!-- SnapsToDevicePixels, which the top bar and the bottom bar have always had and
+                 this one never did: its left rule was landing on ~2/3 of a device column and
+                 painting a grey smear instead of a hairline. It went unnoticed because the
+                 desk used to be the lighter value, and 2/3 of a hairline over #262628 comes
+                 out at almost exactly a whole hairline over #1C1C1E — the number the join
+                 test was checking. Same defect class as the sub-pixel strokes the icon round
+                 chased; it just happened to be wearing the right colour. -->
             <Border x:Name="ZoomRail" Grid.Row="1" Grid.RowSpan="2" Grid.Column="1" Background="{StaticResource ChromeRailBrush}"
                     BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="1,0,0,0"
+                    SnapsToDevicePixels="True" UseLayoutRounding="True"
                     AutomationProperties.Name="Zoom rail">
-                <!-- Survey's rail footer: zoom / fit live at the BOTTOM of the rail,
-                     over a 1px #2a3140 top rule with 8px vertical padding
-                     (AppShell.jsx:3011). Every rail tooltip flies out LEFT so it
-                     clears the 48px rail instead of clipping (Tooltip.jsx:69-71). -->
-                <Border VerticalAlignment="Bottom" BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,1,0,0" Padding="0,8">
+                <!-- Survey's rail footer: zoom / fit live at the BOTTOM of the rail, with
+                     8px vertical padding (AppShell.jsx:3011). Every rail tooltip flies out
+                     LEFT so it clears the 48px rail instead of clipping (Tooltip.jsx:69-71).
+
+                     Survey puts a 1px #2a3140 rule across the top of that footer, and it is
+                     dropped here. In Survey the rail above the footer is full — pages,
+                     spaces, a panel toggle — and the rule is what separates the footer from
+                     that list. WinShot's rail holds the four zoom controls and nothing else,
+                     so the rule was drawing a line between the controls and 450px of empty
+                     rail: a divider with nothing on the other side of it. The 8px padding
+                     and the rail's own left rule already place the group. -->
+                <Border VerticalAlignment="Bottom" Padding="0,8">
                     <StackPanel HorizontalAlignment="Center">
                         <Button x:Name="BtnZoomIn" Style="{StaticResource RailButton}" Click="OnZoomIn"
                                 ToolTip="Zoom in" AutomationProperties.Name="Zoom in"

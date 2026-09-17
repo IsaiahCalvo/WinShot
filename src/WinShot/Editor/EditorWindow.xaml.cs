@@ -914,6 +914,18 @@ public partial class EditorWindow : Window
         CaptureShadow.Height = Math.Max(1, _sourceHeight * _zoom - 2);
         Canvas.SetLeft(CaptureShadow, ViewTranslate.X + 1);
         Canvas.SetTop(CaptureShadow, ViewTranslate.Y + 1);
+
+        // The hairline half of the sheet's edge (see EditorWindow.xaml). Grown one DIP
+        // PROUD on every side, so its 1px stroke lands on the desk rather than over the
+        // outermost row of the capture. It sits under EditorSurface in z-order, which is
+        // why growing it outward is what makes it visible at all — and why a selection
+        // handle sitting on the sheet's corner still draws over the top of it.
+        if (CaptureEdge is null) return;
+        CaptureEdge.Visibility = Visibility.Visible;
+        CaptureEdge.Width = _sourceWidth * _zoom + 2;
+        CaptureEdge.Height = _sourceHeight * _zoom + 2;
+        Canvas.SetLeft(CaptureEdge, ViewTranslate.X - 1);
+        Canvas.SetTop(CaptureEdge, ViewTranslate.Y - 1);
     }
 
     private void OnCenterView(object sender, RoutedEventArgs e) => FitToView();

@@ -147,7 +147,15 @@
             </Grid>
         </Border>
 
-        <Border x:Name="CategoryRow" Grid.Row="0" Background="{StaticResource WindowBgBrush}" Padding="16,12,16,10">
+        <!-- Chrome, not field. The filter chips are controls, and this window's other two
+             control bands (the selection row below, the status bar at the foot) are already
+             ToolbarBg; only this one was painted in the same value as the thumbnail grid it
+             sits over, so it read as floating on the content rather than as the top of the
+             window's chrome. Same split the editor now makes: every control lands on the
+             chrome material, and the one recessed field holds the one thing that is not
+             chrome. It joins the selection row into a single top block, which is what the
+             editor's top bar and its group sub-row already do. -->
+        <Border x:Name="CategoryRow" Grid.Row="0" Background="{StaticResource ToolbarBgBrush}" Padding="16,12,16,10">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <RadioButton x:Name="ChipAll" Content="All" IsChecked="True" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>

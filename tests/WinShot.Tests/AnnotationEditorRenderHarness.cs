@@ -74,6 +74,10 @@ public class AnnotationEditorRenderHarness
                 // states, which made every comparison 5 % differing pixels that meant nothing
                 // — and there was no 150 % pass at all, which is the scale Isaiah runs.
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-primary-shell.png"));
+                // 125% is the step the chrome/desk value join is most likely to break on: it
+                // is the only one of the four where a logical pixel is 1.25 device pixels, so
+                // a hairline lands on a fraction and can go grey or disappear entirely.
+                RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-125pct.png"), dpi: 120);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-150pct.png"), dpi: 144);
                 RenderToPng(editor, Path.Combine(outDir, "editor-after-shell-200pct.png"), dpi: 192);
 
@@ -194,20 +198,23 @@ public class AnnotationEditorRenderHarness
         thread.Join();
 
         Assert.Null(failure);
-        // Nineteen painted renders, each already pixel-scanned by SaveBitmap. It was twelve
+        // Twenty painted renders, each already pixel-scanned by SaveBitmap. It was twelve
         // on each branch before the merge; the union adds the group strips, the colour
-        // picker, the redaction row and the toolbar strip.
-        Assert.Equal(19, Directory.GetFiles(outDir, "*.png").Length);
+        // picker, the redaction row and the toolbar strip, and the design pass adds 125%.
+        Assert.Equal(20, Directory.GetFiles(outDir, "*.png").Length);
 
-        // The three scale passes are one state rendered three ways, so their pixel sizes are
+        // The four scale passes are one state rendered four ways, so their pixel sizes are
         // exact multiples. Anything else means the states drifted apart again.
         var shell = new SD.Bitmap(Path.Combine(outDir, "editor-after-primary-shell.png"));
+        var at125 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-125pct.png"));
         var at150 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-150pct.png"));
         var at200 = new SD.Bitmap(Path.Combine(outDir, "editor-after-shell-200pct.png"));
         using (shell)
+        using (at125)
         using (at150)
         using (at200)
         {
+            Assert.Equal(Math.Round(shell.Width * 1.25), at125.Width);
             Assert.Equal(Math.Round(shell.Width * 1.5), at150.Width);
             Assert.Equal(shell.Width * 2, at200.Width);
             Assert.Equal(shell.Height * 2, at200.Height);
