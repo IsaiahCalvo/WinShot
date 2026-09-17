@@ -778,9 +778,10 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _lastFollowScreen = _currentScreen; // a full repaint redraws the crosshair at the cursor
     }
 
-    // Half-extents of the regions the idle crosshair/loupe occupy around the cursor.
-    private const int CrosshairBandHalf = 16;  // guide-line band half-width (covers line + shadow + AA)
-    private const int LoupeBoxHalf = 250;       // box that contains the loupe + label in any flip
+    /// <summary>Guide-line band half-width in LOGICAL px: covers the line, its 3x shadow and
+    /// the antialiasing. Scaled per monitor like the pen that draws it — the guide thickens
+    /// with DPI, so a fixed device-pixel band is a band that shrinks relative to its line.</summary>
+    private const int CrosshairBandHalfLogical = 16;
 
     /// <summary>
     /// Invalidates just the crosshair guide bands (full monitor height/width strips at the old
@@ -794,12 +795,39 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             InvalidateFollowAt(newScreen);
     }
 
+    /// <summary>
+    /// The ground the pointer-follow chrome covers at <paramref name="pt"/>, asked of the same
+    /// code that draws it.
+    ///
+    /// This used to be a flat 250-px half-box around the cursor, in logical px and never
+    /// scaled. `1c9b778` then made the loupe grow with the monitor — 120 logical px became 180
+    /// device px at 150 % and 240 at 200 % — while the box that erases it did not, so the
+    /// bottom of the loupe, its whole label pill and its shadow were outside every repaint and
+    /// the old loupe stayed on screen. That is the trail Isaiah saw: the artifacts were the
+    /// loupe's own outer band, left at every position the pointer had passed through.
+    /// Everything here now comes from the renderers' own geometry at the monitor's own scale.
+    /// </summary>
     private void InvalidateFollowAt(SD.Point pt)
     {
         SD.Rectangle mon = MonitorBoundsAt(pt);
-        InvalidateScreenRect(new SD.Rectangle(pt.X - CrosshairBandHalf, mon.Top, CrosshairBandHalf * 2, mon.Height));
-        InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - CrosshairBandHalf, mon.Width, CrosshairBandHalf * 2));
-        InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
+        double scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(mon);
+        int band = WinShot.Recording.RecordingMonitorDpi.Px(CrosshairBandHalfLogical, scale);
+        InvalidateScreenRect(new SD.Rectangle(pt.X - band, mon.Top, band * 2, mon.Height));
+        InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - band, mon.Width, band * 2));
+
+        // Both readouts, not whichever is showing: the magnifier toggles under `M` and the
+        // repaint has to erase what was on screen a frame ago, not what is on screen now.
+        var local = new SD.Point(pt.X - mon.Left, pt.Y - mon.Top);
+        SD.Rectangle loupe = FastSelectorLoupeRenderer.DirtyRect(mon.Size, _vs, local, pt, scale);
+        if (!loupe.IsEmpty)
+            InvalidateScreenRect(new SD.Rectangle(
+                loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
+
+        SD.Rectangle readout = SelectorChrome.CursorReadoutRect(
+            mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
+        InvalidateScreenRect(new SD.Rectangle(
+            readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
+
         if (_instructionAlpha > 0d && InstructionRectAt(pt) is SD.Rectangle instruction)
             InvalidateScreenRect(instruction);
     }
@@ -1139,9 +1167,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _magnifierOn = !_magnifierOn;
         if (_magnifierOn)
             StartFollowMotion(); // the setting may be off, so the follow tick may not be running
-        SD.Point pt = _currentScreen;
-        InvalidateScreenRect(new SD.Rectangle(
-            pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
+        // The same ground a pointer move dirties: the toggle swaps the loupe for the bare
+        // readout, so whichever was on screen has to be erased at the monitor's own scale.
+        InvalidateFollowAt(_currentScreen);
     }
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
@@ -2836,9 +2864,18 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     private void InvalidateHoverRegion(SD.Rectangle from, SD.Rectangle to)
     {
         var union = SD.Rectangle.Union(from, to);
-        union.Inflate(4, 4); // border pen width + antialiasing
+        double scale = ScaleAt(new SD.Point(union.Left, union.Top));
+        int edge = WinShot.Recording.RecordingMonitorDpi.Px(4, scale); // border pen width + antialiasing
+        union.Inflate(edge, edge);
         InvalidateScreenRect(union);
-        InvalidateScreenRect(new SD.Rectangle(union.Right, union.Bottom, LoupeBoxHalf, 64)); // size label
+        // The size label hanging off the bottom-right corner. Logical px, scaled: the pill's
+        // font and padding grow with the monitor, so a fixed device-pixel box is the same bug
+        // the loupe had — it clips the label's own repaint from 125 % up.
+        InvalidateScreenRect(new SD.Rectangle(
+            union.Right,
+            union.Bottom,
+            WinShot.Recording.RecordingMonitorDpi.Px(250, scale),
+            WinShot.Recording.RecordingMonitorDpi.Px(64, scale)));
     }
 
     /// <summary>Innermost snappable rect under the point. The list is deepest-first, so the

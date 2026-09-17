@@ -685,10 +685,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
     private SD.Point _lastFollowScreen; // last cursor pos the crosshair/loupe were painted at
 
-    // Half-extents of the regions the idle crosshair/loupe occupy around the cursor
-    // (mirrors FastRegionSelectorDialog).
-    private const int CrosshairBandHalf = 16;
-    private const int LoupeBoxHalf = 250;
+    /// <summary>Guide-line band half-width in LOGICAL px (mirrors FastRegionSelectorDialog).
+    /// </summary>
+    private const int CrosshairBandHalfLogical = 16;
 
     /// <summary>Repaints just the crosshair bands + loupe boxes at the old and new cursor
     /// positions, on whichever surfaces they touch — proportional to the chrome, not the
@@ -700,12 +699,27 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             InvalidateFollowAt(newScreen);
     }
 
+    /// <summary>All-In-One draws the same loupe as the region selector and had the same flat
+    /// 250-px half-box erasing it, so it grew the same trail from 125 % up. Same fix: the
+    /// dirty rect comes from the renderers' own geometry at the monitor's own scale.</summary>
     private void InvalidateFollowAt(SD.Point pt)
     {
         SD.Rectangle mon = MonitorBoundsAt(pt);
-        InvalidateScreenRect(new SD.Rectangle(pt.X - CrosshairBandHalf, mon.Top, CrosshairBandHalf * 2, mon.Height));
-        InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - CrosshairBandHalf, mon.Width, CrosshairBandHalf * 2));
-        InvalidateScreenRect(new SD.Rectangle(pt.X - LoupeBoxHalf, pt.Y - LoupeBoxHalf, LoupeBoxHalf * 2, LoupeBoxHalf * 2));
+        double scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(mon);
+        int band = WinShot.Recording.RecordingMonitorDpi.Px(CrosshairBandHalfLogical, scale);
+        InvalidateScreenRect(new SD.Rectangle(pt.X - band, mon.Top, band * 2, mon.Height));
+        InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - band, mon.Width, band * 2));
+
+        var local = new SD.Point(pt.X - mon.Left, pt.Y - mon.Top);
+        SD.Rectangle loupe = FastSelectorLoupeRenderer.DirtyRect(mon.Size, _vs, local, pt, scale);
+        if (!loupe.IsEmpty)
+            InvalidateScreenRect(new SD.Rectangle(
+                loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
+
+        SD.Rectangle readout = SelectorChrome.CursorReadoutRect(
+            mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
+        InvalidateScreenRect(new SD.Rectangle(
+            readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
     }
 
     /// <summary>The DPI factor of the surface a screen point lands on — the handles' dot and
