@@ -200,6 +200,17 @@
          1.5 — the optical sizing rule for a small form — and its stem sits 0.7 right of the
          ring centre on purpose: the eye reads a "1" by its stem, so that is what centred
          looks like. -->
+    <!-- Survey src/Icons.jsx `arrowBothEnds`, verbatim: one shaft with a chevron head at each
+         end, 24-grid, stroke 1.5, round caps and joins. It is the glyph on Survey's "Both
+         ends" toggle (AppShell.jsx:2780) at 16px inside a 28x24 trigger. Not a unicode arrow
+         and not a mirrored copy of SurveyIcon.Arrow: that one is a corner arrow. -->
+    <Viewbox x:Key="SurveyIcon.ArrowBothEnds" x:Shared="False" Width="16" Height="16">
+        <Canvas Width="24" Height="24">
+            <Path Style="{StaticResource SurveyIconStroke}"
+                  Data="M4,12 H20 M9,7 L4,12 L9,17 M15,7 L20,12 L15,17"/>
+        </Canvas>
+    </Viewbox>
+
     <Viewbox x:Key="SurveyIcon.Counter" x:Shared="False" Width="18" Height="18">
         <Canvas Width="24" Height="24">
             <Ellipse Style="{StaticResource SurveyIconStroke}" Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"/>

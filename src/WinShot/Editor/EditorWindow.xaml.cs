@@ -138,6 +138,15 @@ public partial class EditorWindow : Window
     private ArrowStyle _arrowStyle = ArrowStyle.Straight;
     private ArrowheadStyle _arrowhead = ArrowheadStyle.SolidTriangle;
     private ArrowheadStyle _startArrowhead = ArrowheadStyle.None;
+
+    /// <summary>
+    /// Survey's "Both ends" toggle (PDFViewer.jsx:3553): ONE ending picker plus a flag that
+    /// mirrors the picked ending onto the start of the arrow, instead of a second picker.
+    /// Survey persists it to localStorage; WinShot's editor keeps none of its sibling tool
+    /// choices (arrowhead, line style, fill mode) past a session, so this follows the house
+    /// convention and stays a session field.
+    /// </summary>
+    private bool _arrowBothEnds;
     private LineBorderStyle _lineStyle = LineBorderStyle.Solid;
     private ColorWell _colorWell = ColorWell.Stroke;
     private Color _fillColor = Color.FromArgb(0, 255, 255, 255);
@@ -1246,6 +1255,13 @@ public partial class EditorWindow : Window
         FillPanel.Visibility = Visibility.Collapsed;
         OpacityPanel.Visibility = Visibility.Collapsed;
         ArrowStylePanel.Visibility = Show(Has(EditorContextControls.ArrowStyle));
+        // Survey shows "Both ends" on the ARROW tool only — a callout's leader has one end
+        // (AppShell.jsx:2758). The curved arrow is excluded for the same kind of reason, and
+        // it is not cosmetic: its commit path (EditorWindow.Input.cs) carries no start head
+        // and RestyleSelectedArrowhead refuses TypeCurvedArrow, so a toggle there would do
+        // nothing. Same row, same panel, arrow only.
+        if (ArrowBothEndsBtn is not null)
+            ArrowBothEndsBtn.Visibility = Show(chrome == EditorTool.Arrow);
         // Survey portals the rich-text row into the sub-toolbar ONLY while an editor is
         // mounted (AppShell.jsx:1756, bridge cleared on commit/cancel/unmount,
         // TextEditOverlay.jsx:324-330, :400-402, :432).
@@ -1604,6 +1620,8 @@ public partial class EditorWindow : Window
             if (meta.CloudIntensity is double bump)
                 _cloudIntensity = CloudPath.ClampIntensity(bump);
             (_arrowhead, _startArrowhead) = AnnotationStyle.HeadsFrom(meta);
+            _arrowBothEnds = AnnotationStyle.BothEnds(_arrowhead, _startArrowhead);
+            if (ArrowBothEndsBtn is not null) ArrowBothEndsBtn.IsChecked = _arrowBothEnds;
             SelectComboByTag(LineStyleBox, _lineStyle == LineBorderStyle.Cloud ? "cloud" :
                 _lineStyle == LineBorderStyle.Dashed ? "dashed" :
                 _lineStyle == LineBorderStyle.Dotted ? "dotted" : "solid");

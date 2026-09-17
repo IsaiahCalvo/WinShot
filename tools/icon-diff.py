@@ -48,6 +48,7 @@ ICONS = {
     "Ellipse":     "jsx:ellipse",
     "Line":        "jsx:line",
     "Arrow":       "jsx:arrow",
+    "ArrowBothEnds": "jsx:arrowBothEnds",
     "ChevronDown": "jsx:chevronDown",
     "ChevronUp":   "jsx:chevronUp",
     "ChevronLeft": "jsx:chevronLeft",

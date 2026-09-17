@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -691,9 +692,25 @@ public partial class EditorWindow : Window
         else
         {
             _arrowhead = AnnotationStyle.ParseArrowhead(tag, out _);
-            _startArrowhead = ArrowheadStyle.None;
+            // Survey: with "Both ends" on, a newly picked ending goes on the START as well
+            // (PDFViewer.jsx:8158). With it off only the end changes.
+            _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
             _arrowStyle = ArrowStyle.Straight;
         }
+        if (IsLoaded) RestyleSelectedArrowhead();
+    }
+
+    /// <summary>
+    /// Survey's "Both ends" toggle (PDFViewer.jsx:8163-8174). It mirrors the CURRENT ending
+    /// onto the start of new arrows and, when one is selected, restyles it in the same single
+    /// undoable step every other style control uses — turning the toggle off puts the start
+    /// ending back to None.
+    /// </summary>
+    private void OnArrowBothEndsClick(object sender, RoutedEventArgs e)
+    {
+        if (_syncingContext) return;
+        _arrowBothEnds = sender is ToggleButton { IsChecked: true };
+        _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
         if (IsLoaded) RestyleSelectedArrowhead();
     }
 

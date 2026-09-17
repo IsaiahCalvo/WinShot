@@ -536,6 +536,21 @@
                                                             <ComboBoxItem Content="Fancy" Tag="Fancy"/>
                                                             <ComboBoxItem Content="Curved" Tag="Curved"/>
                                                         </ComboBox>
+                                                        <!-- Survey's "Both ends" toggle (AppShell.jsx:2747-2782): one ending picker
+                                                             plus a toggle that MIRRORS the picked ending onto the start, rather than
+                                                             a second picker — double-headed arrows are common, mismatched ends are
+                                                             rare, and the row stays compact. Arrow tool only; a callout leader has
+                                                             one end. Survey's trigger is 28x24 immediately right of the arrowhead
+                                                             dropdown; WinShot uses its own 28x28 SurveyIconToggle so this button is
+                                                             the same object as the fill toggles two panels over — Survey's mechanic
+                                                             and position, WinShot's material. -->
+                                                        <ToggleButton x:Name="ArrowBothEndsBtn" Style="{StaticResource SurveyIconToggle}"
+                                                                      Content="{StaticResource SurveyIcon.ArrowBothEnds}"
+                                                                      Margin="6,0,0,0"
+                                                                      Click="OnArrowBothEndsClick"
+                                                                      ToolTip="Put the arrowhead on both ends"
+                                                                      AutomationProperties.Name="Arrowhead on both ends"
+                                                                      AutomationProperties.HelpText="Mirror the chosen arrowhead onto the start of the arrow."/>
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="LineStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
