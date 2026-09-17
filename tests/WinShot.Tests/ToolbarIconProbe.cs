@@ -442,6 +442,30 @@ public class ToolbarIconProbe
                 if (editor.FindName("EditorGroupBar") is FrameworkElement bar
                     && bar.ActualWidth > 0 && bar.Visibility == Visibility.Visible)
                     strips.Add(Shot(bar, dpi));
+
+                // And the group's own panel, by name — clicking the group button is not
+                // proof the panel it owns became visible, and a sub-row that never showed
+                // is a sub-row whose glyphs were never looked at. This is how the Image
+                // group's buttons went unexamined for a whole round.
+                string panel = btnName.Replace("GroupBtn", "GroupPanel").Replace("ShapeGroup", "ShapeGroup");
+                var fep = editor.FindName(panel) as FrameworkElement;
+                diag.AppendLine($"{dpi} {panel}: found={fep is not null} vis={fep?.Visibility} " +
+                                $"size={fep?.ActualWidth ?? -1}x{fep?.ActualHeight ?? -1}");
+                if (fep is not null)
+                {
+                    // Force it visible if the click did not open it. This probe is about what
+                    // the GLYPHS look like; whether a group chip opens its row is mechanics
+                    // someone else owns, and "I could not open it" is not a reason to ship a
+                    // row of icons nobody has ever looked at. The diag line above records the
+                    // real visibility, so forcing it here cannot hide a mechanics bug.
+                    var was = fep.Visibility;
+                    fep.Visibility = Visibility.Visible;
+                    Pump(2);
+                    if (fep.ActualWidth > 0 && fep.ActualHeight > 0)
+                        Write(Shot(fep, dpi), Path.Combine(outDir, $"subrow-{panel}-{dpi}.png"));
+                    fep.Visibility = was;
+                    Pump(1);
+                }
             }
 
             foreach (string name in new[] { "ZoomRail", "EditorBottomBar" })
