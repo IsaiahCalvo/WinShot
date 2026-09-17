@@ -48,11 +48,13 @@ internal static class CloudPath
         Math.Min(80, 14 * ClampIntensity(intensity));
 
     /// <param name="strokeWidth">
-    /// Accepted for call-site compatibility and ignored, see <see cref="ScallopSize"/>.
+    /// Half of it is part of the inset — the pen straddles the crown centreline, so the ink
+    /// reaches half a stroke further out than the geometry. See <see cref="FitInside"/>.
+    /// It is still NOT part of the scallop SIZE, see <see cref="ScallopSize"/>.
     /// </param>
     public static PathGeometry ForRectangle(Rect bounds, double intensity = DefaultIntensity,
         double strokeWidth = 1) =>
-        For(CloudKind.Rectangle, Corners(bounds), intensity);
+        For(CloudKind.Rectangle, Corners(FitInside(CloudKind.Rectangle, bounds, intensity, strokeWidth)), intensity);
 
     /// <summary>
     /// The engine reads an ellipse cloud straight off the bounding box of the points it is
@@ -60,7 +62,48 @@ internal static class CloudPath
     /// </summary>
     public static PathGeometry ForEllipse(Rect bounds, double intensity = DefaultIntensity,
         double strokeWidth = 1) =>
-        For(CloudKind.Ellipse, Corners(bounds), intensity);
+        For(CloudKind.Ellipse, Corners(FitInside(CloudKind.Ellipse, bounds, intensity, strokeWidth)), intensity);
+
+    /// <summary>
+    /// <c>bounds</c> is the box the PAINTED cloud has to fit in, so the ring of points the
+    /// crowns are built from is pulled in from it — by the crowns' measured reach past that
+    /// ring, plus half the pen, which straddles the crown centreline.
+    /// <para>Without this the crowns are simply cut off. Every caller hands the cloud to a
+    /// <see cref="System.Windows.Shapes.Path"/> that carries an explicit Width/Height
+    /// (<c>ResizeBoxShape</c> rebuilds the geometry from those on every resize, so they are
+    /// load-bearing, and <c>AnnotationTransform.LocalBounds</c> reads them for the handles).
+    /// WPF gives a <see cref="Stretch.None"/> Shape a LAYOUT CLIP at that slot, so anything
+    /// drawn outside (0,0,W,H) is chopped — measured, a 320x180 bump-2 cloud painted exactly
+    /// its 320x180 slot while its geometry spanned 345.7x205.7, i.e. the crowns rendered as
+    /// flat-topped triangles.</para>
+    /// <para>Scaling the finished cloud into the slot instead (<see cref="Stretch.Fill"/>) is
+    /// the reflex and it is wrong twice over: Survey keeps scale baked into the coordinates
+    /// and never applies a scale() transform because that squashes the scallops
+    /// (cloudAnnotationGeometry.js:10-18), and a non-uniform one (sx=0.926, sy=0.875 on this
+    /// box) would make the same Bump draw a different crown on every aspect ratio, which is
+    /// the width-dependent-scallop bug <see cref="ScallopSize"/> exists to prevent.</para>
+    /// </summary>
+    private static Rect FitInside(CloudKind kind, Rect b, double intensity, double strokeWidth)
+    {
+        if (b.Width <= 0 || b.Height <= 0) return b;
+        // Measure the bulge, don't predict it. How far a crown reaches past the ring it grew
+        // from is the engine's business (and half a scallop is only roughly right — at Bump 2
+        // it is 12.9, not 14), so build once on the box and read the overhang off the result.
+        // The reach is a property of the scallop size, which does not depend on the box, so
+        // one pass lands flush; only a box small enough for the engine's own rectangle-fit to
+        // shrink the crowns needs the clamp below.
+        Rect reach = For(kind, Corners(b), intensity).Bounds;
+        double bulge = reach.IsEmpty ? 0 : Math.Max(
+            Math.Max(b.Left - reach.Left, reach.Right - b.Right),
+            Math.Max(b.Top - reach.Top, reach.Bottom - b.Bottom));
+        double inset = Math.Max(0, bulge) + Math.Max(0, strokeWidth) / 2;
+        // ponytail: a big Bump on a small box would invert the rect. Clamp to leave a ring at
+        // least 1 unit across and let those crowns spill instead — a clipped cloud still reads
+        // as a cloud, an inside-out one is nothing at all.
+        double max = Math.Min(b.Width, b.Height) / 2 - 0.5;
+        inset = Math.Max(0, Math.Min(inset, max));
+        return Rect.Inflate(b, -inset, -inset);
+    }
 
     private static Point[] Corners(Rect b) => [b.TopLeft, b.TopRight, b.BottomRight, b.BottomLeft];
 

@@ -30,9 +30,14 @@ public class CloudPathTests
         });
         Assert.Equal(FillRule.Nonzero, g.FillRule);
 
-        // The fill reaches the crown apexes, past the box the cloud was built from.
-        Assert.True(g.Bounds.Left < 10 && g.Bounds.Top < 20);
-        Assert.True(g.Bounds.Right > 130 && g.Bounds.Bottom > 100);
+        // `bounds` is the box the PAINTED cloud fits in, not the ring the crowns grow out of:
+        // the ring is inset by half a scallop plus half the pen so WPF's layout clip on the
+        // Path's Width/Height slot has nothing to chop. Crowns still bulge past their own
+        // ring — they just do it inside the box now.
+        Assert.True(g.Bounds.Left >= 10 && g.Bounds.Top >= 20,
+            $"crowns escape the box top-left: {g.Bounds}");
+        Assert.True(g.Bounds.Right <= 130 && g.Bounds.Bottom <= 100,
+            $"crowns escape the box bottom-right: {g.Bounds}");
     }
 
     [Fact]
