@@ -27,9 +27,26 @@
         </Grid.ColumnDefinitions>
 
         <!-- Survey's top chrome is a full-bleed FLAT strip, not a floating pill:
-             background #181c24, padding 8px 12px, no radius, no border, no
-             shadow, no margin, butting straight onto the 34px sub-row below
-             (AppShell.jsx:1337-1355). -->
+             background #181c24, padding 8px 12px, no radius, no shadow, no margin.
+             and no bottom border either — measured on the running app 2026-09-17, not
+             assumed: its strip is 1400x44 at #181c24 with border-bottom 0px, and the
+             48px rail below it (#12151c, border-left 1px #2a3140, no top border) runs
+             its left rule straight up into that strip with nothing to meet.
+
+             WinShot DELIBERATELY DIVERGES here. Isaiah, 2026-09-17: "The right rail dies
+             into the top toolbar because the top toolbar has no bottom border... same
+             hairline, same token (Border), consistent at every DPI." Chrome materials are
+             WinShot's side of the Survey line — Survey wins mechanics, features and icons;
+             WinShot wins palette, materials and type — so this is the rule working, not a
+             port error. Do not "restore" it to Survey's borderless strip.
+
+             All three chrome edges are now the one hairline in the one token: this bottom
+             rule, the rail's left rule, and the bottom bar's top rule (EditorBottomBar,
+             BorderThickness 0,1,0,0). Border is #1FFFFFFF, a 12%-white WASH, so the three
+             paint to different values over their own surfaces by design — EditorChromeJoinTests
+             scans the rendered pixels and checks each against that token composited over its
+             own background, at 96/144/192 DPI. The 34px group bar overlays the canvas lower
+             down and carries its own bottom rule, so nothing doubles. -->
         <Border x:Name="TopToolbar" Grid.Row="0" Grid.ColumnSpan="2" Margin="0" Padding="12,8" CornerRadius="0"
                 BorderThickness="0" Background="{StaticResource ChromeBgBrush}"
                 TextElement.Foreground="{StaticResource ChromeTextBrush}"
@@ -114,19 +131,19 @@
                                 Click="OnDrawGroupClick" Tag="Draw" ToolTip="Draw"
                                 AutomationProperties.Name="Draw"
                                 AutomationProperties.HelpText="Pen, highlighter, and eraser. Shortcut P or H."
-                                Content="{StaticResource SurveyIcon.Pen}"/>
+                                Content="{StaticResource SurveyIcon.DrawGroup}"/>
 
                         <Button x:Name="ShapeGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnShapeGroupClick" Tag="Shapes" ToolTip="Shapes"
                                 AutomationProperties.Name="Shapes"
                                 AutomationProperties.HelpText="Rectangle, ellipse, line, arrow, and counter."
-                                Content="{StaticResource SurveyIcon.Rect}"/>
+                                Content="{StaticResource SurveyIcon.Shapes}"/>
 
                         <Button x:Name="TextGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnTextGroupClick" Tag="Text" ToolTip="Text"
                                 AutomationProperties.Name="Text"
                                 AutomationProperties.HelpText="Text box and callout."
-                                Content="{StaticResource SurveyIcon.Text}"/>
+                                Content="{StaticResource SurveyIcon.TextGroup}"/>
 
                         <Button x:Name="EffectsGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnEffectsGroupClick" Tag="Effects" ToolTip="Effects"
@@ -1106,7 +1123,7 @@
                                      Tag="Text" Checked="OnToolChecked" ToolTip="Text"
                                      AutomationProperties.Name="Text"
                                      AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
-                                     Content="{StaticResource SurveyIcon.Text}"/>
+                                     Content="{StaticResource SurveyIcon.TextBox}"/>
                         <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Callout" Checked="OnToolChecked" ToolTip="Callout"
                                      AutomationProperties.Name="Callout"
