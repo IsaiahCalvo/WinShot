@@ -89,32 +89,31 @@
                         <Button x:Name="BtnUndo" Style="{StaticResource SurveyDefaultButton}"
                                 ToolTip="Undo" Click="OnUndo" IsEnabled="False"
                                 AutomationProperties.Name="Undo" AutomationProperties.HelpText="Undo the last action. Shortcut Ctrl+Z.">
-                            <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Undo}"/></Viewbox>
+                            <ContentControl Content="{StaticResource SurveyIcon.Undo}"/>
                         </Button>
                         <Button x:Name="BtnRedo" Style="{StaticResource SurveyDefaultButton}"
                                 ToolTip="Redo" Click="OnRedo" IsEnabled="False"
                                 AutomationProperties.Name="Redo" AutomationProperties.HelpText="Redo the last action. Shortcut Ctrl+Y.">
-                            <Viewbox Width="14" Height="14"><ContentControl Content="{StaticResource SurveyIcon.Redo}"/></Viewbox>
+                            <ContentControl Content="{StaticResource SurveyIcon.Redo}"/>
                         </Button>
                         <Rectangle Style="{StaticResource ToolbarDivider}"/>
-                        <!-- 20, not the resource's own 18. Crop is one of the two glyphs in
-                             this toolbar Survey has no counterpart for, and at 18 its house
-                             1.5-unit stroke painted 1.125 px — the lightest thing in the row,
-                             against Rotate's 1.5 px right beside it. At 20 it paints 1.25 px,
-                             which is Pan's weight exactly and inside the band the five
-                             Survey-ported glyphs occupy. Same trick Survey uses: hold the
-                             stroke, move the host size. -->
+                        <!-- No host-size nudge. The dictionary holds one weight now, so every
+                             glyph in this row is drawn at the family's own 18 px and paints the
+                             same 1.25 px line. Undo and Redo used to be hosted at 14 and Crop at
+                             20, each to fake a matching stroke against the glyph beside it — and
+                             the sizes then did not match, so Undo's arrow read two thirds the
+                             size of Crop's frame in the same row. -->
                         <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}"
                                 Click="OnCropClick" ToolTip="Crop"
                                 AutomationProperties.Name="Crop and resize"
                                 AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C.">
-                            <Viewbox Width="20" Height="20"><ContentControl Content="{StaticResource SurveyIcon.Crop}"/></Viewbox>
+                            <ContentControl Content="{StaticResource SurveyIcon.Crop}"/>
                         </Button>
                         <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}"
                                 ToolTip="Rotate 90° clockwise" Click="OnRotateCw"
                                 AutomationProperties.Name="Rotate clockwise"
                                 AutomationProperties.HelpText="Rotate the source image 90 degrees clockwise.">
-                            <Viewbox Width="18" Height="18"><ContentControl Content="{StaticResource SurveyIcon.Rotate}"/></Viewbox>
+                            <ContentControl Content="{StaticResource SurveyIcon.Rotate}"/>
                         </Button>
                         <!-- Survey's "more" overflow is gone. Everything it held now has a
                              visible home: rotate/flip/image size on the crop bar, add image,
@@ -141,12 +140,13 @@
                                      AutomationProperties.Name="Pan"
                                      AutomationProperties.HelpText="Drag to move the view. Middle-drag or hold Space works with any tool."
                                      Content="{StaticResource SurveyIcon.Pan}"/>
-                        <!-- FontSize is the glyph size (see SurveyIconToggle). 22, not the
-                             style's 20: live Survey renders the select cursor's mask span at
-                             22x22 where Pan's is 20x20 — a pointed glyph reads smaller than a
-                             blunt one, so it is drawn bigger to look the same size. -->
+                        <!-- FontSize is the glyph size (see SurveyIconToggle), and it scales the
+                             stroke with it. Select used to be hosted at 22 against Pan's 20 on the
+                             grounds that a pointed glyph reads small — but the cursor's ink already
+                             measured wider AND taller than the hand's, so the nudge made a heavier
+                             line next to a lighter one for nothing. Both are the style's size. -->
                         <RadioButton x:Name="SelectToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
-                                     Tag="Select" Checked="OnToolChecked" IsChecked="True" FontSize="22"
+                                     Tag="Select" Checked="OnToolChecked" IsChecked="True"
                                      ToolTip="Select" AutomationProperties.Name="Select"
                                      AutomationProperties.HelpText="Select annotations, drag a marquee, move, resize, or delete. Shortcut V."
                                      Content="{StaticResource SurveyIcon.Cursor}"/>
@@ -371,7 +371,7 @@
                                                                          button out from under the pointer; the row it creates eases in. -->
                                                                     <DockPanel Margin="0,12,0,0" LastChildFill="True">
                                                                         <Button x:Name="SaveColorBtn" DockPanel.Dock="Right" VerticalAlignment="Bottom"
-                                                                                Style="{StaticResource CompactToolIconButton}" Content="&#xE710;" Click="OnSaveColor"
+                                                                                Style="{StaticResource CompactToolIconButton}" Content="{StaticResource SurveyIcon.Plus}" Click="OnSaveColor"
                                                                                 ToolTip="Save this color" AutomationProperties.Name="Save color"
                                                                                 AutomationProperties.HelpText="Keep the current color in My colors."/>
                                                                         <StackPanel x:Name="SavedColorsSection" Visibility="Collapsed">
@@ -1290,7 +1290,7 @@
                                 Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                 AutomationProperties.Name="Add screenshot or image"
                                 AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
-                        <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE722;"
+                        <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddCapture}"
                                 Click="OnAddCapture" ToolTip="Add capture…"
                                 AutomationProperties.Name="Add capture"
                                 AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
@@ -1298,13 +1298,13 @@
                                 Click="OnAddBackground" ToolTip="Add background (B)"
                                 AutomationProperties.Name="Add background"
                                 AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>
-                        <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE8E9;"
+                        <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.ExtractText}"
                                 Click="OnExtractText" ToolTip="Extract text"
                                 AutomationProperties.Name="Extract text"
                                 AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
                         <!-- Appears only once there is an added image to flip between. A
                              before/after GIF of one frame is a PNG. -->
-                        <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="&#xE786;"
+                        <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Gif}"
                                 Click="OnExportGif" ToolTip="Export before/after GIF…"
                                 Visibility="Collapsed"
                                 AutomationProperties.Name="Export before and after GIF"
@@ -1357,13 +1357,13 @@
                 </Button>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <Button x:Name="BtnPin" Style="{StaticResource CompactToolIconButton}" Content="&#xE718;" ToolTip="Pin to screen"
+                    <Button x:Name="BtnPin" Style="{StaticResource CompactToolIconButton}" Content="{StaticResource SurveyIcon.Pin}" ToolTip="Pin to screen"
                             Click="OnPin" AutomationProperties.Name="Pin to screen"
                             AutomationProperties.HelpText="Open the edited image in a local always-on-top pin window."/>
-                    <Button x:Name="BtnCopy" Style="{StaticResource CompactToolIconButton}" Content="&#xE8C8;"
+                    <Button x:Name="BtnCopy" Style="{StaticResource CompactToolIconButton}" Content="{StaticResource SurveyIcon.Copy}"
                             ToolTip="Copy to clipboard (Ctrl+C)" Click="OnCopy" AutomationProperties.Name="Copy"
                             AutomationProperties.HelpText="Copy the source-resolution edited image. Shortcut Ctrl+C."/>
-                    <Button x:Name="BtnCenter" Style="{StaticResource CompactToolIconButton}" Content="&#xE9A6;"
+                    <Button x:Name="BtnCenter" Style="{StaticResource CompactToolIconButton}" Content="{StaticResource SurveyIcon.FitScreen}"
                             ToolTip="Fit &amp; center (Ctrl+0)" Click="OnCenterView" AutomationProperties.Name="Fit and center"
                             AutomationProperties.HelpText="Fit and center the whole image. Shortcut Ctrl+0."/>
                 </StackPanel>
