@@ -155,9 +155,26 @@ internal static class AnnotationTransform
         return new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
     }
 
-    /// <summary>The element's bounds in its OWN coordinates — before any render transform.</summary>
+    /// <summary>
+    /// The element's bounds in its OWN coordinates — before any render transform.
+    /// <para>A box-shaped annotation states its geometry as a layout slot: <c>CreateBoxShape</c>
+    /// and <c>ResizeBoxShape</c> write Canvas.Left/Top plus Width/Height, and that box IS the
+    /// rect the user dragged out. Take it verbatim when it is there. Falling back to
+    /// <see cref="VisualTreeHelper.GetDescendantBounds"/> for one measures the INK instead —
+    /// the geometry widened by half the stroke, plus whatever the path bulges past its box —
+    /// so every handle, the dashed frame and the rotation pivot drift outward by an amount
+    /// that GROWS with line width. It is only ever right by accident: WPF's Rectangle/Ellipse
+    /// happen to inset their geometry by the same half-stroke, so the two agree there and
+    /// nowhere else. A revision-cloud rectangle, whose crown bulges half a bump past the box,
+    /// put its handles 18 DIP off the shape at a 12 px border.</para>
+    /// <para>Marks with no slot of their own — line, arrow, ink, outline text — have no
+    /// authored box to read, so the ink box stays their answer.</para>
+    /// </summary>
     public static Rect LocalBounds(FrameworkElement element)
     {
+        // NaN (auto-sized) fails both comparisons, which is exactly the fallback case.
+        if (element.Width > 0 && element.Height > 0)
+            return new Rect(0, 0, element.Width, element.Height);
         Rect b = VisualTreeHelper.GetDescendantBounds(element);
         if (b.IsEmpty) b = new Rect(element.RenderSize);
         return b;

@@ -155,10 +155,9 @@ public partial class EditorWindow : Window
     /// </summary>
     private static (Rect Frame, Point Body, double Angle) CounterBboxFrame(FrameworkElement fe, AnnotationData meta)
     {
-        // The badge Grid is 3r square (TipDistance(r) * 2) with the bubble at its centre. Take
-        // that size from the Grid itself: UnrotatedCanvasBounds is GetDescendantBounds, i.e.
-        // the PIN's ink box — only ~2.06r wide AND off-centre, because the nub sticks out on
-        // one side. Measuring the frame with it shrinks it and slides it off the bubble.
+        // The badge Grid is 3r square (TipDistance(r) * 2) with the bubble at its centre, which
+        // is exactly what UnrotatedCanvasBounds now reports for it — but read the Grid direct
+        // anyway, since this frame's whole job is to be that canonical box.
         double size = fe.Width;
         if (double.IsNaN(size) || size <= 0) size = UnrotatedCanvasBounds(fe).Width;
         double r = size / 3;
