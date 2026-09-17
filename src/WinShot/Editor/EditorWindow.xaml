@@ -48,7 +48,8 @@
              own background, at 96/144/192 DPI. The 34px group bar overlays the canvas lower
              down and carries its own bottom rule, so nothing doubles. -->
         <Border x:Name="TopToolbar" Grid.Row="0" Grid.ColumnSpan="2" Margin="0" Padding="12,8" CornerRadius="0"
-                BorderThickness="0" Background="{StaticResource ChromeBgBrush}"
+                BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
+                Background="{StaticResource ChromeBgBrush}"
                 TextElement.Foreground="{StaticResource ChromeTextBrush}"
                 SnapsToDevicePixels="True">
             <StackPanel>
