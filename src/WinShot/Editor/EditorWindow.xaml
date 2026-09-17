@@ -1294,12 +1294,14 @@
                                 </Viewbox>
                             </Grid>
                         </Button>
+                        <!-- Custom placement, not Left: Survey aligns this menu's BOTTOM with
+                             the trigger's bottom and Left aligns tops. See PlaceFitMenu. -->
                         <Popup x:Name="FitMenuPopup" PlacementTarget="{Binding ElementName=FitMenuBtn}"
-                               Placement="Left" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                               Placement="Custom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                             <!-- AppShell.jsx:2984-2999: rgb(30,30,30) on 1px #2a3140,
                                  radius 2, 0 10px 24px rgba(0,0,0,0.45), padding 2. -->
                             <Border Background="{StaticResource ChromePopoverBrush}" BorderBrush="{StaticResource ChromeHairlineBrush}"
-                                    BorderThickness="1" CornerRadius="2" Padding="2" Margin="30,0,6,30"
+                                    BorderThickness="1" CornerRadius="2" Padding="2" Margin="0"
                                     MinWidth="140">
                                 <Border.Effect>
                                     <DropShadowEffect BlurRadius="24" ShadowDepth="10" Direction="270" Opacity="0.45"/>

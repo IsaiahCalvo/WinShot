@@ -719,7 +719,36 @@ public partial class EditorWindow : Window
 
     private void OnZoomOut(object sender, RoutedEventArgs e) => ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor);
 
-    private void OnFitMenuClick(object sender, RoutedEventArgs e) => FitMenuPopup.IsOpen = !FitMenuPopup.IsOpen;
+    private void OnFitMenuClick(object sender, RoutedEventArgs e)
+    {
+        FitMenuPopup.CustomPopupPlacementCallback ??= PlaceFitMenu;
+        FitMenuPopup.IsOpen = !FitMenuPopup.IsOpen;
+    }
+
+    /// <summary>
+    /// Survey's collapsed rail opens the fit menu with
+    /// <c>{ right: '100%', bottom: 0, marginRight: '6px' }</c> (AppShell.jsx:3236): it flies
+    /// out LEFT over the page, its right edge against the trigger's left edge with a 6px gap,
+    /// and its BOTTOM edge level with the trigger's bottom. WPF's PlacementMode.Left gets the
+    /// horizontal edge right but aligns TOPS, which for a 3-row menu hanging off a 28 DIP
+    /// button at the very bottom of the rail put the list ~62 DIP too low and left WPF to
+    /// flip it back on screen — so where it landed depended on the window height. A custom
+    /// placement says the thing Survey says instead of approximating it with a margin.
+    /// </summary>
+    private static CustomPopupPlacement[] PlaceFitMenu(Size popup, Size target, Point offset) =>
+        new[]
+        {
+            new CustomPopupPlacement(
+                new Point(-FitMenuGap - popup.Width, target.Height - popup.Height),
+                PopupPrimaryAxis.Horizontal),
+            // If there is no room to the left, mirror to the right rather than let WPF
+            // slide the menu somewhere neither edge lines up with anything.
+            new CustomPopupPlacement(
+                new Point(target.Width + FitMenuGap, target.Height - popup.Height),
+                PopupPrimaryAxis.Horizontal),
+        };
+
+    private const double FitMenuGap = 6;
 
     private void OnFitPage(object sender, RoutedEventArgs e)
     {

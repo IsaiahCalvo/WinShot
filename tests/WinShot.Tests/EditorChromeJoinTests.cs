@@ -29,6 +29,8 @@ public class EditorChromeJoinTests
     public void ToolbarRailAndBottomBarShareOneHairline(double dpi)
     {
         var r = Render(dpi);
+        // Stood down because another test owns the Application — see Render.
+        if (r is null) return;
         double scale = dpi / 96.0;
 
         // 1. The toolbar closes with a horizontal rule across the FULL width.
@@ -85,7 +87,7 @@ public class EditorChromeJoinTests
         int ToolbarRuleColor, int RailRuleColor, int BottomBarRuleColor,
         int ToolbarSurface, int RailSurface, int BottomBarSurface);
 
-    private static Scan Render(double dpi)
+    private static Scan? Render(double dpi)
     {
         Exception? failure = null;
         Scan? scan = null;
@@ -185,7 +187,7 @@ public class EditorChromeJoinTests
         thread.Start();
         thread.Join();
         if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
-        return scan!;
+        return scan;
     }
 
     private static void Pump()

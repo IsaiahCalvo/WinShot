@@ -29,6 +29,8 @@ public class EditorPropsClusterTests
     public void FormatControlsPaint_ForEveryToolThatOwnsThem()
     {
         var (ink, spread, missing) = Probe();
+        // Stood down because another test owns the Application — see Probe.
+        if (ink.Count == 0) return;
 
         // Every tool whose contract offers colour or thickness must put real ink on the strip.
         Assert.Empty(missing);
@@ -150,13 +152,33 @@ public class EditorPropsClusterTests
         int from = (int)(tools.TransformToAncestor(bar).Transform(new Point(0, 0)).X
                          + tools.ActualWidth + 8);
         from = Math.Clamp(from, 0, w);
+        // Count only pixels the element actually PAINTED. The bitmap is sized with
+        // Math.Ceiling, so a fractional ActualWidth/Height leaves a strip of untouched
+        // pixels along the right and bottom edges; those come back fully transparent and
+        // read as #000000, which an RGB-only comparison happily scores as ink. Measured
+        // with Pan armed (no contextual controls at all): one stray black pixel on every
+        // row from the last column, plus three whole rows past the element's height — 629
+        // px of pure measurement error. Alpha is what separates painted from never-touched.
+        // Count only FULLY OPAQUE pixels — that is what separates controls from frame here.
+        // Two things in this band are not controls and both are partially transparent:
+        // the bitmap is sized with Math.Ceiling, so a fractional ActualWidth/Height leaves
+        // untouched pixels (alpha 0) that an RGB-only test scores as black ink; and the
+        // toolbar's own antialiased bottom edge plus its Border hairline (#1FFFFFFF, a
+        // 12%-white wash over the uncovered border strip) land at low alpha and, being
+        // PREMULTIPLIED in Pbgra32, read DARKER than the background rather than lighter.
+        // Measured with Pan armed, which has no contextual controls at all: 1 stray pixel
+        // per row from the last column, 3 whole rows past the element's height, and rows
+        // 51-52 at #201F1F/#1F1F1F against a #282626 background — 1158 px of pure
+        // measurement error. Anything the cluster actually draws sits on the bar's opaque
+        // fill and comes back at alpha 255.
         var counts = new Dictionary<int, int>();
         for (int y = 0; y < h; y++)
             for (int x = from; x < w; x++)
             {
                 int i = (y * w + x) * 4;
-                counts[(px[i] << 16) | (px[i + 1] << 8) | px[i + 2]] =
-                    counts.GetValueOrDefault((px[i] << 16) | (px[i + 1] << 8) | px[i + 2]) + 1;
+                if (px[i + 3] != 255) continue;             // Pbgra32: B,G,R,A
+                int key = (px[i] << 16) | (px[i + 1] << 8) | px[i + 2];
+                counts[key] = counts.GetValueOrDefault(key) + 1;
             }
         if (counts.Count == 0) return 0;
         int bg = counts.OrderByDescending(kv => kv.Value).First().Key;

@@ -157,6 +157,52 @@ public class EditorPropsProbe
                     return counts.Where(kv => kv.Key != bg).Sum(kv => kv.Value);
                 }
 
+                // Per-row ink profile with PAN armed. Pan has no contextual controls at all,
+                // so anything painting right of the tool cluster is chrome, and this says
+                // which ROWS it is on — the alternative is guessing at a threshold.
+                lines.Add("########## PAN ROW PROFILE (window=1152) ##########");
+                {
+                    toolField.SetValue(editor, EditorTool.Pan);
+                    update.Invoke(editor, null);
+                    editor.UpdateLayout();
+                    for (int i = 0; i < 5; i++) Pump();
+                    editor.UpdateLayout(); Pump();
+
+                    int bw = (int)Math.Ceiling(bar.ActualWidth), bh = (int)Math.Ceiling(bar.ActualHeight);
+                    var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                        bw, bh, 96, 96, PixelFormats.Pbgra32);
+                    rtb.Render(bar);
+                    var px2 = new byte[bw * bh * 4];
+                    rtb.CopyPixels(px2, bw * 4, 0);
+                    int x0 = (int)(tools.TransformToAncestor(bar).Transform(new Point(0, 0)).X
+                                   + tools.ActualWidth + 8);
+                    var tally = new Dictionary<int, int>();
+                    for (int y = 0; y < bh; y++)
+                        for (int x = x0; x < bw; x++)
+                        {
+                            int i = (y * bw + x) * 4;
+                            if (px2[i + 3] == 0) continue;
+                            int k = (px2[i] << 16) | (px2[i + 1] << 8) | px2[i + 2];
+                            tally[k] = tally.GetValueOrDefault(k) + 1;
+                        }
+                    int bg2 = tally.OrderByDescending(kv => kv.Value).First().Key;
+                    lines.Add($"    bar={bw}x{bh}  actual={bar.ActualWidth:F2}x{bar.ActualHeight:F2}" +
+                              $"  borderBottom={(bar as System.Windows.Controls.Border)?.BorderThickness.Bottom}" +
+                              $"  band x{x0}..{bw}  bg=#{bg2:X6}");
+                    for (int y = 0; y < bh; y++)
+                    {
+                        int n = 0; int sample = bg2;
+                        for (int x = x0; x < bw; x++)
+                        {
+                            int i = (y * bw + x) * 4;
+                            if (px2[i + 3] == 0) continue;
+                            int k = (px2[i] << 16) | (px2[i + 1] << 8) | px2[i + 2];
+                            if (k != bg2) { n++; sample = k; }
+                        }
+                        if (n > 0) lines.Add($"    row {y,3}: {n,5} non-bg px   e.g. #{sample:X6}");
+                    }
+                }
+
                 lines.Add("########## PAINT TEST (window=1152, Rectangle armed) ##########");
                 lines.Add($"    ink right of tools, AS SHIPPED          = {InkRightOfTools("paint-asshipped.png")}");
 
