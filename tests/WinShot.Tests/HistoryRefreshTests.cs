@@ -100,7 +100,8 @@ public class HistoryRefreshTests
         Assert.Equal(Visibility.Visible, item.MissingThumbnailVisibility);
         Assert.Equal(Visibility.Collapsed, item.ShimmerVisibility);
         Assert.Equal(Visibility.Visible, item.UnreadableVisibility);
-        Assert.Equal("\uE7BA", item.PlaceholderGlyph);
+        // A resource key now, not a Segoe MDL2 code point: the mark is drawn.
+        Assert.Equal(HistoryItem.UnreadableGlyph, item.PlaceholderGlyph);
     }
 
     /// <summary>And a decode that worked shows no failure mark, tried or not.</summary>

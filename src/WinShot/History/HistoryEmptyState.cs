@@ -6,6 +6,7 @@
 /// save folder on a disconnected drive told you your screenshots did not exist.
 /// </summary>
 internal readonly record struct HistoryEmptyState(
+    /// <summary>The x:Key of the mark in SurveyToolIcons.xaml, not a font code point.</summary>
     string Glyph,
     string Title,
     string Body,
@@ -13,10 +14,12 @@ internal readonly record struct HistoryEmptyState(
     bool ShowRetry,
     bool ShowSettings = false)
 {
-    // Segoe MDL2: picture, warning and lock — the same icon family the rest of the window uses.
-    private const string PictureGlyph = "\uE91B";
-    private const string WarningGlyph = "\uE7BA";
-    private const string BlockedGlyph = "\uE72E";
+    // The keys of three DRAWN marks in SurveyToolIcons.xaml, not three Segoe MDL2 code points.
+    // A typeface glyph beside the window's fifty-odd ported paths is a second icon family inside
+    // one window, and this one is the biggest mark on screen whenever it shows at all.
+    private const string PictureGlyph = "SurveyIcon.Photo";
+    private const string WarningGlyph = "SurveyIcon.Warning";
+    private const string BlockedGlyph = "SurveyIcon.Lock";
 
     /// <summary>
     /// <paramref name="filter"/> is the active chip id ("all", "images", "scrolling", "video",

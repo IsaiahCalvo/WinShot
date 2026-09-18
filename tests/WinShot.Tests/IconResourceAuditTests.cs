@@ -82,15 +82,24 @@ public class IconResourceAuditTests
     /// the same row, with its own stroke weight, corner radius and optical size. That is the
     /// loudest tell a UI was not drawn by one hand, and the bottom bar shipped three of them.
     /// </summary>
+    ///
+    /// Content= was the only half this used to look at, which is why it passed over History and
+    /// Settings for two whole rounds: those two windows typed their twenty-one glyphs into a
+    /// TextBlock's Text=, and a TextBlock drawing an icon is a control drawing an icon. Both
+    /// spellings now, and the app has none of either.
     [Fact]
     public void NoControlAnywhereRendersAFontCodePointAsItsContent()
     {
         var offenders = new List<string>();
         foreach (string f in SourceFiles(RepoRoot()).Where(f => f.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)))
         {
+            // The icon dictionary itself names, in prose, the code points it replaced.
+            if (Path.GetFileName(f).Equals("SurveyToolIcons.xaml", StringComparison.OrdinalIgnoreCase))
+                continue;
             foreach (string tag in File.ReadAllText(f).Split('<'))
             {
-                if (!Regex.IsMatch(tag, @"Content=""&#x[0-9A-Fa-f]{4};""")) continue;
+                if (tag.StartsWith("!--", StringComparison.Ordinal)) continue;
+                if (!Regex.IsMatch(tag, @"(Content|Text)=""&#x[0-9A-Fa-f]{4};""")) continue;
                 string name = Regex.Match(tag, @"x:Name=""([A-Za-z0-9_]+)""") is { Success: true } n
                     ? n.Groups[1].Value : tag.Split('\n')[0].Trim();
                 offenders.Add($"{Path.GetFileName(f)}:{name}");
@@ -161,6 +170,33 @@ public class IconResourceAuditTests
             + "glyph's StrokeThickness so it paints the house weight on its own grid: "
             + string.Join("; ", painted.Where(kv => kv.Value != house)
                                        .Select(kv => $"{kv.Key} -> {kv.Value} px")));
+    }
+
+    /// <summary>
+    /// The C# half of the same rule, for the two windows this round converted. A private-use
+    /// code point handed to a WPF control from code-behind is the same defect the XAML rule
+    /// catches, spelled somewhere that rule cannot see: History kept five of them — three empty
+    /// states and two thumbnail placeholders — as \uE9xx string constants.
+    /// </summary>
+    [Fact]
+    public void NeitherHistoryNorSettingsHandsAControlAPrivateUseCodePoint()
+    {
+        var offenders = new List<string>();
+        foreach (string dir in new[] { "History", "SettingsUi" })
+        foreach (string f in Directory.EnumerateFiles(
+                     Path.Combine(RepoRoot(), "src", "WinShot", dir), "*.cs", SearchOption.AllDirectories))
+        {
+            string text = File.ReadAllText(f);
+            foreach (Match m in Regex.Matches(text, @"\\u(E[0-9A-Fa-f]{3})"))
+                offenders.Add($"{Path.GetFileName(f)}: U+{m.Groups[1].Value}");
+            // And the literal character, which is what a paste from the font viewer leaves.
+            if (text.Any(c => c is >= '\uE000' and <= '\uF8FF'))
+                offenders.Add($"{Path.GetFileName(f)}: a private-use character, pasted literally");
+        }
+
+        Assert.True(offenders.Count == 0,
+            "These name a typeface glyph where they should name a SurveyIcon.* resource key: "
+            + string.Join(", ", offenders));
     }
 
     private static IEnumerable<string> SourceFiles(string repo)
