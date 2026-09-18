@@ -1624,7 +1624,7 @@
         <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="HorizontalAlignment" Value="Left"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Padding" Value="6,4"/>
+        <Setter Property="Padding" Value="2,4,6,4"/>
         <Setter Property="Margin" Value="0,2"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
@@ -1645,9 +1645,15 @@
                                      window that draws a disclosure row. ChevronDown points down,
                                      so closed is -90 and open is 0 — the same quarter turn the
                                      right-pointing glyph made from 0 to 90. -->
+                                <!-- Hosted at the family's own 18: the Viewbox scales the
+                                     1.667-unit stroke with the box, so a 12px host would have
+                                     painted this chevron at 0.83px against everything else's
+                                     1.25. Its ink starts 4.5px inside that box, so the row's
+                                     left padding comes in to match and the lead the eye sees is
+                                     what it was. -->
                                 <ContentControl x:Name="Chevron" Content="{StaticResource SurveyIcon.ChevronDown}"
-                                                Width="12" Height="12" VerticalAlignment="Center"
-                                                Margin="0,0,6,0" RenderTransformOrigin="0.5,0.5"
+                                                Width="18" Height="18" VerticalAlignment="Center"
+                                                Margin="0,0,2,0" RenderTransformOrigin="0.5,0.5"
                                                 Foreground="{TemplateBinding Foreground}">
                                     <ContentControl.RenderTransform>
                                         <RotateTransform x:Name="ChevronSpin" Angle="-90"/>
@@ -2375,23 +2381,28 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
+                        <!-- Content INSIDE Bd, washes over the top — ToolButton's stacking, and
+                             the geometry the align cells had before they shared this template:
+                             a ContentPresenter that is a sibling of the border centres in the
+                             whole box rather than inside the 1px rule, and every dot in the 3x3
+                             align grid moved a pixel up and left.
+                             Padding used to be dropped on the floor here, so the Aa chip asked
+                             for 8px either side, got none, and auto-sized to an 18px box with
+                             its letters a pixel from a 5px radius. -->
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
-                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"/>
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
                         <!-- These were the only interactive controls in the editor with no
                              response to the pointer at all: B, I, U, S, the align trigger, the
                              Aa chip and all nine align cells took a click and gave nothing back.
                              The washes are the app's own, cross-faded like every other row. -->
-                        <Border x:Name="Hover" Opacity="0" CornerRadius="4"
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="4" Margin="1"
                                 Background="{StaticResource HoverFillBrush}" IsHitTestVisible="False"/>
-                        <Border x:Name="Press" Opacity="0" CornerRadius="4"
+                        <Border x:Name="Press" Opacity="0" CornerRadius="4" Margin="1"
                                 Background="{StaticResource PressedShadeBrush}" IsHitTestVisible="False"/>
-                        <!-- Margin, not Padding on the Border: the washes have to cover the whole
-                             chip. Padding used to be dropped on the floor here, so the Aa chip
-                             asked for 8px either side, got none, and auto-sized to an 18px box
-                             with its letters 1px from a 5px radius. -->
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          Margin="{TemplateBinding Padding}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">

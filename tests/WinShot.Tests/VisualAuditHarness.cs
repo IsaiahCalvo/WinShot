@@ -455,6 +455,10 @@ public class VisualAuditHarness
         {
             if (c is not FrameworkElement fe || !fe.IsVisible) continue;
             if (fe.ActualWidth < 6 || fe.ActualHeight < 6) continue;
+            // IsVisible is not the same as visible. A History card's action overlay sits at
+            // Opacity 0 until the pointer is on the card; measuring it diffed the SCREENSHOT
+            // behind it and reported a red annotation as a clipped Delete label.
+            if (Faded(fe, win)) continue;
             // Only leaf-ish interactive/text containers: a Grid's "ink" is meaningless.
             if (fe is not (ButtonBase or Label or TextBox)) continue;
 
@@ -637,6 +641,14 @@ public class VisualAuditHarness
             return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
         }
         return 0.2126 * Ch(r) + 0.7152 * Ch(g) + 0.0722 * Ch(b);
+    }
+
+    /// <summary>Is this control, or anything it hangs under, faded out to nothing?</summary>
+    private static bool Faded(DependencyObject? fe, DependencyObject root)
+    {
+        for (var p = fe; p is not null && !ReferenceEquals(p, root); p = VisualTreeHelper.GetParent(p))
+            if (p is UIElement u && u.Opacity < 0.05) return true;
+        return false;
     }
 
     private sealed record Measured(
