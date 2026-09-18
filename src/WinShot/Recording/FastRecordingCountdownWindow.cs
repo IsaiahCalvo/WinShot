@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -11,8 +11,9 @@ public sealed class FastRecordingCountdownWindow : WF.Form
     private static readonly SD.Color Ring = ThemePalette.Accent;
     private static readonly SD.Color RingTrack = ThemePalette.BorderStrong;
     private static readonly SD.Color TextColor = SD.Color.White;
-    // Light enough to pass 4.5:1 on the #2B2B2B card (136 gray failed contrast).
-    private static readonly SD.Color MutedText = SD.Color.FromArgb(170, 170, 170);
+    // The palette's own muted text. It used to be 170/170/170, a grey typed in by hand next to
+    // the token it was standing in for.
+    private static readonly SD.Color MutedText = ThemePalette.TextSecondary;
 
     // The delay itself is a real wait, so it stays on a plain one-second timer and keeps
     // working with animation turned off system-wide. Only the ring's sweep and the digit's
@@ -138,18 +139,40 @@ public sealed class FastRecordingCountdownWindow : WF.Form
         // "Click or Esc to cancel" needs ~165px at the title step and ~150px at the 11pt it
         // shipped at — both clipped flat at each end. The body step is what actually fits,
         // and EndEllipsis makes any future string say so instead of losing its last word.
-        using var hintFont = ThemePalette.UiFont(ThemePalette.TextBodyPt);
+        using var hintFont = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale);
         WF.TextRenderer.DrawText(
             e.Graphics,
             "Click or Esc to cancel",
             hintFont,
-            new SD.Rectangle(0, Height - S(42), Width, S(24)),
+            HintBounds(ClientSize, _scale),
             MutedText,
             WF.TextFormatFlags.HorizontalCenter |
             WF.TextFormatFlags.VerticalCenter |
             WF.TextFormatFlags.SingleLine |
             WF.TextFormatFlags.NoPadding |
             WF.TextFormatFlags.EndEllipsis);
+    }
+
+    /// <summary>
+    /// Where the cancel hint goes. The window IS the ring — the form's Region is an ellipse — so
+    /// this row's usable width is the circle's CHORD at its own height, not the window's width.
+    /// It used to take the full width, and at 100 % the sentence is 118 px against a 115 px
+    /// chord: both ends were painted on top of the accent ring. Raised to where the chord opens
+    /// wide enough for the whole sentence, and clamped to that chord, so no future string can
+    /// cross the ring however long it grows — it ellipses instead.
+    /// </summary>
+    internal static SD.Rectangle HintBounds(SD.Size client, double scale)
+    {
+        int Px(int logical) => (int)Math.Round(logical * scale);
+        int height = Px(24);
+        int top = client.Height - Px(58);
+        double radius = (Math.Min(client.Width, client.Height) / 2.0) - Math.Max(3, Px(3));
+        // Measured at the row's BOTTOM edge, the corner nearest the ring — the chord at the row's
+        // middle is wider than the row's own corners have, and using it put the sentence's tail
+        // back on the arc.
+        double dy = Math.Abs(top + height - (client.Height / 2.0));
+        int half = (int)Math.Floor(Math.Sqrt(Math.Max(0d, (radius * radius) - (dy * dy))));
+        return new SD.Rectangle((client.Width / 2) - half, top, Math.Max(1, half * 2), height);
     }
 
     /// <summary>One tween per second drives the ring's sweep and the digit's landing. It is

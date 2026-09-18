@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -137,6 +137,9 @@ public sealed class ToastWindow : WF.Form
     private string _body;
     private double _entranceAmount;
     private readonly WF.Label _glyphLabel;
+    /// <summary>Which mark <see cref="_glyphLabel"/> paints. Not readonly: an action that fails
+    /// turns the card into its own error report, mark included.</summary>
+    private ToastSeverity _severity;
     private readonly WF.Label _previewLabel;
     private readonly DarkButton? _openButton;
     private readonly DarkButton? _secondaryButton;
@@ -199,6 +202,10 @@ public sealed class ToastWindow : WF.Form
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
+        // Every control on the card that does not set its own face inherits this one, and a
+        // point-unit default would put the buttons back at the primary monitor's size inside
+        // boxes sized for this one.
+        Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale);
         FormBorderStyle = WF.FormBorderStyle.None;
         Opacity = 0;            // OnShown fades it up to RestOpacity
         Padding = new WF.Padding(S(14));
@@ -212,12 +219,22 @@ public sealed class ToastWindow : WF.Form
             WF.ControlStyles.UserPaint,
             true);
 
-        // The severity glyph is the only thing that separates "Saved" from "Save failed" at
-        // a glance, so it gets its own colour as well as its own shape.
-        _glyphLabel = Label(GlyphOf(severity), 14, 14, 22, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
-        _glyphLabel.Font = ThemePalette.IconFont(ThemePalette.TextTitlePt);
+        // The severity mark is the only thing that separates "Saved" from "Save failed" at a
+        // glance, so it gets its own colour as well as its own shape. Drawn, not typed: see
+        // SeverityGlyph. The Label stays because it is what names the mark to a screen reader
+        // and what the card's hover handlers below are wired to; it simply has no text.
+        _severity = severity;
+        // 24 wide, not 22: the mark is a circle, and a square box is the only one a circle can
+        // sit in with the same air on all four sides. In the 22-wide slot it had two device
+        // pixels of clearance on the right and four on the left at every scale.
+        _glyphLabel = Label(string.Empty, 14, 14, 24, ThemePalette.TextTitlePt, ColorOf(severity), height: 24);
         _glyphLabel.AccessibleRole = WF.AccessibleRole.Graphic;
         _glyphLabel.AccessibleName = severity.ToString();
+        _glyphLabel.Paint += (_, e) => SeverityGlyph.Draw(
+            e.Graphics,
+            new SD.Rectangle(SD.Point.Empty, _glyphLabel.Size),
+            _severity,
+            _glyphLabel.ForeColor);
         Controls.Add(_glyphLabel);
 
         // Accent stays reserved for actions; the title reads as text, not a control.
@@ -311,7 +328,7 @@ public sealed class ToastWindow : WF.Form
             {
                 Scale = _scale,
                 BackColor = Back,
-                Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
+                Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale),
                 ForeColor = ThemePalette.TextSecondary,
                 Text = checkboxText,
                 AccessibleName = checkboxText,
@@ -425,7 +442,13 @@ public sealed class ToastWindow : WF.Form
         if (string.IsNullOrEmpty(text)) return 1;
         try
         {
-            using SD.Font ui = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
+            // The column IS the scale: _bodyColumnPx is S(BodyWidthDip), so dividing it back out
+            // recovers the monitor scale this toast was laid out for without threading it through
+            // three internal signatures the tests already pin. The label's face and the face this
+            // measures with have to be the same one, which is the whole point of the paragraph
+            // above — and a point-unit face is the primary monitor's size, not this toast's.
+            double scale = columnPx / (double)BodyWidthDip;
+            using SD.Font ui = ThemePalette.ScaledUiFont(ThemePalette.TextBodyLgPt, scale);
             const WF.TextFormatFlags flags = WF.TextFormatFlags.WordBreak | WF.TextFormatFlags.NoPrefix;
             var column = new SD.Size(Math.Max(1, columnPx), int.MaxValue);
 
@@ -453,14 +476,6 @@ public sealed class ToastWindow : WF.Form
             return 1;
         }
     }
-
-    /// <summary>Segoe MDL2 / Fluent codepoints that exist in both fonts.</summary>
-    private static string GlyphOf(ToastSeverity severity) => severity switch
-    {
-        ToastSeverity.Success => "",   // CheckMark
-        ToastSeverity.Error => "",     // Error
-        _ => "",                       // Info
-    };
 
     private static SD.Color ColorOf(ToastSeverity severity) => severity switch
     {
@@ -553,9 +568,10 @@ public sealed class ToastWindow : WF.Form
         _dismiss.Stop();
         SetBody(message);
         _previewLabel.ForeColor = ThemePalette.TextError;
-        _glyphLabel.Text = GlyphOf(ToastSeverity.Error);
+        _severity = ToastSeverity.Error;
         _glyphLabel.ForeColor = ColorOf(ToastSeverity.Error);
         _glyphLabel.AccessibleName = nameof(ToastSeverity.Error);
+        _glyphLabel.Invalidate();
         if (IsHandleCreated)
         {
             // The card just changed height; a corner toast is bottom-anchored, so leaving it
@@ -955,7 +971,7 @@ public sealed class ToastWindow : WF.Form
         {
             AutoSize = false,
             BackColor = SD.Color.Transparent,
-            Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = ThemePalette.ScaledUiFont(size, _scale, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color,
             Location = new SD.Point(S(x), S(y)),
             Size = new SD.Size(S(width), S(height)),

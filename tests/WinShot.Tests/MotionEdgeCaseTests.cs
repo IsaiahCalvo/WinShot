@@ -353,15 +353,18 @@ public class MotionEdgeCaseTests
     [Fact]
     public void ToastSeverityChangesTheGlyphAndGivesAnErrorTimeToRead()
     {
-        string Glyph(ToastSeverity severity)
+        // The mark is drawn now, not typed (see SeverityGlyph), so what separates the three is
+        // the colour it is drawn in and the name it announces — not a code point in a Label.
+        (string Name, SD.Color Colour) Mark(ToastSeverity severity)
         {
             using var toast = new ToastWindow("t", "b", new SD.Point(10, 10), null, severity);
-            return toast.Controls.OfType<WF.Label>().First().Text;
+            WF.Label mark = toast.Controls.OfType<WF.Label>().First();
+            return (mark.AccessibleName ?? string.Empty, mark.ForeColor);
         }
 
         Assert.Equal(3, new[]
         {
-            Glyph(ToastSeverity.Info), Glyph(ToastSeverity.Success), Glyph(ToastSeverity.Error),
+            Mark(ToastSeverity.Info), Mark(ToastSeverity.Success), Mark(ToastSeverity.Error),
         }.Distinct().Count());
 
         int Dwell(ToastSeverity severity)

@@ -195,6 +195,29 @@ public static class ThemePalette
         Math.Max(1, (int)Math.Round(sizePt * (96f / 72f) * (scale <= 0 ? 1d : scale)));
 
     /// <summary>
+    /// A type token at the size a surface laid out for <paramref name="scale"/> needs — and the
+    /// only font a hand-scaled WinForms surface may use.
+    ///
+    /// A <see cref="SD.GraphicsUnit.Point"/> font resolves its pixel size ONCE, against the
+    /// device context it was constructed on, which is the primary monitor's. A surface that
+    /// multiplies every box by its own target monitor's scale therefore grows the box and leaves
+    /// the type exactly where it was: on a 150 % primary with a 100 % second display, the first-run
+    /// bubble's boxes came out at 1x and its type at 1.5x, and every row title on the app's very
+    /// first screen was sliced through the middle. On a 200 % display the opposite — type at two
+    /// thirds of the size the layout was drawn for. The comment on several of these surfaces says
+    /// "point-based fonts render at the monitor's DPI"; they do not, and
+    /// <see cref="UiFontPx"/>'s own remarks have said so all along.
+    ///
+    /// One box scale and one type scale, from the same number.
+    /// </summary>
+    public static SD.Font ScaledUiFont(float sizePt, double scale, SD.FontStyle style = SD.FontStyle.Regular)
+        => UiFontPx(PxForPt(sizePt, scale), style);
+
+    /// <inheritdoc cref="ScaledUiFont"/>
+    public static SD.Font ScaledIconFont(float sizePt, double scale, SD.FontStyle style = SD.FontStyle.Regular)
+        => IconFontPx(PxForPt(sizePt, scale), style);
+
+    /// <summary>
     /// The app's one monospaced face, for numeric readouts that must not jitter as their
     /// digits change — the recording timer, the editors' time and frame counts. Named here
     /// rather than typed out per surface so the choice is one decision.

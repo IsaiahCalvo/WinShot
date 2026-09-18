@@ -169,41 +169,60 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
             return;
         }
 
+        using SD.Bitmap frame = Compose(_run, _opacity, glide: true);
+        Present(frame, KeystrokeDisplay.Anchor(
+            _regionPx,
+            frame.Size,
+            _options.Position,
+            S(14)));
+    }
+
+    /// <summary>
+    /// The pill as one finished ARGB frame, with no window and nothing presented. The visual
+    /// audit renders it at four scales the way <c>FastRecordingControlBar.RenderToBitmap</c> lets
+    /// it render the recording bar: through the code that ships rather than a copy of it. The
+    /// width lands immediately — the glide belongs to a chord being typed, and a frame measured
+    /// mid-glide is a measurement of nothing in particular.
+    /// </summary>
+    internal SD.Bitmap ComposePillForAudit(string run) => Compose(run, 1d, glide: false);
+
+    private SD.Bitmap Compose(string run, double opacity, bool glide)
+    {
         int height = S(52);
-        SD.Size textSize = WF.TextRenderer.MeasureText(_run, _font);
+        SD.Size textSize = WF.TextRenderer.MeasureText(run, _font);
         int target = Math.Min(
             Math.Max(16, _regionPx.Width - S(16)),
             Math.Max(S(96), textSize.Width + S(44)));
         // The pill glides to its new width instead of snapping there as the chord grows. With
         // animation off system-wide it lands immediately, like every other tween in the app.
-        _renderedWidth = WinShot.Core.Motion.AnimationsEnabled()
+        _renderedWidth = glide && WinShot.Core.Motion.AnimationsEnabled()
             ? KeystrokeDisplay.EaseWidth(_renderedWidth, target)
             : target;
         int width = Math.Max(1, _renderedWidth);
 
-        using var frame = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var frame = new SD.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = SD.Graphics.FromImage(frame))
         {
             // The fade is composited, not handed to each brush: TextRenderer drops the alpha
             // channel, so an alpha-scaled ink colour left the chord at full strength while the
             // capsule under it dissolved. GdiFade fades the finished pill as one image.
-            GdiFade.Draw(g, new SD.Rectangle(0, 0, width, height), _opacity, (target, box) =>
+            GdiFade.Draw(g, new SD.Rectangle(0, 0, width, height), opacity, (surface, box) =>
             {
-                target.SmoothingMode = SmoothingMode.AntiAlias;
+                surface.SmoothingMode = SmoothingMode.AntiAlias;
                 using var path = GdiPaths.RoundedRect(
                     new SD.Rectangle(box.Left, box.Top, box.Width - 1, box.Height - 1), box.Height / 2);
                 using var brush = new SD.SolidBrush(SD.Color.FromArgb(235, PillBack));
                 using var pen = new SD.Pen(PillBorder, 1);
-                target.FillPath(brush, path);
-                target.DrawPath(pen, path);
+                surface.FillPath(brush, path);
+                surface.DrawPath(pen, path);
 
                 // Centred in the pill's CURRENT width, so the text stays put while the pill
                 // grows around it rather than sliding as the edges move.
                 var textBounds = new SD.Rectangle(
                     box.Left + S(10), box.Top, Math.Max(1, box.Width - S(20)), box.Height);
                 WF.TextRenderer.DrawText(
-                    target,
-                    _run,
+                    surface,
+                    run,
                     _font,
                     textBounds,
                     TextColor,
@@ -214,11 +233,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
             });
         }
 
-        Present(frame, KeystrokeDisplay.Anchor(
-            _regionPx,
-            new SD.Size(width, height),
-            _options.Position,
-            S(14)));
+        return frame;
     }
 
     private void AdvanceFade()
