@@ -110,6 +110,7 @@ public class VisualAuditHarness
                         }
 
                         AuditFloatingLayers(win, name, outDir, cropDir, rows);
+                        if (name == "state-sheet") WriteStateTable(win, outDir);
                     }
                     catch (Exception ex)
                     {
@@ -166,6 +167,19 @@ public class VisualAuditHarness
         yield return ("settings-about", () => new SettingsWindow(settings),
             w => Select(w, "SectionList", 7));
         yield return ("resize-dialog", () => new ResizeDialog(1200, 760), null);
+        // Every style in the theme, six states each. See VisualAuditStateSheet.
+        yield return ("state-sheet", VisualAuditStateSheet.Build, null);
+        // The dialog card, built rather than shown: ShowDialog blocks, and Build hands back
+        // exactly what it would have shown.
+        yield return ("dialog-ok", () => Dialog("Couldn't save", ShortBody, ("OK", true)), null);
+        yield return ("dialog-confirm",
+            () => Dialog("Delete 12 screenshots?", ShortBody, ("Cancel", false), ("Delete", true)), null);
+        yield return ("dialog-destructive",
+            () => Dialog("Delete 12 screenshots?", ShortBody, ("Keep them", false), ("Delete", null)), null);
+        yield return ("dialog-three",
+            () => Dialog("Unsaved changes", ShortBody,
+                ("Discard", false), ("Cancel", false), ("Save", true)), null);
+        yield return ("dialog-long", () => Dialog("Couldn't reach the update server", LongBody, ("OK", true)), null);
         yield return ("background-composer",
             () => new WinShot.Editor.Background.BackgroundComposerWindow(Shot(800, 500), settings, history), null);
         // Both editors open on an empty temp file: the chrome is what is being audited and no
@@ -182,6 +196,31 @@ public class VisualAuditHarness
                 new WinShot.Recording.RecoverableRecordingTempFile(
                     @"C:\Temp\WinShot\recording-2.gif", ".gif", 3_145_728, DateTime.UtcNow.AddDays(-1)),
             }), null);
+    }
+
+    private const string ShortBody = "This cannot be undone.";
+
+    /// <summary>
+    /// Long enough to wrap to four lines in a 420 DIP card — the case where a dialog that
+    /// sizes to its content either grows correctly or clips its last line.
+    /// </summary>
+    private const string LongBody =
+        "WinShot could not reach the update server, so it does not know whether a newer build "
+        + "exists. Your screenshots and recordings are unaffected. Check your connection and "
+        + "try again, or carry on — WinShot will look again the next time it starts.";
+
+    /// <summary>
+    /// A dialog card as the app builds it. Buttons run left to right with the primary LAST;
+    /// a null "primary" flag means the destructive fill.
+    /// </summary>
+    private static Window Dialog(string title, string body, params (string Label, bool? Primary)[] buttons)
+    {
+        var (dialog, _, footer) = ThemedMessageDialog.Build(null, title, body);
+        foreach (var (label, primary) in buttons)
+            ThemedMessageDialog.AddButton(
+                footer, label, primary == true, () => { },
+                primary is null ? "PillButtonDestructive" : null);
+        return dialog;
     }
 
     private static string EmptyMedia(string ext)
@@ -547,6 +586,57 @@ public class VisualAuditHarness
             if (flags.Count > 0)
                 Crop4x(win, m.Fe, dpi, Path.Combine(cropDir, $"{surface}-{m.Id}-{(int)dpi}-4x.png"));
         }
+    }
+
+    /// <summary>
+    /// The one thing about a state that cannot be judged by looking at six cells side by side:
+    /// whether PRESSED is darker than resting. The accent ladder in the palette only ever goes
+    /// down — Accent, AccentDeep, AccentPressed — and a template that lightens on press is
+    /// reading it upside down. Mean luminance inside each cell, one row per style and state.
+    /// </summary>
+    private static void WriteStateTable(Window win, string outDir)
+    {
+        var bits = RenderWindowBits(win, 144);
+        var px = Pixels(bits);
+        int stride = bits.PixelWidth * 4;
+        var lines = new List<string> { "style	state	mean_r	mean_g	mean_b	luminance" };
+
+        foreach (var fe in Descendants(win).OfType<FrameworkElement>())
+        {
+            if (fe is not Control || string.IsNullOrEmpty(fe.Name) || !fe.Name.Contains('_')) continue;
+            if (!fe.IsVisible || fe.ActualWidth < 6 || fe.ActualHeight < 6) continue;
+            var box = BoxInWindow(fe, win, 144, bits.PixelWidth, bits.PixelHeight);
+            if (box.Width < 4 || box.Height < 4) continue;
+
+            double r = 0, g = 0, b = 0;
+            int n = 0;
+            for (int y = box.Top; y < box.Bottom; y++)
+                for (int x = box.Left; x < box.Right; x++)
+                {
+                    int i = y * stride + x * 4;
+                    b += px[i]; g += px[i + 1]; r += px[i + 2];
+                    n++;
+                }
+            if (n == 0) continue;
+            r /= n; g /= n; b /= n;
+            int cut = fe.Name.LastIndexOf('_');
+            lines.Add(string.Join("	", fe.Name[..cut], fe.Name[(cut + 1)..],
+                r.ToString("F1", CultureInfo.InvariantCulture),
+                g.ToString("F1", CultureInfo.InvariantCulture),
+                b.ToString("F1", CultureInfo.InvariantCulture),
+                Luminance(r, g, b).ToString("F4", CultureInfo.InvariantCulture)));
+        }
+        File.WriteAllLines(Path.Combine(outDir, "states.tsv"), lines);
+    }
+
+    private static double Luminance(double r, double g, double b)
+    {
+        static double Ch(double v)
+        {
+            double s = v / 255.0;
+            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * Ch(r) + 0.7152 * Ch(g) + 0.0722 * Ch(b);
     }
 
     private sealed record Measured(
