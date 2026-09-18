@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -108,6 +108,9 @@ public class VisualAuditHarness
                             RenderWindow(win, Path.Combine(outDir, $"{name}-{(int)dpi}.png"), dpi);
                             AuditControls(win, name, dpi, cropDir, rows);
                         }
+
+                        AuditFloatingLayers(win, name, outDir, cropDir, rows);
+                        if (name == "state-sheet") WriteStateTable(win, outDir);
                     }
                     catch (Exception ex)
                     {
@@ -137,6 +140,16 @@ public class VisualAuditHarness
         SettingsService settings, HistoryService history)
     {
         yield return ("editor", () => new EditorWindow(Shot(1200, 760), settings, history), null);
+        // Every contextual sub-row in the editor starts Collapsed and is revealed by the tool
+        // that owns it, so a single resting editor render measured none of them. One surface per
+        // tool puts the crop bar, the arrowhead row, the redaction row, the counter picker, the
+        // rich-text strip and the magnifier row in front of the instrument.
+        foreach (string tool in ContextualTools)
+        {
+            string t = tool;
+            yield return ($"editor-{t.ToLowerInvariant()}",
+                () => new EditorWindow(Shot(1200, 760), settings, history), w => PickTool(w, t));
+        }
         yield return ("history", () => new HistoryWindow(history, settings), null);
         yield return ("settings-general", () => new SettingsWindow(settings), null);
         yield return ("settings-shortcuts", () => new SettingsWindow(settings),
@@ -154,6 +167,19 @@ public class VisualAuditHarness
         yield return ("settings-about", () => new SettingsWindow(settings),
             w => Select(w, "SectionList", 7));
         yield return ("resize-dialog", () => new ResizeDialog(1200, 760), null);
+        // Every style in the theme, six states each. See VisualAuditStateSheet.
+        yield return ("state-sheet", VisualAuditStateSheet.Build, null);
+        // The dialog card, built rather than shown: ShowDialog blocks, and Build hands back
+        // exactly what it would have shown.
+        yield return ("dialog-ok", () => Dialog("Couldn't save", ShortBody, ("OK", true)), null);
+        yield return ("dialog-confirm",
+            () => Dialog("Delete 12 screenshots?", ShortBody, ("Cancel", false), ("Delete", true)), null);
+        yield return ("dialog-destructive",
+            () => Dialog("Delete 12 screenshots?", ShortBody, ("Keep them", false), ("Delete", null)), null);
+        yield return ("dialog-three",
+            () => Dialog("Unsaved changes", ShortBody,
+                ("Discard", false), ("Cancel", false), ("Save", true)), null);
+        yield return ("dialog-long", () => Dialog("Couldn't reach the update server", LongBody, ("OK", true)), null);
         yield return ("background-composer",
             () => new WinShot.Editor.Background.BackgroundComposerWindow(Shot(800, 500), settings, history), null);
         // Both editors open on an empty temp file: the chrome is what is being audited and no
@@ -172,12 +198,228 @@ public class VisualAuditHarness
             }), null);
     }
 
+    private const string ShortBody = "This cannot be undone.";
+
+    /// <summary>
+    /// Long enough to wrap to four lines in a 420 DIP card — the case where a dialog that
+    /// sizes to its content either grows correctly or clips its last line.
+    /// </summary>
+    private const string LongBody =
+        "WinShot could not reach the update server, so it does not know whether a newer build "
+        + "exists. Your screenshots and recordings are unaffected. Check your connection and "
+        + "try again, or carry on — WinShot will look again the next time it starts.";
+
+    /// <summary>
+    /// A dialog card as the app builds it. Buttons run left to right with the primary LAST;
+    /// a null "primary" flag means the destructive fill.
+    /// </summary>
+    private static Window Dialog(string title, string body, params (string Label, bool? Primary)[] buttons)
+    {
+        var (dialog, _, footer) = ThemedMessageDialog.Build(null, title, body);
+        foreach (var (label, primary) in buttons)
+            ThemedMessageDialog.AddButton(
+                footer, label, primary == true, () => { },
+                primary is null ? "PillButtonDestructive" : null);
+        return dialog;
+    }
+
     private static string EmptyMedia(string ext)
     {
         string p = Path.Combine(Path.GetTempPath(), $"winshot-visual-audit-{Guid.NewGuid():N}.{ext}");
         File.WriteAllBytes(p, Array.Empty<byte>());
         return p;
     }
+
+    /// <summary>
+    /// The tools whose sub-row panel is a surface of its own. Select* is the resting editor and
+    /// is already covered by the plain "editor" surface.
+    /// </summary>
+    private static readonly string[] ContextualTools =
+    {
+        "Rectangle", "Arrow", "Line", "Text", "Callout", "Step",
+        "Redact", "Magnifier", "Crop", "Freehand", "Highlighter", "Polygon",
+    };
+
+    private static void PickTool(Window w, string tool)
+    {
+        if (w.FindName(tool + "ToolBtn") is System.Windows.Controls.Primitives.ToggleButton b)
+            b.IsChecked = true;
+    }
+
+    /// <summary>
+    /// Every popover, dropdown and context menu in the app lives in a Popup, whose content is a
+    /// separate top-level window: <c>RenderTargetBitmap.Render(ownerWindow)</c> never reaches it,
+    /// which is why the first sweep measured none of them. The handle is
+    /// <see cref="PresentationSource"/> — an open popup has one of its own, whose RootVisual is
+    /// the PopupRoot holding the card, its shadow margin and all. So open one layer at a time,
+    /// diff the PopupRoot instead of the window, and the whole existing instrument applies.
+    /// </summary>
+    private static void AuditFloatingLayers(
+        Window win, string surface, string outDir, string cropDir, List<string> rows)
+    {
+        foreach (var (layer, open, close, child) in FloatingLayers(surface, win))
+        {
+            string name = $"{surface}.{layer}";
+            try
+            {
+                open();
+                for (int i = 0; i < 20; i++) { Pump(); Thread.Sleep(20); }
+                // WPF POOLS a popup's HwndSource: close one popover and the next one to open
+                // reuses the same window, so "a presentation source that was not there before"
+                // found only the first layer per surface and called the other ten never opened.
+                // Ask the popup's own child which source it is hanging in instead.
+                var c = child();
+                var root = c is null ? null
+                    : PresentationSource.FromVisual(c)?.RootVisual as FrameworkElement;
+                if (root is null || root.ActualWidth < 4)
+                {
+                    rows.Add($"{name}\t-\t-\t-\tNEVER OPENED\t-\t\t\t\t\t\t\t\t\tERROR");
+                    continue;
+                }
+                root.UpdateLayout();
+                Pump();
+                foreach (double dpi in Dpis)
+                {
+                    RenderWindow(root, Path.Combine(outDir, $"{name}-{(int)dpi}.png"), dpi);
+                    AuditControls(root, name, dpi, cropDir, rows);
+                }
+            }
+            catch (Exception ex)
+            {
+                rows.Add($"{name}\t-\t-\t-\tLAYER FAILED: {ex.GetType().Name}: {Flat(ex.Message)}\t-\t\t\t\t\t\t\t\t\tERROR");
+            }
+            finally
+            {
+                try { close(); } catch { }
+                Pump();
+            }
+        }
+    }
+
+    private static IEnumerable<(string Name, Action Open, Action Close, Func<FrameworkElement?> Child)>
+        FloatingLayers(string surface, Window win)
+    {
+        // A Popup reached by name: IsOpen is the whole trigger, and it does not care whether the
+        // button that normally opens it is on screen.
+        // Open a popover through the BUTTON that opens it, not by setting IsOpen: the colour
+        // picker builds its sixteen preset swatches in the click handler, so a popup forced open
+        // from the side rendered an empty card and the grid went unaudited for a whole round.
+        (string, Action, Action, Func<FrameworkElement?>) Pop(
+            string label, string popupName, string trigger, Action? prep = null)
+        {
+            var p = win.FindName(popupName) as System.Windows.Controls.Primitives.Popup;
+            return (label,
+                () =>
+                {
+                    if (p is null) return;
+                    switch (win.FindName(trigger))
+                    {
+                        case System.Windows.Controls.Primitives.ToggleButton t: t.IsChecked = true; break;
+                        case ButtonBase b: b.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); break;
+                    }
+                    Pump();
+                    prep?.Invoke();
+                    Pump();
+                    p.IsOpen = true;
+                },
+                () =>
+                {
+                    if (win.FindName(trigger) is System.Windows.Controls.Primitives.ToggleButton t)
+                        t.IsChecked = false;
+                    if (p is not null) p.IsOpen = false;
+                },
+                () => p?.Child as FrameworkElement);
+        }
+
+        (string, Action, Action, Func<FrameworkElement?>) Drop(string label, string comboName)
+        {
+            var c = win.FindName(comboName) as ComboBox;
+            return (label,
+                () => { if (c is not null) c.IsDropDownOpen = true; },
+                () => { if (c is not null) c.IsDropDownOpen = false; },
+                () => (c?.Template?.FindName("PART_Popup", c)
+                        as System.Windows.Controls.Primitives.Popup)?.Child as FrameworkElement);
+        }
+
+        (string, Action, Action, Func<FrameworkElement?>) Menu(
+            string label, ContextMenu? menu, UIElement? target)
+        {
+            return (label,
+                () =>
+                {
+                    if (menu is null) return;
+                    menu.PlacementTarget = target;
+                    menu.IsOpen = true;
+                },
+                () => { if (menu is not null) menu.IsOpen = false; },
+                () => menu);
+        }
+
+        if (surface == "editor" || surface.StartsWith("editor-", StringComparison.Ordinal))
+        {
+            yield return Pop("colour-grid", "ColorPickerPopup", "ColorWellBtn");
+            yield return Pop("colour-spectrum", "ColorPickerPopup", "ColorWellBtn",
+                () => Check(win, "PickerSpectrumModeBtn"));
+            yield return Pop("size-presets", "SizePresetsPopup", "SizePresetsBtn");
+            yield return Pop("font-colour", "FontColorPopup", "FontColorBtn");
+            yield return Pop("align-grid", "AlignPopup", "AlignMenuBtn");
+            yield return Pop("overflow", "FormatOverflowPopup", "FormatOverflowBtn");
+            yield return Pop("eraser-mode", "EraserModePopup", "EraserCaretBtn");
+            yield return Pop("fit-menu", "FitMenuPopup", "FitMenuBtn");
+            foreach (string combo in new[]
+                     {
+                         "ArrowStyleBox", "LineStyleBox", "FontFamilyBox", "FontSizeBox",
+                         "AlignBox", "VerticalAlignBox", "CropRatioBox", "CounterSeriesBox",
+                         "StepModeBox", "RedactStyleBox",
+                     })
+                yield return Drop(combo.Replace("Box", "").ToLowerInvariant(), combo);
+            yield return Menu("annotation-menu", AnnotationMenu(win), win);
+            yield return Menu("counter-row-menu", CounterRowMenu(win), win);
+        }
+        else if (surface == "history")
+        {
+            yield return Menu("card-menu", FirstContextMenu(win), win);
+        }
+        else if (surface.StartsWith("settings-", StringComparison.Ordinal))
+        {
+            foreach (var combo in Descendants(win).OfType<ComboBox>()
+                         .Where(c => c.IsVisible && !string.IsNullOrEmpty(c.Name)).Take(3).ToList())
+                yield return Drop(combo.Name.ToLowerInvariant(), combo.Name);
+        }
+    }
+
+    /// <summary>
+    /// The right-click menu on a counter-series row, which only exists once a row does. The
+    /// editor builds one per series, so ask it for a row's menu the way the list does.
+    /// </summary>
+    private static ContextMenu? CounterRowMenu(Window win)
+    {
+        var box = win.FindName("CounterSeriesBox") as ComboBox;
+        return box?.Items.OfType<ComboBoxItem>().Select(i => i.ContextMenu)
+            .FirstOrDefault(m => m is not null);
+    }
+
+    private static void Check(Window w, string name)
+    {
+        if (w.FindName(name) is System.Windows.Controls.Primitives.ToggleButton t) t.IsChecked = true;
+    }
+
+    /// <summary>
+    /// The editor's annotation right-click menu is built on demand in code, so the only way to
+    /// see it is to ask the window for it the way the right-click path does.
+    /// </summary>
+    private static ContextMenu? AnnotationMenu(Window win)
+    {
+        var m = win.GetType().GetMethod("BuildAnnotationMenu",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return m?.Invoke(win, null) as ContextMenu;
+    }
+
+    /// <summary>History's card menu hangs off the first card; with an empty library it hangs off
+    /// the list, so take whichever element in the window carries one.</summary>
+    private static ContextMenu? FirstContextMenu(Window win) =>
+        Descendants(win).OfType<FrameworkElement>()
+            .Select(f => f.ContextMenu).FirstOrDefault(m => m is not null);
 
     private static void Select(Window w, string listName, int index)
     {
@@ -200,7 +442,7 @@ public class VisualAuditHarness
     // ---------------------------------------------------------------- measuring
 
     private static void AuditControls(
-        Window win, string surface, double dpi, string cropDir, List<string> rows)
+        FrameworkElement win, string surface, double dpi, string cropDir, List<string> rows)
     {
         // Everything is measured out of ONE pair of full-window renders: the window as the user
         // sees it, and the window with every audited label and glyph at zero opacity. The
@@ -213,6 +455,10 @@ public class VisualAuditHarness
         {
             if (c is not FrameworkElement fe || !fe.IsVisible) continue;
             if (fe.ActualWidth < 6 || fe.ActualHeight < 6) continue;
+            // IsVisible is not the same as visible. A History card's action overlay sits at
+            // Opacity 0 until the pointer is on the card; measuring it diffed the SCREENSHOT
+            // behind it and reported a red annotation as a clipped Delete label.
+            if (Faded(fe, win)) continue;
             // Only leaf-ish interactive/text containers: a Grid's "ink" is meaningless.
             if (fe is not (ButtonBase or Label or TextBox)) continue;
 
@@ -346,6 +592,65 @@ public class VisualAuditHarness
         }
     }
 
+    /// <summary>
+    /// The one thing about a state that cannot be judged by looking at six cells side by side:
+    /// whether PRESSED is darker than resting. The accent ladder in the palette only ever goes
+    /// down — Accent, AccentDeep, AccentPressed — and a template that lightens on press is
+    /// reading it upside down. Mean luminance inside each cell, one row per style and state.
+    /// </summary>
+    private static void WriteStateTable(Window win, string outDir)
+    {
+        var bits = RenderWindowBits(win, 144);
+        var px = Pixels(bits);
+        int stride = bits.PixelWidth * 4;
+        var lines = new List<string> { "style	state	mean_r	mean_g	mean_b	luminance" };
+
+        foreach (var fe in Descendants(win).OfType<FrameworkElement>())
+        {
+            if (fe is not Control || string.IsNullOrEmpty(fe.Name) || !fe.Name.Contains('_')) continue;
+            if (!fe.IsVisible || fe.ActualWidth < 6 || fe.ActualHeight < 6) continue;
+            var box = BoxInWindow(fe, win, 144, bits.PixelWidth, bits.PixelHeight);
+            if (box.Width < 4 || box.Height < 4) continue;
+
+            double r = 0, g = 0, b = 0;
+            int n = 0;
+            for (int y = box.Top; y < box.Bottom; y++)
+                for (int x = box.Left; x < box.Right; x++)
+                {
+                    int i = y * stride + x * 4;
+                    b += px[i]; g += px[i + 1]; r += px[i + 2];
+                    n++;
+                }
+            if (n == 0) continue;
+            r /= n; g /= n; b /= n;
+            int cut = fe.Name.LastIndexOf('_');
+            lines.Add(string.Join("	", fe.Name[..cut], fe.Name[(cut + 1)..],
+                r.ToString("F1", CultureInfo.InvariantCulture),
+                g.ToString("F1", CultureInfo.InvariantCulture),
+                b.ToString("F1", CultureInfo.InvariantCulture),
+                Luminance(r, g, b).ToString("F4", CultureInfo.InvariantCulture)));
+        }
+        File.WriteAllLines(Path.Combine(outDir, "states.tsv"), lines);
+    }
+
+    private static double Luminance(double r, double g, double b)
+    {
+        static double Ch(double v)
+        {
+            double s = v / 255.0;
+            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * Ch(r) + 0.7152 * Ch(g) + 0.0722 * Ch(b);
+    }
+
+    /// <summary>Is this control, or anything it hangs under, faded out to nothing?</summary>
+    private static bool Faded(DependencyObject? fe, DependencyObject root)
+    {
+        for (var p = fe; p is not null && !ReferenceEquals(p, root); p = VisualTreeHelper.GetParent(p))
+            if (p is UIElement u && u.Opacity < 0.05) return true;
+        return false;
+    }
+
     private sealed record Measured(
         FrameworkElement Fe, string Id, string Text, string RowName,
         SD.Rectangle Box, SD.Rectangle Ink, double Stroke);
@@ -387,7 +692,7 @@ public class VisualAuditHarness
 
     /// <summary>The control's layout box in the window's device pixels at this DPI.</summary>
     private static SD.Rectangle BoxInWindow(
-        FrameworkElement fe, Window win, double dpi, int imgW, int imgH)
+        FrameworkElement fe, FrameworkElement win, double dpi, int imgW, int imgH)
     {
         double scale = dpi / 96.0;
         var tl = fe.TransformToAncestor(win).Transform(new Point(0, 0));
@@ -432,7 +737,7 @@ public class VisualAuditHarness
         return buf;
     }
 
-    private static RenderTargetBitmap RenderWindowBits(Window w, double dpi)
+    private static RenderTargetBitmap RenderWindowBits(FrameworkElement w, double dpi)
     {
         double scale = dpi / 96.0;
         var rtb = new RenderTargetBitmap(
@@ -449,7 +754,7 @@ public class VisualAuditHarness
     /// screenshot. Four device pixels of magenta surround the control's layout box, so a
     /// clipped edge is obvious: ink touching magenta is ink outside the control.
     /// </summary>
-    private static void Crop4x(Window win, FrameworkElement fe, double dpi, string path)
+    private static void Crop4x(FrameworkElement win, FrameworkElement fe, double dpi, string path)
     {
         const int Z = 4, Pad = 4;
         var tl = fe.TransformToAncestor(win).Transform(new Point(0, 0));
@@ -484,7 +789,7 @@ public class VisualAuditHarness
         Save(rtb, path);
     }
 
-    private static void RenderWindow(Window w, string path, double dpi)
+    private static void RenderWindow(FrameworkElement w, string path, double dpi)
     {
         double scale = dpi / 96.0;
         int width = (int)Math.Ceiling(w.ActualWidth * scale);

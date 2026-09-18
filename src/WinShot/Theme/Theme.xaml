@@ -659,27 +659,83 @@
     </Style>
 
     <!-- ====================================================================
-         POPOVER SURFACE — the card inside every editor Popup. One material, one
-         radius, one entrance. Give the Border its own ScaleTransform; PopoverIn
-         animates it, and a Style-set transform would be shared and frozen.
+         FOCUS RING — the one keyboard focus affordance.
+
+         Eight styles had none at all: the checkbox, both sliders, the disclosure
+         row, the strip tab, the strip tool chip, the size-preset row and the menu
+         row. What they fell back on is WPF's default focus visual, which is a
+         dotted BLACK rectangle — on a #1C1C1E window that is nothing at all, so a
+         keyboard user tabbing through Settings could not see where they were.
+
+         A FocusVisualStyle rather than a ring inside each template, because it
+         only draws when focus arrived from the KEYBOARD, which is the whole point
+         of a focus ring, and because it is one line per style instead of surgery
+         on eight templates. Info blue, not Accent: the accent is a selection, and
+         a focus ring landing on an already-selected accent chip would vanish.
          ==================================================================== -->
-    <Style x:Key="PopoverSurface" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource ElevatedBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+    <Style x:Key="FocusRing">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="-2" StrokeThickness="2" RadiusX="8" RadiusY="8"
+                               Stroke="{StaticResource InfoBrush}" SnapsToDevicePixels="True"
+                               IsHitTestVisible="False"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         POPOVER CARD — the card inside EVERY floating layer: the seven editor
+         popovers, both dropdown templates and the context menu.
+
+         Before this there were five cards. Three corner radii (the fit menu 2,
+         the eraser menu 6, everything else 8), four drop shadows — two of them
+         written inline on the Border — and two border brushes, on menus that open
+         inches apart in the same toolbar. The fit menu had no Margin at all, so
+         the shadow it did ask for was clipped away by its own popup window and it
+         was the one card in the app that floated with nothing under it.
+
+         The Margin is not spacing: a Popup window is sized to its child, so the
+         shadow only has room to fall if the child reserves it. 36 covers
+         ChromePopoverShadow's 30 blur plus its 10 drop. Callers override the TOP
+         margin to set their own gap from the trigger, and Padding to suit their
+         content; nothing else here is theirs to change.
+         ==================================================================== -->
+    <Style x:Key="PopoverCard" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource ChromePopoverBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ChromeControlBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{StaticResource RadiusInput}"/>
         <Setter Property="Padding" Value="8"/>
-        <Setter Property="Margin" Value="0,4,12,12"/>
-        <Setter Property="Effect" Value="{StaticResource FloatingShadow}"/>
-        <!-- Anchored at the top edge, where the popup meets its button, so it grows
-             away from the control rather than out of its own middle. -->
+        <Setter Property="Margin" Value="0,6,36,36"/>
+        <Setter Property="Effect" Value="{StaticResource ChromePopoverShadow}"/>
+        <!-- Anchored at the top edge, where the popup meets its button, so a card
+             that animates grows away from the control, not out of its own middle. -->
         <Setter Property="RenderTransformOrigin" Value="0.5,0"/>
-        <Style.Triggers>
-            <Trigger Property="IsVisible" Value="True">
-                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PopoverIn}"/></Trigger.EnterActions>
-            </Trigger>
-        </Style.Triggers>
     </Style>
+
+    <!-- The rule between groups of menu rows. Windows' own Separator is a near-white
+         line with its own margins; dropped into a #323236 menu it was the brightest
+         thing on the card, brighter than the labels it was supposed to divide.
+         Keyed as MenuItem's separator as well as implicitly, because a Separator
+         inside a MenuItem's host takes SeparatorStyleKey and ignores the implicit one. -->
+    <Style x:Key="DarkSeparator" TargetType="Separator">
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Margin" Value="8,4"/>
+        <Setter Property="Background" Value="{StaticResource ChromeHairlineBrush}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Background="{TemplateBinding Background}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="Separator" BasedOn="{StaticResource DarkSeparator}"/>
+    <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator"
+           BasedOn="{StaticResource DarkSeparator}"/>
 
     <!-- The one-shot variant of SubToolButton, for the sub-row's plain actions. -->
     <Style x:Key="SubToolIconButton" TargetType="Button" BasedOn="{StaticResource ToolIconButton}">
@@ -819,7 +875,7 @@
                             <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
                                     Background="{StaticResource HoverShadeBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner}"
-                                    Background="{StaticResource AccentPressedBrush}"/>
+                                    Background="{StaticResource PressedShadeBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
                                               Margin="{TemplateBinding Padding}"/>
@@ -869,7 +925,7 @@
                             <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner1}"
                                     Background="{StaticResource SurfaceAltBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="{StaticResource RadiusButtonInner1}"
-                                    Background="{StaticResource ElevatedBrush}"/>
+                                    Background="{StaticResource PressedShadeBrush}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                               RecognizesAccessKey="True"
                                               Margin="{TemplateBinding Padding}"/>
@@ -961,7 +1017,7 @@
                     <Grid>
                         <Ellipse x:Name="Bg" Fill="{StaticResource SurfaceBrush}"/>
                         <Ellipse x:Name="Hover" Opacity="0" Fill="{StaticResource SurfaceAltBrush}"/>
-                        <Ellipse x:Name="Press" Opacity="0" Fill="{StaticResource ElevatedBrush}"/>
+                        <Ellipse x:Name="Press" Opacity="0" Fill="{StaticResource PressedShadeBrush}"/>
                         <Ellipse x:Name="FocusRing" Stroke="{StaticResource BorderBrush}" StrokeThickness="1"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           TextElement.FontFamily="{TemplateBinding FontFamily}"
@@ -1103,6 +1159,7 @@
     </Style>
 
     <Style x:Key="DarkComboBox" TargetType="ComboBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Height" Value="30"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
@@ -1126,12 +1183,9 @@
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True" Focusable="False"
                                PopupAnimation="Fade">
-                            <Border Background="{StaticResource ElevatedBrush}"
-                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="{StaticResource RadiusInput}"
+                            <Border Style="{StaticResource PopoverCard}"
                                     MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
-                                    Margin="0,4,0,0" Padding="4"
-                                    Effect="{StaticResource FloatingShadow}">
+                                    Margin="0,4,36,36" Padding="4">
                                 <ScrollViewer MaxHeight="280">
                                     <ItemsPresenter/>
                                 </ScrollViewer>
@@ -1172,6 +1226,7 @@
          the gradient; both repeat buttons are transparent so nothing covers it.
          ==================================================================== -->
     <Style x:Key="SpectrumSlider" TargetType="Slider">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Height" Value="20"/>
         <Setter Property="MinWidth" Value="120"/>
         <Setter Property="IsMoveToPointEnabled" Value="True"/>
@@ -1217,6 +1272,7 @@
     </Style>
 
     <Style x:Key="DarkSlider" TargetType="Slider">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Height" Value="20"/>
         <Setter Property="MinWidth" Value="120"/>
         <Setter Property="IsMoveToPointEnabled" Value="True"/>
@@ -1315,6 +1371,7 @@
          single control instead of a box inside a box.
          ==================================================================== -->
     <Style x:Key="BareTextBox" TargetType="TextBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="SelectionBrush" Value="{StaticResource AccentBrush}"/>
@@ -1338,6 +1395,7 @@
          field. Divider on its left edge, icon-font glyph, hover highlight.
          ==================================================================== -->
     <Style x:Key="FieldChevronButton" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="22"/>
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
@@ -1382,6 +1440,7 @@
          preset's real weight, then the number. Selected row = accent fill.
          ==================================================================== -->
     <Style x:Key="SizePresetRow" TargetType="RadioButton">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Height" Value="30"/>
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -1425,6 +1484,7 @@
          DARK CHECKBOX — macOS-style; checked = blue fill + white check.
          ==================================================================== -->
     <Style x:Key="DarkCheckBox" TargetType="CheckBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBodyLg}"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -1483,18 +1543,14 @@
          leaking light Windows chrome. Implicit-style ready; reference by key.
          ==================================================================== -->
     <Style x:Key="DarkContextMenu" TargetType="ContextMenu">
-        <Setter Property="Background" Value="{StaticResource ElevatedBrush}"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContextMenu">
-                    <Border Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{StaticResource RadiusInput}" Padding="4"
-                            Effect="{StaticResource FloatingShadow}">
+                    <!-- Same card as every popover. It used to carry its own material and
+                         a shadow with no margin to fall into, so the one menu the user
+                         right-clicks most sat flat against whatever was behind it. -->
+                    <Border Style="{StaticResource PopoverCard}" Margin="0,0,36,36" Padding="4">
                         <ItemsPresenter/>
                     </Border>
                 </ControlTemplate>
@@ -1517,9 +1573,15 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="CheckGlyph" Grid.Column="0" Text="&#xE73E;"
-                                       FontFamily="{StaticResource IconFont}" FontSize="{StaticResource TextBody}"
-                                       VerticalAlignment="Center" Visibility="Hidden"/>
+                            <!-- DarkCheckBox's tick, drawn not typed: the last font code point
+                                 in a shared template. Same geometry, same round caps, so a
+                                 checked menu row and a checked box are one mark. -->
+                            <Path x:Name="CheckGlyph" Grid.Column="0" Visibility="Hidden"
+                                  Width="18" Height="18" Stretch="None"
+                                  Stroke="{TemplateBinding Foreground}" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round" Data="M4,9 L8,13 L14,5"
+                                  VerticalAlignment="Center"/>
                             <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
                             <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}"
                                        Foreground="{StaticResource TextSecondaryBrush}" Margin="20,0,0,0"/>
@@ -1557,11 +1619,12 @@
          when the revealed content is off-screen.
          ==================================================================== -->
     <Style x:Key="DisclosureToggle" TargetType="ToggleButton">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="HorizontalAlignment" Value="Left"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Padding" Value="6,4"/>
+        <Setter Property="Padding" Value="2,4,6,4"/>
         <Setter Property="Margin" Value="0,2"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
@@ -1576,14 +1639,26 @@
                             <Border x:Name="Hover" Opacity="0" Background="{StaticResource HoverFillBrush}"
                                     CornerRadius="{StaticResource RadiusChip}"/>
                             <StackPanel Orientation="Horizontal" Margin="{TemplateBinding Padding}">
-                                <TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
-                                           FontSize="{StaticResource GlyphMicro}" VerticalAlignment="Center"
-                                           Margin="0,0,6,0" RenderTransformOrigin="0.5,0.5"
-                                           Foreground="{TemplateBinding Foreground}">
-                                    <TextBlock.RenderTransform>
-                                        <RotateTransform x:Name="ChevronSpin" Angle="0"/>
-                                    </TextBlock.RenderTransform>
-                                </TextBlock>
+                                <!-- The family's own chevron, at the family's weight. This was
+                                     Segoe MDL2's E76C: one of the last two font code points in a
+                                     SHARED template, which put a second icon family inside every
+                                     window that draws a disclosure row. ChevronDown points down,
+                                     so closed is -90 and open is 0 — the same quarter turn the
+                                     right-pointing glyph made from 0 to 90. -->
+                                <!-- Hosted at the family's own 18: the Viewbox scales the
+                                     1.667-unit stroke with the box, so a 12px host would have
+                                     painted this chevron at 0.83px against everything else's
+                                     1.25. Its ink starts 4.5px inside that box, so the row's
+                                     left padding comes in to match and the lead the eye sees is
+                                     what it was. -->
+                                <ContentControl x:Name="Chevron" Content="{StaticResource SurveyIcon.ChevronDown}"
+                                                Width="18" Height="18" VerticalAlignment="Center"
+                                                Margin="0,0,2,0" RenderTransformOrigin="0.5,0.5"
+                                                Foreground="{TemplateBinding Foreground}">
+                                    <ContentControl.RenderTransform>
+                                        <RotateTransform x:Name="ChevronSpin" Angle="-90"/>
+                                    </ContentControl.RenderTransform>
+                                </ContentControl>
                                 <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </StackPanel>
                         </Grid>
@@ -1600,7 +1675,7 @@
                                 <BeginStoryboard>
                                     <Storyboard>
                                         <DoubleAnimation Storyboard.TargetName="ChevronSpin"
-                                                         Storyboard.TargetProperty="Angle" To="90"
+                                                         Storyboard.TargetProperty="Angle" To="0"
                                                          Duration="{StaticResource MotionQuick}"
                                                          EasingFunction="{StaticResource EaseOutCubic}"/>
                                     </Storyboard>
@@ -1610,7 +1685,7 @@
                                 <BeginStoryboard>
                                     <Storyboard>
                                         <DoubleAnimation Storyboard.TargetName="ChevronSpin"
-                                                         Storyboard.TargetProperty="Angle" To="0"
+                                                         Storyboard.TargetProperty="Angle" To="-90"
                                                          Duration="{StaticResource MotionQuick}"
                                                          EasingFunction="{StaticResource EaseOutCubic}"/>
                                     </Storyboard>
@@ -1929,7 +2004,7 @@
                                 <Border x:Name="Hover" Opacity="0" CornerRadius="5"
                                         Background="{StaticResource HoverShadeBrush}"/>
                                 <Border x:Name="Press" Opacity="0" CornerRadius="5"
-                                        Background="{StaticResource AccentPressedBrush}"/>
+                                        Background="{StaticResource PressedShadeBrush}"/>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   RecognizesAccessKey="True"
                                                   Margin="{TemplateBinding Padding}"
@@ -2066,6 +2141,7 @@
          20px icon + 1px border per side), 6px radius. Checked = neutral chip.
          ==================================================================== -->
     <Style x:Key="StripToolButton" TargetType="ToggleButton">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="40"/>
         <Setter Property="Height" Value="32"/>
         <Setter Property="Margin" Value="0"/>
@@ -2118,10 +2194,62 @@
         </Setter>
     </Style>
 
+    <!-- StripToolButton's material on a row that carries WORDS as well as a glyph.
+         Same chip, same washes, same radius — only the fixed 40x32 box and the 20x20
+         Viewbox are gone, because a Viewbox sized for one glyph scales a whole
+         sentence down to fit it. -->
+    <Style x:Key="StripToolRow" TargetType="ToggleButton" BasedOn="{StaticResource StripToolButton}">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <Setter Property="Width" Value="Auto"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
+                            BorderBrush="Transparent" BorderThickness="1">
+                        <Grid>
+                            <Border x:Name="Chip" Opacity="0" Margin="-1" CornerRadius="6"
+                                    BorderThickness="1" BorderBrush="{StaticResource ToolChipRingBrush}"
+                                    Background="{StaticResource ToolChipBrush}"/>
+                            <Border x:Name="Hover" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource HoverFillBrush}"/>
+                            <Border x:Name="Press" Opacity="0" CornerRadius="5"
+                                    Background="{StaticResource PressedShadeBrush}"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Left" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource ChipIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ChipOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Effect" Value="{StaticResource ChromeLiftShadow}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bg" Property="Effect" Value="{StaticResource ChromePressShadow}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- A text tab above the sub-row: 24 tall, 8px inline padding, 2px underline
          on the selected one. The underline is the accent — it marks WHICH pane
          you are in, which is a mode, not a pen. -->
     <Style x:Key="StripTab" TargetType="RadioButton">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
         <Setter Property="Height" Value="24"/>
         <Setter Property="Padding" Value="8,0"/>
@@ -2161,27 +2289,18 @@
     <!-- One row of the zoom/fit menu: 8x6 padding, 2px radius, quiet by default.
          Survey paints no hover here and the code sets the active row's Foreground
          as a local value, so the template must leave Foreground alone. -->
-    <Style x:Key="MenuRowButton" TargetType="Button">
-        <Setter Property="Height" Value="28"/>
-        <Setter Property="HorizontalAlignment" Value="Stretch"/>
-        <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bg" Background="Transparent" CornerRadius="2" Padding="8,6">
-                        <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
+    <!-- ====================================================================
+         MENU ROW — one row of any popup menu in the app: the fit menu, the eraser
+         mode menu, anything that comes after them.
 
-    <!-- One row of a chrome popup menu: full width, 28 tall, 4px radius. -->
+         There were three of these. The fit menu's rows were 11px muted grey with a
+         2px radius and NO hover feedback of any kind; the eraser menu's were 12px
+         primary white with a 4px radius and a hover wash; this one, the only
+         complete one, was written and then never used. Two menus that open from
+         buttons an inch apart cannot be two different controls.
+         ==================================================================== -->
     <Style x:Key="ChromeMenuItem" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="0,1"/>
@@ -2222,43 +2341,10 @@
         </Setter>
     </Style>
 
-    <!-- Eraser split-menu row: 10x6 padding, 4px radius, hover-only highlight. -->
-    <Style x:Key="EraserModeRow" TargetType="Button">
-        <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="HorizontalAlignment" Value="Stretch"/>
-        <Setter Property="Padding" Value="10,6"/>
-        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"/>
-                        <!-- Wave 0: the hover wash cross-fades like every other row in the
-                             app rather than snapping, so this menu does not read as a
-                             different control from the ones beside it. -->
-                        <Border x:Name="Hover" Opacity="0" CornerRadius="4"
-                                Background="{StaticResource HoverFillBrush}"/>
-                        <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"
-                                          Margin="{TemplateBinding Padding}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
-                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
     <!-- `.ctx-color-swatch`: a bare 24px disc. The content IS the appearance —
          no button box, no hover, no border of its own. -->
     <Style x:Key="ColorSwatchWell" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="24"/>
         <Setter Property="Height" Value="24"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -2294,12 +2380,39 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
+                    <Grid>
+                        <!-- Content INSIDE Bd, washes over the top — ToolButton's stacking, and
+                             the geometry the align cells had before they shared this template:
+                             a ContentPresenter that is a sibling of the border centres in the
+                             whole box rather than inside the 1px rule, and every dot in the 3x3
+                             align grid moved a pixel up and left.
+                             Padding used to be dropped on the floor here, so the Aa chip asked
+                             for 8px either side, got none, and auto-sized to an 18px box with
+                             its letters a pixel from a 5px radius. -->
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <!-- These were the only interactive controls in the editor with no
+                             response to the pointer at all: B, I, U, S, the align trigger, the
+                             Aa chip and all nine align cells took a click and gave nothing back.
+                             The washes are the app's own, cross-faded like every other row. -->
+                        <Border x:Name="Hover" Opacity="0" CornerRadius="4" Margin="1"
+                                Background="{StaticResource HoverFillBrush}" IsHitTestVisible="False"/>
+                        <Border x:Name="Press" Opacity="0" CornerRadius="4" Margin="1"
+                                Background="{StaticResource PressedShadeBrush}" IsHitTestVisible="False"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource PressOut}"/></Trigger.ExitActions>
+                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
                         </Trigger>
@@ -2317,16 +2430,9 @@
         <Setter Property="Margin" Value="2"/>
         <Setter Property="Background" Value="{StaticResource ChromeCellBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+        <!-- No Template of its own: it was a copy of CompactFormatButton's one radius step
+             smaller, and the copy is how nine cells ended up with no hover or press wash while
+             the chips beside them were about to get one. -->
     </Style>
 
     <!-- ====================================================================
@@ -2585,11 +2691,8 @@
                         <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="6"
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True" Focusable="False">
-                            <Border x:Name="Pop" Background="{StaticResource ElevatedBrush}"
-                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-                                    CornerRadius="8" MinWidth="126" Padding="5" Margin="0,0,30,30"
-                                    Effect="{StaticResource ChromePopoverShadow}"
-                                    RenderTransformOrigin="0.5,0">
+                            <Border x:Name="Pop" Style="{StaticResource PopoverCard}"
+                                    MinWidth="126" Padding="5" Margin="0,0,36,36">
                                 <Border.RenderTransform>
                                     <TransformGroup>
                                         <ScaleTransform x:Name="PopScale" ScaleX="0.98" ScaleY="0.98"/>
@@ -2661,6 +2764,7 @@
          24x22 chevron cell that opens the preset popover.
          ==================================================================== -->
     <Style x:Key="SizeFieldInput" TargetType="TextBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="43"/>
         <Setter Property="Height" Value="22"/>
         <Setter Property="Padding" Value="5,0"/>
