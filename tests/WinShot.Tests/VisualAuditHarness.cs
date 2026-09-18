@@ -150,6 +150,14 @@ public class VisualAuditHarness
             yield return ($"editor-{t.ToLowerInvariant()}",
                 () => new EditorWindow(Shot(1200, 760), settings, history), w => PickTool(w, t));
         }
+        // The counter-series row menu only exists once a row does, and a row only exists once a
+        // counter pin is on the canvas — so two rounds of this sweep opened an empty editor and
+        // recorded the menu as NEVER OPENED. This surface drops three pins with the Step tool
+        // armed, through the same PointerArgs seam the counter tests use, and then the menu is
+        // there to be rendered like any other.
+        yield return ("editor-counters",
+            () => new EditorWindow(Shot(1200, 760), settings, history),
+            w => { PickTool(w, "Step"); DropCounters(w, 3); });
         yield return ("history", () => new HistoryWindow(history, settings), null);
         yield return ("settings-general", () => new SettingsWindow(settings), null);
         yield return ("settings-shortcuts", () => new SettingsWindow(settings),
@@ -244,6 +252,36 @@ public class VisualAuditHarness
     {
         if (w.FindName(tool + "ToolBtn") is System.Windows.Controls.Primitives.ToggleButton b)
             b.IsChecked = true;
+    }
+
+    /// <summary>
+    /// Drops <paramref name="count"/> counter pins on the canvas. A counter is placed
+    /// press-and-release on the spot, which is what PointerDown/PointerUp with the same
+    /// PointerArgs is — the seam EditorCounterSeriesTests already drives.
+    /// </summary>
+    private static void DropCounters(Window w, int count)
+    {
+        if (w is not EditorWindow editor) return;
+        if (w.FindName("AnnotationCanvas") is not FrameworkElement canvas) return;
+        if (w.FindName("Viewport") is not FrameworkElement viewport) return;
+
+        for (int i = 0; i < count; i++)
+        {
+            var at = new Point(160 + (i * 90), 180);
+            var args = new EditorWindow.PointerArgs(
+                at, canvas.TranslatePoint(at, viewport), System.Windows.Input.MouseButton.Left, 1);
+            editor.PointerDown(args);
+            Pump();
+            editor.PointerUp(args);
+            Pump();
+        }
+        // The dropdown builds its rows — and their menus — from the series list.
+        editor.GetType()
+            .GetMethod("RefreshCounterSeriesChrome",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?.Invoke(editor, null);
+        w.UpdateLayout();
+        Pump();
     }
 
     /// <summary>

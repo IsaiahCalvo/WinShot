@@ -1,4 +1,4 @@
-﻿using System.Drawing.Drawing2D;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -342,7 +342,7 @@ public sealed class ScrollControlsBar : WF.Form
             Size = new SD.Size(S(250), S(24)),
             AutoEllipsis = true,
             ForeColor = ThemePalette.TextSecondary,
-            Font = ThemePalette.UiFont(ThemePalette.TextBodyPt),
+            Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale),
             Text = "Scroll capture ready",
             // Before capture the bar is a single Start Capture capsule: a status line
             // reading "ready" and a toggle for a run that hasn't begun are both answers to
@@ -366,14 +366,16 @@ public sealed class ScrollControlsBar : WF.Form
         _auto.Visible = false; // revealed with the status line when capture starts
         _auto.Click += (_, _) => PerformAction(ScrollChromeAction.ToggleAuto);
 
+        // AccentDeep, not Accent: these two carry a WHITE label, and white on the raw accent is
+        // 3.65:1 — under the text floor, on the only two affirmative buttons this surface has.
         _start = MakeButton("Start capture", "ScrollCaptureStart", "Start scrolling capture",
             "Begin capturing without moving focus from the captured app. Keyboard shortcut: Alt+S.",
-            ThemePalette.Accent, SD.Color.White);
+            ThemePalette.AccentDeep, SD.Color.White);
         _start.Click += (_, _) => PerformAction(ScrollChromeAction.Start);
 
         _done = MakeButton("Done", "ScrollCaptureDone", "Finish scrolling capture",
             "Keep the captured result. Keyboard shortcut: Alt+D.",
-            ThemePalette.Accent, SD.Color.White);
+            ThemePalette.AccentDeep, SD.Color.White);
         _done.Visible = false;
         _done.Click += (_, _) => PerformAction(ScrollChromeAction.Done);
 
@@ -582,7 +584,7 @@ public sealed class ScrollControlsBar : WF.Form
             Padding = new WF.Padding(S(14), S(6), S(14), S(6)),
             Margin = new WF.Padding(S(8), 0, 0, 0),
             Anchor = WF.AnchorStyles.None,
-            Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
+            Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyLgPt, _scale, SD.FontStyle.Bold),
             MinimumSize = new SD.Size(0, S(40)),
             AccessibleName = accessibleName,
             AccessibleDescription = accessibleDescription,
@@ -741,7 +743,7 @@ public sealed class ScrollPreviewPanel : WF.Form
             Dock = WF.DockStyle.Bottom,
             Height = S(32), // two lines, so the "slow down" warning fits
             ForeColor = ThemePalette.TextSecondary,
-            Font = ThemePalette.UiFont(ThemePalette.TextCaptionPt),
+            Font = ThemePalette.ScaledUiFont(ThemePalette.TextCaptionPt, _scale),
             Text = "Capturing…",
             TextAlign = SD.ContentAlignment.MiddleCenter,
             AccessibleName = "Scrolling capture preview status",

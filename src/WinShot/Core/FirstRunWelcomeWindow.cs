@@ -59,6 +59,8 @@ public sealed class FirstRunWelcomeWindow : WF.Form
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = ThemePalette.ToolbarBg;
+        // Inherited by the "Got it" button, which sets no face of its own.
+        Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale);
         FormBorderStyle = WF.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.Manual;
@@ -81,8 +83,8 @@ public sealed class FirstRunWelcomeWindow : WF.Form
             S(CardWidthDip),
             S(HeaderHeightDip + RowHeightDip * actions.Count + FooterHeightDip) + S(TailHeightDip));
 
-        _titleFont = ThemePalette.UiFont(ThemePalette.TextTitlePt, SD.FontStyle.Bold);
-        _subtitleFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+        _titleFont = ThemePalette.ScaledUiFont(ThemePalette.TextTitlePt, _scale, SD.FontStyle.Bold);
+        _subtitleFont = ThemePalette.ScaledUiFont(ThemePalette.TextCaptionPt, _scale);
 
         // Real controls, not painted rectangles with a hit test. The rows are the whole point
         // of WinShot's one onboarding surface, and as paint they had no tab stop, no
@@ -296,20 +298,52 @@ public sealed class FirstRunWelcomeWindow : WF.Form
 
         SD.Rectangle body = BodyBounds;
 
+        (SD.Rectangle title, SD.Rectangle subtitle) = HeaderBounds(body, _scale);
         WF.TextRenderer.DrawText(
-            g, "WinShot is ready", _titleFont,
-            new SD.Rectangle(S(PadDip), body.Top + S(12), body.Width - S(PadDip * 2), S(24)),
-            ThemePalette.TextPrimary,
+            g, "WinShot is ready", _titleFont, title, ThemePalette.TextPrimary,
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter);
 
         WF.TextRenderer.DrawText(
             g, "Try one now, or find everything in the tray icon.",
-            _subtitleFont,
-            new SD.Rectangle(S(PadDip), body.Top + S(34), body.Width - S(PadDip * 2), S(18)),
-            ThemePalette.TextSecondary,
+            _subtitleFont, subtitle, ThemePalette.TextSecondary,
             WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter);
 
         PopupChrome.DrawBorder(g, ClientSize, S(CornerDip));
+    }
+
+    /// <summary>
+    /// The card's two header rows. 10..36 and 36..56, not 12..36 and 34..52: the two boxes used
+    /// to OVERLAP by two design pixels, so the title's descenders were painted into the top of
+    /// the subtitle's row and the subtitle had no clearance above it at all. The title's box was
+    /// also a design pixel short of what 16-DIP bold needs once the descender is counted — the
+    /// same thing ToastWindow's own title row carries a comment about. Here rather than inline
+    /// so a test can say the two boxes do not touch without re-typing the numbers.
+    /// </summary>
+    internal static (SD.Rectangle Title, SD.Rectangle Subtitle) HeaderBounds(
+        SD.Rectangle body, double scale)
+    {
+        int Px(int logical) => Recording.RecordingMonitorDpi.Px(logical, scale);
+        int left = Px(PadDip);
+        int width = body.Width - Px(PadDip * 2);
+        return (
+            new SD.Rectangle(left, body.Top + Px(10), width, Px(26)),
+            new SD.Rectangle(left, body.Top + Px(36), width, Px(20)));
+    }
+
+    /// <summary>
+    /// One row's three boxes: the glyph, the title and the hint. Same story as
+    /// <see cref="HeaderBounds"/> — the title and hint used to overlap by two design pixels.
+    /// </summary>
+    internal static (SD.Rectangle Glyph, SD.Rectangle Title, SD.Rectangle Hint) RowBounds(
+        SD.Size row, double scale)
+    {
+        int Px(int logical) => Recording.RecordingMonitorDpi.Px(logical, scale);
+        int textX = Px(42);
+        int textW = row.Width - Px(52);
+        return (
+            new SD.Rectangle(Px(10), Px(12), Px(24), Px(24)),
+            new SD.Rectangle(textX, Px(4), textW, Px(22)),
+            new SD.Rectangle(textX, Px(26), textW, Px(18)));
     }
 
     /// <summary>
@@ -395,9 +429,9 @@ public sealed class FirstRunWelcomeWindow : WF.Form
             _scale = scale;
             _invoke = invoke;
             _wash = new StateAmount(this);
-            _glyphFont = ThemePalette.IconFont(ThemePalette.TextTitlePt);
-            _titleFont = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold);
-            _hintFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
+            _glyphFont = ThemePalette.ScaledIconFont(ThemePalette.TextTitlePt, scale);
+            _titleFont = ThemePalette.ScaledUiFont(ThemePalette.TextBodyLgPt, scale, SD.FontStyle.Bold);
+            _hintFont = ThemePalette.ScaledUiFont(ThemePalette.TextCaptionPt, scale);
 
             SetStyle(
                 WF.ControlStyles.AllPaintingInWmPaint |
@@ -465,19 +499,35 @@ public sealed class FirstRunWelcomeWindow : WF.Form
                 g.DrawPath(ring, path);
             }
 
+            (SD.Rectangle glyphBox, SD.Rectangle titleBox, SD.Rectangle hintBox) =
+                RowBounds(Size, _scale);
+
+            // Centred in its box, both ways. DrawString with only a layout rectangle hangs the
+            // glyph off the rectangle's TOP-LEFT and adds the face's internal leading, so the
+            // three glyphs sat at three different heights inside three identical boxes — one of
+            // them a pixel off the top edge — while the titles beside them lined up exactly.
             using (var glyphBrush = new SD.SolidBrush(ThemePalette.Accent))
-                g.DrawString(_action.Glyph, _glyphFont, glyphBrush, new SD.RectangleF(S(10), S(12), S(24), S(24)));
+            using (var centre = new SD.StringFormat
+            {
+                Alignment = SD.StringAlignment.Center,
+                LineAlignment = SD.StringAlignment.Center,
+                FormatFlags = SD.StringFormatFlags.NoWrap,
+            })
+            {
+                SD.Text.TextRenderingHint previous = g.TextRenderingHint;
+                // The hint the rest of the app draws glyphs with; subpixel AA puts colour
+                // fringes on a monoline icon.
+                g.TextRenderingHint = SD.Text.TextRenderingHint.AntiAliasGridFit;
+                g.DrawString(_action.Glyph, _glyphFont, glyphBrush, (SD.RectangleF)glyphBox, centre);
+                g.TextRenderingHint = previous;
+            }
 
             WF.TextRenderer.DrawText(
-                g, _action.Title, _titleFont,
-                new SD.Rectangle(S(42), S(6), Width - S(52), S(20)),
-                ThemePalette.TextPrimary,
+                g, _action.Title, _titleFont, titleBox, ThemePalette.TextPrimary,
                 WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis);
 
             WF.TextRenderer.DrawText(
-                g, _action.Hint, _hintFont,
-                new SD.Rectangle(S(42), S(24), Width - S(52), S(18)),
-                ThemePalette.TextSecondary,
+                g, _action.Hint, _hintFont, hintBox, ThemePalette.TextSecondary,
                 WF.TextFormatFlags.Left | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.EndEllipsis);
         }
 

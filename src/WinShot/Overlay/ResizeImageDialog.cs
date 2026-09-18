@@ -1,4 +1,4 @@
-﻿using WinShot.Core;
+using WinShot.Core;
 using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
@@ -40,7 +40,7 @@ public sealed class ResizeImageDialog : WF.Form
         ShowInTaskbar = false;
         StartPosition = WF.FormStartPosition.CenterScreen;
         TopMost = true;
-        Font = ThemePalette.UiFont(ThemePalette.TextBodyPt);
+        Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale);
         SetStyle(
             WF.ControlStyles.AllPaintingInWmPaint |
             WF.ControlStyles.OptimizedDoubleBuffer |
@@ -140,7 +140,7 @@ public sealed class ResizeImageDialog : WF.Form
         {
             AutoSize = false,
             BackColor = Back,
-            Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = ThemePalette.ScaledUiFont(size, _scale, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? ThemePalette.TextPrimary,
             Location = new SD.Point(S(x), 0),
             // 12 pt Segoe UI Bold needs ~22 px of line box, so the title step gets its own

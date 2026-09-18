@@ -9,7 +9,9 @@ public sealed class FastDisplayPickerDialog : WF.Form
 {
     private static readonly SD.Color Back = ThemePalette.ToolbarBg;
     private static readonly SD.Color ButtonBack = ThemePalette.SurfaceAlt;
-    private static readonly SD.Color Accent = ThemePalette.Accent;
+    // AccentDeep: the Record button is a DarkButton, which puts a WHITE label on a saturated
+    // fill, and white on the raw accent is 3.65:1 — under the 4.5:1 text floor.
+    private static readonly SD.Color Accent = ThemePalette.AccentDeep;
     private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
 
     // Point fonts render at the monitor's DPI, so the fixed-pixel layout scales with
@@ -46,7 +48,7 @@ public sealed class FastDisplayPickerDialog : WF.Form
         panel.Controls.Add(new WF.Label
         {
             AutoSize = false,
-            Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
+            Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyLgPt, _scale, SD.FontStyle.Bold),
             ForeColor = TextColor,
             Height = S(24),
             Margin = new WF.Padding(0, 0, 0, S(8)),

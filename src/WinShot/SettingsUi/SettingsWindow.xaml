@@ -251,11 +251,14 @@
         </Style>
 
         <!-- A single icon-over-label tab cell. -->
-        <Style x:Key="NavTabIcon" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
-            <Setter Property="FontSize" Value="{StaticResource GlyphAction}"/>
+        <!-- The rail's marks are DRAWN, so this styles the box rather than a face. Hosted at the
+             family's own 18, not the 20-DIP glyph step it used to type at: the family authors its
+             glyphs on a 24-unit grid at 1.667 units and hosts them at 18, which is what paints the
+             house's 1.25 px line. A 20 px host would make this rail the one place in the app whose
+             icons are a heavier stroke than everything else. -->
+        <Style x:Key="NavTabIcon" TargetType="ContentControl">
             <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Margin" Value="0,1,0,5"/>
         </Style>
         <Style x:Key="NavTabLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
@@ -446,50 +449,50 @@
                 </ListBox.ItemsPanel>
                 <ListBoxItem x:Name="GeneralNavItem" AutomationProperties.Name="General settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE713;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Gear}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="General"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="ShortcutsNavItem" AutomationProperties.Name="Shortcut settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE765;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Keyboard}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Shortcuts"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="QuickAccessNavItem"
                              AutomationProperties.Name="Quick Access settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE7C4;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.TaskView}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Quick Access"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="RecordingNavItem" AutomationProperties.Name="Recording settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE714;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Video}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Recording"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="ScreenshotsNavItem" AutomationProperties.Name="Screenshot settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE722;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Camera}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Screenshots"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="AnnotateNavItem" AutomationProperties.Name="Annotate settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE70F;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Pen}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Annotate"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="AdvancedNavItem" AutomationProperties.Name="Advanced settings">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE90F;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Sliders}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="Advanced"/>
                     </StackPanel>
                 </ListBoxItem>
                 <ListBoxItem x:Name="AboutNavItem" AutomationProperties.Name="About WinShot">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource NavTabIcon}" Text="&#xE946;"/>
+                        <ContentControl Style="{StaticResource NavTabIcon}" Content="{StaticResource SurveyIcon.Info}"/>
                         <TextBlock Style="{StaticResource NavTabLabel}" Text="About"/>
                     </StackPanel>
                 </ListBoxItem>

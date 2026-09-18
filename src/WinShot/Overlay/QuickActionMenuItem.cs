@@ -324,6 +324,12 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
     /// over the region instead, and a rectangle would lose its corners to the clip.</summary>
     private sealed class RoundedMenuRenderer : DarkDropDown.DarkMenuRenderer
     {
+        /// <summary>The card's plate is pinned by hand and stays where it is; every other menu in
+        /// the app moved to the palette's Elevated.</summary>
+        internal RoundedMenuRenderer() : base(SD.Color.FromArgb(35, 35, 38))
+        {
+        }
+
         protected override void OnRenderToolStripBorder(WF.ToolStripRenderEventArgs e)
         {
         }

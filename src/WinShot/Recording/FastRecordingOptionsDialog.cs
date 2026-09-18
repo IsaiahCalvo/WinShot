@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using ScreenRecorderLib;
 using WinShot.Core;
 using SD = System.Drawing;
@@ -12,8 +12,16 @@ public sealed class FastRecordingOptionsDialog : WF.Form
     private static readonly SD.Color FieldBack = ThemePalette.SurfaceAlt;
     private static readonly SD.Color TextColor = ThemePalette.TextPrimary;
     private static readonly SD.Color MutedText = ThemePalette.TextSecondary;
-    private static readonly SD.Color HintText = SD.Color.FromArgb(170, 170, 170);
-    private static readonly SD.Color Accent = ThemePalette.Accent;
+    // TextSecondary, not a grey typed in by hand: 170/170/170 is off the palette by six
+    // channels and reads 6.5:1 where the token beside it reads 8.1, so the two muted greys on
+    // this one card were visibly different weights of the same idea.
+    private static readonly SD.Color HintText = ThemePalette.TextSecondary;
+
+    // AccentDeep, not Accent: ActionButton puts a WHITE label on this fill, and white on the raw
+    // accent is 3.65:1 — under the 4.5:1 text floor, on the button that starts the recording.
+    // ThemePalette says so where AccentDeep is declared; this was the last WinForms fill that
+    // had not read it.
+    private static readonly SD.Color Accent = ThemePalette.AccentDeep;
 
     // Design-unit layout grid (96-DPI logical pixels, scaled by _scale everywhere).
     private const int DialogWidth = 286;
@@ -77,6 +85,8 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         _scale = RecordingMonitorDpi.ScaleFor(WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
+        // Inherited by every combo, checkbox, number box and button below: none sets its own.
+        Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyPt, _scale);
         ClientSize = new SD.Size(S(DialogWidth), S(400)); // height is owned by Reflow()
         FormBorderStyle = WF.FormBorderStyle.None;
         KeyPreview = true;
@@ -590,7 +600,7 @@ public sealed class FastRecordingOptionsDialog : WF.Form
         new()
         {
             AutoSize = false,
-            Font = ThemePalette.UiFont(size, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
+            Font = ThemePalette.ScaledUiFont(size, _scale, bold ? SD.FontStyle.Bold : SD.FontStyle.Regular),
             ForeColor = color ?? MutedText,
             Location = new SD.Point(S(x), 0),
             // 12 pt Segoe UI Bold needs ~22 px of line box, so the title step gets its own

@@ -75,9 +75,14 @@ internal static class DarkControlPalette
         SD.Color hovered = ThemePalette.Over(ThemePalette.HoverShade, rest);
         // The accent's pressed state is authored (Theme.xaml's AccentPressedColor), so the one
         // accent presses to one colour whether a DarkButton or a FlatAppearance draws it.
-        SD.Color pressed = rest.ToArgb() == ThemePalette.Accent.ToArgb()
-            ? ThemePalette.AccentPressed
-            : ThemePalette.Over(ThemePalette.PressedShade, rest);
+        // AccentDeep counts as the accent here: it is the same identity a step darker, the value
+        // every fill that carries WHITE TEXT has to use, and a button that moved onto it for
+        // contrast must not start pressing to a different blue from the one beside it.
+        SD.Color pressed =
+            rest.ToArgb() == ThemePalette.Accent.ToArgb()
+            || rest.ToArgb() == ThemePalette.AccentDeep.ToArgb()
+                ? ThemePalette.AccentPressed
+                : ThemePalette.Over(ThemePalette.PressedShade, rest);
         return Mix(Mix(rest, hovered, h), pressed, p);
     }
 }
@@ -534,7 +539,18 @@ public sealed class DarkDropDown : WF.Control
     /// <summary>Dark menu styling for the dropdown popup (and reusable elsewhere).</summary>
     public class DarkMenuRenderer : WF.ToolStripProfessionalRenderer
     {
-        public DarkMenuRenderer() : base(new DarkMenuColors())
+        public DarkMenuRenderer() : this(ThemePalette.Elevated)
+        {
+        }
+
+        /// <summary>
+        /// For the one menu whose plate is pinned by hand — the quick-actions card's. Every other
+        /// drop-down in the app takes <see cref="ThemePalette.Elevated"/>, which is the colour
+        /// Theme.xaml declares for "popups / flyouts / context menus" and which every WPF menu
+        /// already paints. This table used to hold a fourth dark grey of its own, so right-clicking
+        /// in the editor and right-clicking the tray icon gave two different cards.
+        /// </summary>
+        protected DarkMenuRenderer(SD.Color plate) : base(new DarkMenuColors(plate))
         {
         }
 
@@ -581,6 +597,19 @@ public sealed class DarkDropDown : WF.Control
                 : e.Item.Selected || e.Item.Pressed
                     ? SD.Color.White
                     : DarkControlPalette.Text;
+
+            // A DISABLED row is drawn by the base renderer through ControlPaint's own greyed-out
+            // path, which throws e.TextColor away and paints a light-theme grey: the tray menu's
+            // version header came out #6D6D6D on the card, 3.03:1, the least readable thing in
+            // the app. The row is a header, not an unavailable command, so it is drawn here in
+            // the palette's own muted text at 8.1:1.
+            if (!e.Item.Enabled)
+            {
+                WF.TextRenderer.DrawText(
+                    e.Graphics, e.Text, e.TextFont, e.TextRectangle, e.TextColor, e.TextFormat);
+                return;
+            }
+
             base.OnRenderItemText(e);
         }
 
@@ -595,17 +624,21 @@ public sealed class DarkDropDown : WF.Control
             g.FillEllipse(brush, r.X + (r.Width - d) / 2, r.Y + (r.Height - d) / 2, d, d);
         }
 
-        private sealed class DarkMenuColors : WF.ProfessionalColorTable
+        private sealed class DarkMenuColors(SD.Color plate) : WF.ProfessionalColorTable
         {
-            private static readonly SD.Color Back = SD.Color.FromArgb(35, 35, 38);
-            public override SD.Color ToolStripDropDownBackground => Back;
-            public override SD.Color ImageMarginGradientBegin => Back;
-            public override SD.Color ImageMarginGradientMiddle => Back;
-            public override SD.Color ImageMarginGradientEnd => Back;
-            public override SD.Color MenuBorder => SD.Color.FromArgb(70, 70, 74);
+            private readonly SD.Color _back = plate;
+
+            public override SD.Color ToolStripDropDownBackground => _back;
+            public override SD.Color ImageMarginGradientBegin => _back;
+            public override SD.Color ImageMarginGradientMiddle => _back;
+            public override SD.Color ImageMarginGradientEnd => _back;
+            public override SD.Color MenuBorder => ThemePalette.SurfaceHover;
             public override SD.Color MenuItemBorder => SD.Color.Transparent;
-            public override SD.Color SeparatorDark => SD.Color.FromArgb(70, 70, 74);
-            public override SD.Color SeparatorLight => Back;
+            // The 12 %-white hairline every other divider in the app is, composited onto this
+            // plate. It used to be #46464A — brighter than the token, and brighter than the
+            // menu's own border, which is the defect the WPF separators were fixed for last round.
+            public override SD.Color SeparatorDark => ThemePalette.Over(ThemePalette.Border, _back);
+            public override SD.Color SeparatorLight => _back;
         }
     }
 }

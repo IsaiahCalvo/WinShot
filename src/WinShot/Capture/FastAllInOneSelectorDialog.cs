@@ -1555,11 +1555,14 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         private int U(int logical) => (int)Math.Round(logical * _u);
 
         private readonly FastAllInOneSelectorDialog _owner;
-        private readonly SD.Font _glyphFont = ThemePalette.IconFont(ThemePalette.GlyphActionPt);
-        private readonly SD.Font _tipFont = ThemePalette.UiFont(ThemePalette.TextCaptionPt);
-        private readonly SD.Font _ocrFont = ThemePalette.UiFont(ThemePalette.GlyphTextPt, SD.FontStyle.Bold);
-        private readonly SD.Font _labelFont = ThemePalette.UiFont(ThemePalette.TextMicroPt);
-        private readonly SD.Font _fieldFont = ThemePalette.UiFont(ThemePalette.TextBodyLgPt);
+        // Sized off _u, the same number U() scales the layout by. A point-unit face resolves
+        // its pixel size against the PRIMARY monitor's device context, not this bar's, so on a
+        // mixed-DPI desktop the bar's boxes moved and its type did not.
+        private readonly SD.Font _glyphFont;
+        private readonly SD.Font _tipFont;
+        private readonly SD.Font _ocrFont;
+        private readonly SD.Font _labelFont;
+        private readonly SD.Font _fieldFont;
         private readonly List<BarButton> _buttons = new();
         private readonly WF.TextBox _widthBox;
         private readonly WF.TextBox _heightBox;
@@ -1586,6 +1589,11 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         public ToolbarForm(FastAllInOneSelectorDialog owner)
         {
             _owner = owner;
+            _glyphFont = ThemePalette.ScaledIconFont(ThemePalette.GlyphActionPt, _u);
+            _tipFont = ThemePalette.ScaledUiFont(ThemePalette.TextCaptionPt, _u);
+            _ocrFont = ThemePalette.ScaledUiFont(ThemePalette.GlyphTextPt, _u, SD.FontStyle.Bold);
+            _labelFont = ThemePalette.ScaledUiFont(ThemePalette.TextMicroPt, _u);
+            _fieldFont = ThemePalette.ScaledUiFont(ThemePalette.TextBodyLgPt, _u);
 
             AutoScaleMode = WF.AutoScaleMode.None;
             BackColor = BarFill;
@@ -2212,7 +2220,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 BackColor = FieldFill,
                 BorderStyle = WF.BorderStyle.None,
-                Font = ThemePalette.UiFont(ThemePalette.TextBodyLgPt, SD.FontStyle.Bold),
+                Font = ThemePalette.ScaledUiFont(ThemePalette.TextBodyLgPt, _u, SD.FontStyle.Bold),
                 ForeColor = SD.Color.White,
                 TextAlign = WF.HorizontalAlignment.Center,
             };

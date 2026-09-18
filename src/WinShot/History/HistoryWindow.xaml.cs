@@ -994,7 +994,13 @@ public partial class HistoryWindow : Window
         }
 
         HistoryEmptyState state = HistoryEmptyState.For(_filter, _settings.Current.HistoryEnabled, _loadError);
-        EmptyStateGlyph.Text = state.Glyph;
+        // A drawn mark now, not a code point: the state names the resource and the window
+        // fetches it. x:Shared="False" on every SurveyIcon means each fetch is its own visual.
+        EmptyStateGlyph.Child = new System.Windows.Controls.ContentControl
+        {
+            Content = TryFindResource(state.Glyph),
+            Foreground = (System.Windows.Media.Brush)FindResource("TextDisabledBrush"),
+        };
         EmptyStateTitle.Text = state.Title;
         EmptyStateBody.Text = state.Body;
         NewCaptureButton.Visibility = state.ShowNewCapture ? Visibility.Visible : Visibility.Collapsed;
@@ -1122,7 +1128,8 @@ public partial class HistoryWindow : Window
     private void OnToggleSortDirection(object sender, RoutedEventArgs e)
     {
         _sortDescending = !_sortDescending;
-        SortDirectionGlyph.Text = _sortDescending ? "\uE74B" : "\uE74A";
+        SortDirectionGlyph.Content = TryFindResource(
+            _sortDescending ? "SurveyIcon.SortDescending" : "SurveyIcon.SortAscending");
         SortDirectionButton.SetValue(System.Windows.Automation.AutomationProperties.NameProperty,
             _sortDescending ? "Sort descending" : "Sort ascending");
         ApplyFilter();
@@ -2141,6 +2148,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShimmerVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UnreadableVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderGlyph)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderMark)));
         }
     }
 
@@ -2245,13 +2253,17 @@ public sealed class HistoryItem : INotifyPropertyChanged
 
     /// <summary>Segoe MDL2 picture while the tile is still loading, warning once it has given
     /// up — the same two glyphs the empty state uses for the same two meanings.</summary>
-    // Segoe MDL2: picture while it loads, warning once it has given up. Spelled as escapes
-    // to stay greppable next to HistoryEmptyState, which picks the same two glyphs for the
-    // same two meanings; the literal private-use characters read as boxes in a diff.
-    public const string LoadingGlyph = "\uE91B";
-    public const string UnreadableGlyph = "\uE7BA";
+    // The keys of two DRAWN marks in SurveyToolIcons.xaml: a picture while the thumbnail loads,
+    // a warning once it has given up. The same two HistoryEmptyState names for the same two
+    // meanings — they were the last font code points in this window.
+    public const string LoadingGlyph = "SurveyIcon.Photo";
+    public const string UnreadableGlyph = "SurveyIcon.Warning";
 
     public string PlaceholderGlyph => ThumbnailTried ? UnreadableGlyph : LoadingGlyph;
+
+    /// <summary>The mark itself, for the tile to host. x:Shared="False" on every SurveyIcon
+    /// means each tile gets its own visual rather than fighting over one.</summary>
+    public object? PlaceholderMark => Application.Current?.TryFindResource(PlaceholderGlyph);
     public Visibility ScrollingVisibility => IsScrollingCapture ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Bar across the bottom of a video tile: camcorder glyph, clip length, file size.</summary>
@@ -2301,6 +2313,7 @@ public sealed class HistoryItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShimmerVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UnreadableVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderGlyph)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaceholderMark)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ThumbnailVisibility)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFallbackVisibility)));
         }
