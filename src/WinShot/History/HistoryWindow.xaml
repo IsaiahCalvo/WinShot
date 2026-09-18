@@ -139,7 +139,11 @@
                 <StackPanel x:Name="SortControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <TextBlock Text="Sort by:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="{StaticResource ChipGutterMargin}"/>
                     <Button x:Name="SortFieldButton" Style="{StaticResource PillButtonSecondary}" Click="OnSortFieldMenu">
-                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><Viewbox Width="12" Height="12" Margin="12,4,0,0"><ContentControl Content="{StaticResource SurveyIcon.ChevronDown}"/></Viewbox></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock x:Name="SortFieldText" Text="Date"/><!-- The negative right margin cancels the glyph's own right bearing. The drawn chevron is
+                                 12 units of ink centred in a 24-unit grid, so a 12 px host carries 3 px of air on each
+                                 side; as the LAST thing in the row those 3 px are dead space the font code point did
+                                 not have, and the pill measured 3 px lopsided at 96 and 120 because of them. -->
+                            <Viewbox Width="12" Height="12" Margin="12,4,-3,0"><ContentControl Content="{StaticResource SurveyIcon.ChevronDown}"/></Viewbox></StackPanel>
                     </Button>
                     <Button x:Name="SortDirectionButton" Style="{StaticResource PillButtonSecondary}" MinWidth="40" Click="OnToggleSortDirection"
                             AutomationProperties.Name="Sort descending"><ContentControl x:Name="SortDirectionGlyph" Content="{StaticResource SurveyIcon.SortDescending}"/></Button>
