@@ -335,8 +335,7 @@ public class WinFormsAuditHarness
                 // is a straight line where the ring is a curve, so the arc still grazes the two
                 // bottom corners of the rectangle.
                 new Extra("countdown-hint", "badge",
-                    SD.Rectangle.Inflate(
-                        FastRecordingCountdownWindow.HintBounds(win.ClientSize, s), -P(3), 0),
+                    SD.Rectangle.Inflate(HintBox(win.ClientSize, s), -P(3), 0),
                     "Click or Esc to cancel", true),
             };
             return FromForm(win, extra);
@@ -347,13 +346,30 @@ public class WinFormsAuditHarness
         }
     }
 
+    /// <summary>The countdown hint's box, from the window itself where it publishes one and
+    /// from what it used to hard-code otherwise — the base has no such method, and a before/after
+    /// run builds this harness against the base's src.</summary>
+    private static SD.Rectangle HintBox(SD.Size client, double scale)
+    {
+        MethodInfo? bounds = typeof(FastRecordingCountdownWindow).GetMethod(
+            "HintBounds", BindingFlags.Static | BindingFlags.NonPublic);
+        if (bounds?.Invoke(null, new object[] { client, scale }) is SD.Rectangle box)
+            return box;
+        int Px(int logical) => (int)Math.Round(logical * scale);
+        return new SD.Rectangle(0, client.Height - Px(42), client.Width, Px(24));
+    }
+
     private static Shot? Keystroke(string run, double scale)
     {
         var pill = FastKeystrokeOverlayWindow.CreateForSmokeTest(new SD.Rectangle(0, 0, 1200, 700));
         try
         {
-            SD.Bitmap? frame = pill.ComposePillForAudit(run);
-            if (frame is null) return null;
+            // Reflected, and with a fallback, for one reason: a before/after run checks the base
+            // out over src/ and the base has no such seam. The same goes for HintBounds below.
+            MethodInfo? compose = typeof(FastKeystrokeOverlayWindow).GetMethod(
+                "ComposePillForAudit", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (compose is null) return null;
+            if (compose.Invoke(pill, new object[] { run }) is not SD.Bitmap frame) return null;
             // The pill's own text box, not the whole capsule: the capsule's rounded border is
             // chrome and measuring the chord against it says nothing about where the chord sits.
             int pad = (int)Math.Round(10 * scale);
