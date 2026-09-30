@@ -811,7 +811,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// loupe's own outer band, left at every position the pointer had passed through.
     /// Everything here now comes from the renderers' own geometry at the monitor's own scale.
     /// </summary>
-    private void InvalidateFollowAt(SD.Point pt)
+    private void InvalidateFollowAt(SD.Point pt, bool eraseMagnifier = false)
     {
         SD.Rectangle mon = MonitorBoundsAt(pt);
         double scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(mon);
@@ -819,18 +819,14 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(pt.X - band, mon.Top, band * 2, mon.Height));
         InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - band, mon.Width, band * 2));
 
-        // Both readouts, not whichever is showing: the magnifier toggles under `M` and the
-        // repaint has to erase what was on screen a frame ago, not what is on screen now.
+        // The toggle also uses this rect to erase the magnifier that was just hidden.
         var local = new SD.Point(pt.X - mon.Left, pt.Y - mon.Top);
-        SD.Rectangle loupe = FastSelectorLoupeRenderer.DirtyRect(mon.Size, _vs, local, pt, scale);
+        SD.Rectangle loupe = _magnifierOn || eraseMagnifier
+            ? FastSelectorLoupeRenderer.DirtyRect(mon.Size, _vs, local, pt, scale)
+            : SD.Rectangle.Empty;
         if (!loupe.IsEmpty)
             InvalidateScreenRect(new SD.Rectangle(
                 loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
-
-        SD.Rectangle readout = SelectorChrome.CursorReadoutDirtyRect(
-            mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
-        InvalidateScreenRect(new SD.Rectangle(
-            readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
 
         if (_instructionAlpha > 0d && InstructionRectAt(pt) is SD.Rectangle instruction)
             InvalidateScreenRect(instruction);
@@ -1166,9 +1162,8 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         _magnifierOn = !_magnifierOn;
         if (_magnifierOn)
             StartFollowMotion(); // the setting may be off, so the follow tick may not be running
-        // The same ground a pointer move dirties: the toggle swaps the loupe for the bare
-        // readout, so whichever was on screen has to be erased at the monitor's own scale.
-        InvalidateFollowAt(_currentScreen);
+        // Erase the magnifier and its coordinates at this monitor's scale.
+        InvalidateFollowAt(_currentScreen, eraseMagnifier: true);
     }
 
     internal void HandleMouseDown(WF.MouseEventArgs e)
@@ -2251,31 +2246,17 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         {
             var local = ToLocal(bright, monitorBounds);
             BrightenRegion(g, monitorBounds, local);
-            // Scaled like the edge-press glow below, which starts at this same 2 px weight:
-            // an unscaled base made hovering an edge pop the stroke a pixel wider at 150 %
-            // before the tween had done anything.
-            // In window mode the border carries the highlight's presence like the wash and
-            // the pill do. It used to be unconditionally opaque, which is why the entrance and
-            // the exit could not be given a fade: a solid border over a ramping tint reads as
-            // a pop against it, which is the note the wash's own comment used to carry.
-            //
-            // Whole pixels, because this surface paints with SmoothingMode.None and an aliased
-            // pen covers whole rows: 2 x 1.25 is 2.5, which is not two and a half rows of
-            // anything — it is whatever GDI+ rounds it to. Scanned across a whole glide it
-            // rounds UP and it rounds CONSISTENTLY (3 rows at 125 %, 3 at 150 %, 4 at 200 %),
-            // so there is no shimmer to fix; the ceiling is here to put that number in the
-            // source rather than leave it to the rasteriser, which is the same reason the
-            // crosshair guide's weight is rounded.
+            // One physical pixel at every screen scale, with the same highlight fade.
             using (var pen = new SD.Pen(
                 SD.Color.FromArgb((int)Math.Round(255 * highlight), Accent),
-                (float)Math.Ceiling(2d * Math.Max(1d, s))))
+                SelectorChrome.SelectionBorderWidth))
                 g.DrawRectangle(pen, local);
 
             // The edge under the pointer thickens: the only thing on the selection that says
             // "clicking here moves this one edge onto the nearest boundary".
             if (showHandles && _hoverEdge != MarqueeSide.None && _edgeGlow > 0.01d)
             {
-                float weight = (float)((2d + (4d * Math.Clamp(_edgeGlow, 0d, 1d))) * Math.Max(1d, s));
+                float weight = SelectorChrome.SelectionBorderWidth + (float)(2d * Math.Clamp(_edgeGlow, 0d, 1d));
                 using var edgePen = new SD.Pen(Accent, weight);
                 switch (_hoverEdge)
                 {
@@ -2382,10 +2363,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             if (CrosshairLinesVisible())
                 SelectorChrome.DrawCrosshair(g, clientSize, ToLocal(_currentScreen, monitorBounds), s);
 
-            // While dragging, the readout says how big the selection is; idle, where the
-            // pointer is. The loupe carries it when the magnifier is on, and the crosshair
-            // carries it on its own when the magnifier is off — either way the selector
-            // always answers "where am I".
+            // Alt hides the magnifier and its readout together.
             SD.Size dragSize = _dragging && _dragMoved
                 ? DragRect().Size
                 : SD.Size.Empty;
@@ -2394,14 +2372,6 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                 FastSelectorLoupeRenderer.Draw(
                     g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize,
                     WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
-            }
-            else if (dragSize.IsEmpty)
-            {
-                // Idle only. The readout answers "where am I"; mid-drag the magnifier is the
-                // surface that reports the extent, and a following pill that swells to a
-                // w × h figure is the dimension chrome this selector no longer draws.
-                SelectorChrome.DrawCursorReadout(g, clientSize,
-                    SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds), s);
             }
         }
 

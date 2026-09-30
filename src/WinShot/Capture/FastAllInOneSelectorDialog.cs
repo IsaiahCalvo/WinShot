@@ -556,7 +556,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
                 _magnifierOn = !_magnifierOn;
                 if (_magnifierOn)
                     StartFollowMotion(); // the setting may be off, so the follow tick may not be running
-                InvalidateAllSurfaces();
+                InvalidateFollowAt(_currentScreen, eraseMagnifier: true);
             }
             e.Handled = true;
             e.SuppressKeyPress = true; // no menu-loop ding on a borderless overlay
@@ -706,7 +706,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// <summary>All-In-One draws the same loupe as the region selector and had the same flat
     /// 250-px half-box erasing it, so it grew the same trail from 125 % up. Same fix: the
     /// dirty rect comes from the renderers' own geometry at the monitor's own scale.</summary>
-    private void InvalidateFollowAt(SD.Point pt)
+    private void InvalidateFollowAt(SD.Point pt, bool eraseMagnifier = false)
     {
         SD.Rectangle mon = MonitorBoundsAt(pt);
         double scale = WinShot.Recording.RecordingMonitorDpi.ScaleFor(mon);
@@ -715,15 +715,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         InvalidateScreenRect(new SD.Rectangle(mon.Left, pt.Y - band, mon.Width, band * 2));
 
         var local = new SD.Point(pt.X - mon.Left, pt.Y - mon.Top);
-        SD.Rectangle loupe = FastSelectorLoupeRenderer.DirtyRect(mon.Size, _vs, local, pt, scale);
+        SD.Rectangle loupe = _magnifierOn || eraseMagnifier
+            ? FastSelectorLoupeRenderer.DirtyRect(mon.Size, _vs, local, pt, scale)
+            : SD.Rectangle.Empty;
         if (!loupe.IsEmpty)
             InvalidateScreenRect(new SD.Rectangle(
                 loupe.X + mon.Left, loupe.Y + mon.Top, loupe.Width, loupe.Height));
 
-        SD.Rectangle readout = SelectorChrome.CursorReadoutDirtyRect(
-            mon.Size, SelectorReadout.Text(pt, SD.Size.Empty), local, scale);
-        InvalidateScreenRect(new SD.Rectangle(
-            readout.X + mon.Left, readout.Y + mon.Top, readout.Width, readout.Height));
     }
 
     /// <summary>The DPI factor of the surface a screen point lands on — the handles' dot and
@@ -1108,7 +1106,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         {
             var local = ToLocal(bright, monitorBounds);
             BrightenRegion(g, monitorBounds, local);
-            using (var pen = new SD.Pen(Accent, 2))
+            using (var pen = new SD.Pen(Accent, SelectorChrome.SelectionBorderWidth))
                 g.DrawRectangle(pen, local);
             if (_pendingPx is not null && !_dragging)
                 SelectionHandles.Draw(g, local, _handleScale, _resizeHandle,
@@ -1127,12 +1125,6 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             FastSelectorLoupeRenderer.Draw(
                 g, clientSize, _vs, ToLocal(_currentScreen, monitorBounds), _currentScreen, _frozen, dragSize,
                 WinShot.Recording.RecordingMonitorDpi.ScaleFor(monitorBounds));
-        }
-        else if (cursorOnThisSurface && dragSize.IsEmpty && _pendingPx is null && _hoverWindow is null)
-        {
-            // With the magnifier off nothing else on screen says where the pointer is.
-            SelectorChrome.DrawCursorReadout(g, clientSize,
-                SelectorReadout.Text(_currentScreen, dragSize), ToLocal(_currentScreen, monitorBounds), s);
         }
     }
 

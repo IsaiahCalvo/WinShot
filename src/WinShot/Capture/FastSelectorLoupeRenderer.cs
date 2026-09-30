@@ -52,13 +52,19 @@ internal static class FastSelectorLoupeRenderer
         {
             // With screen-freeze, sample from the frozen desktop bitmap so the loupe shows
             // the same still pixels the user is selecting (and avoids a live BitBlt per paint).
-            using var sample = frozen is not null
-                ? CropFrozenSample(frozen, loupe.SourceScreen, virtualScreen)
-                : CaptureService.CaptureScreenRegionWithoutLayeredWindows(loupe.SourceScreen);
-            SD.Color pixel = ReadTargetPixel(sample, loupe.TargetSample);
+            using var liveSample = frozen is null
+                ? CaptureService.CaptureScreenRegionWithoutLayeredWindows(loupe.SourceScreen)
+                : null;
+            SD.Bitmap sample = frozen ?? liveSample!;
+            SD.Rectangle source = frozen is not null
+                ? new SD.Rectangle(loupe.SourceScreen.X - virtualScreen.X,
+                    loupe.SourceScreen.Y - virtualScreen.Y, loupe.SourceScreen.Width, loupe.SourceScreen.Height)
+                : new SD.Rectangle(SD.Point.Empty, sample.Size);
+            SD.Color pixel = ReadTargetPixel(sample,
+                new SD.Point(source.X + loupe.TargetSample.X, source.Y + loupe.TargetSample.Y));
             string hex = $"#{pixel.R:X2}{pixel.G:X2}{pixel.B:X2}";
             DrawShadow(g, loupe, scale);
-            DrawSample(g, sample, loupe, scale);
+            DrawSample(g, sample, source, loupe, scale);
             DrawFrame(g, loupe, scale);
             DrawLabel(g, clientSize, loupe, hex, pixel, scale);
         }
@@ -125,24 +131,6 @@ internal static class FastSelectorLoupeRenderer
         return occupied;
     }
 
-    /// <summary>Crops the loupe's source region out of the frozen virtual-desktop bitmap,
-    /// matching the size the live-capture path would have returned.</summary>
-    private static SD.Bitmap CropFrozenSample(SD.Bitmap frozen, SD.Rectangle sourceScreen, SD.Rectangle virtualScreen)
-    {
-        var crop = new SD.Bitmap(
-            Math.Max(1, sourceScreen.Width),
-            Math.Max(1, sourceScreen.Height),
-            SD.Imaging.PixelFormat.Format32bppArgb);
-        using var g = SD.Graphics.FromImage(crop);
-        var src = new SD.Rectangle(
-            sourceScreen.X - virtualScreen.X,
-            sourceScreen.Y - virtualScreen.Y,
-            sourceScreen.Width,
-            sourceScreen.Height);
-        g.DrawImage(frozen, new SD.Rectangle(0, 0, crop.Width, crop.Height), src, SD.GraphicsUnit.Pixel);
-        return crop;
-    }
-
     private static SD.Color ReadTargetPixel(SD.Bitmap sample, SD.Point target)
     {
         int x = Math.Clamp(target.X, 0, sample.Width - 1);
@@ -171,14 +159,14 @@ internal static class FastSelectorLoupeRenderer
     }
 
     private static void DrawSample(
-        SD.Graphics g, SD.Bitmap sample, FastSelectorLoupe loupe, double scale)
+        SD.Graphics g, SD.Bitmap sample, SD.Rectangle source, FastSelectorLoupe loupe, double scale)
     {
         var state = g.Save();
         using var clip = GdiPaths.RoundedRect(loupe.Bounds, loupe.CornerRadius);
-        g.SetClip(clip);
+        g.SetClip(clip, SD.Drawing2D.CombineMode.Intersect);
         g.InterpolationMode = SD.Drawing2D.InterpolationMode.NearestNeighbor;
         g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.Half;
-        g.DrawImage(sample, loupe.Bounds);
+        g.DrawImage(sample, loupe.Bounds, source, SD.GraphicsUnit.Pixel);
         DrawPixelGrid(g, loupe);
         DrawTargetCell(g, loupe, scale);
         DrawCrosshair(g, loupe);

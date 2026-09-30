@@ -13,6 +13,7 @@ namespace WinShot.Capture;
 /// </summary>
 internal static class SelectorChrome
 {
+    internal const float SelectionBorderWidth = 1f;
     private const int CrosshairGapPx = 10;
     private const double LiveDesktopOpacity = 0.45;
 

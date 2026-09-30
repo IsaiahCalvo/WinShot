@@ -527,10 +527,7 @@ public class SelectorGlideHarness
             $"the border's top edge was {string.Join("/", widths.Distinct().OrderBy(w => w))} px " +
             $"thick across one glide at {scale:0.##}x - an edge that changes width between " +
             "frames is the shimmer");
-        // And the count is the one the source asks for. Measured before the pen was rounded:
-        // 3 rows at 125 % from a 2.5 px pen, 3 at 150 % from 3.0, 4 at 200 % from 4.0 - the
-        // rasteriser was picking the width, which is exactly how a half-pixel edge gets in.
-        Assert.Equal((int)Math.Ceiling(2d * scale), widths[0]);
+        Assert.Equal(1, widths[0]);
     }
 
     /// <summary>Rows of solid accent the border's TOP edge covers, read down the middle of the
