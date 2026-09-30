@@ -703,6 +703,10 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             _panes.All(p => !p.IsDisposed) &&
             targets.All(b => _panes.Any(p => p.MonitorBounds == b)))
         {
+            // Windows can move parked windows onto the laptop when a dock disconnects.
+            // The saved monitor rect stays the same, but the HWND's bounds do not.
+            foreach (var pane in _panes)
+                pane.Bounds = pane.MonitorBounds;
             return;
         }
 
