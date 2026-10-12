@@ -50,22 +50,6 @@ public sealed class FastQuickActionsWindow : WF.Form
     private readonly QuickActionsContextMenu _overflowMenu = new();
     private readonly List<ActionButton> _buttons = new();
     private QuickAccessTooltipWindow? _tooltipWindow;
-    /// <summary>Additive hover flyout for captures too long to review in the card. The card
-    /// itself is untouched by it: this is a separate click-through window beside it.</summary>
-    private TallCapturePreviewWindow? _tallPreview;
-    /// <summary>The whole capture, resampled to the flyout's size once and kept for as long
-    /// as the pixels behind it are unchanged. Rebuilt off the UI thread; every hover used to
-    /// pay for a fresh downscale of an image that can be 32,000 px long, inline, before the
-    /// card's own hover cross-fade was allowed to start.</summary>
-    private SD.Bitmap? _tallScaled;
-    private int _tallScaledVersion = -1;
-    private SD.Size _tallScaledSize;
-    /// <summary>The in-flight resample. It is a SECOND background reader of <see cref="_image"/>,
-    /// so it is tracked as a task rather than a flag: every pixel edit has to wait it out
-    /// through <see cref="WaitForRenderIdleAsync"/> exactly like the thumbnail render, or a
-    /// rotate lands inside the pool thread's <c>DrawImage</c> and GDI+ throws "Object is
-    /// currently in use elsewhere".</summary>
-    private Task? _tallScaleTask;
     private SD.Rectangle _placedWorkingArea;
     private IDisposable? _enterMotion;
     private bool _enterMotionRunning;
@@ -276,7 +260,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             OpenWindows.Remove(this);
             StopAutoCloseTimer();
             HideActionTooltip();
-            HideTallCapturePreview();
             // Restore-last reopens captures as images, so a media file never qualifies.
             if (_historyPath is not null && _mediaFilePath is null)
                 PushRecentlyClosed(_historyPath);
@@ -469,215 +452,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         BeginHoverMotion(hovering ? 1d : 0d);
         SetShortcutHook(hovering);
-        UpdateTallCapturePreview(hovering);
         Invalidate();
-    }
-
-    /// <summary>
-    /// Raises (or retires) the tall-capture flyout. A 6,000 px scrolling capture centre-crops
-    /// to a smudge in a 150 px card, so anything at least 3:1 gets a full-length preview
-    /// floating above the card while the pointer is on it. Gated on the aspect ratio rather
-    /// than the capture kind: the card is not told which flow produced its image, and a 3:1
-    /// strip is unreviewable however it was made.
-    /// </summary>
-    private void UpdateTallCapturePreview(bool hovering)
-    {
-        if (!hovering || _closed || IsDisposed)
-        {
-            HideTallCapturePreview();
-            return;
-        }
-
-        if (_tallPreview is not null)
-        {
-            if (!_tallPreview.IsDisposed)
-            {
-                // Still there but on its way out: reverse it rather than stacking a second
-                // identically placed TopMost window on top of the dying one.
-                try { _tallPreview.FadeIn(); }
-                catch (Exception ex) { Log.Error("Tall-capture preview failed to reopen (non-fatal)", ex); }
-                return;
-            }
-            _tallPreview = null;
-        }
-
-        if (TallCapturePreviewWindow.PlaceFor(_image, Bounds, _dpi) is not SD.Rectangle bounds)
-            return;
-
-        if (_tallScaled is not null && _tallScaledVersion == _imageVersion && _tallScaledSize == bounds.Size)
-        {
-            ShowTallCapturePreview(bounds);
-            return;
-        }
-
-        if (_tallScaleTask is { IsCompleted: false })
-            return;
-        _tallScaleTask = ScaleTallCapturePreviewAsync(_image, bounds, _imageVersion);
-    }
-
-    /// <summary>
-    /// Resamples the capture on the thread pool and raises the flyout when it lands, if the
-    /// pointer is still on the card and the pixels have not changed underneath it.
-    /// </summary>
-    private async Task ScaleTallCapturePreviewAsync(SD.Bitmap source, SD.Rectangle bounds, int version)
-    {
-        SD.Bitmap? scaled = null;
-        try
-        {
-            scaled = await Task.Run(() => TallCapturePreviewWindow.Scale(source, bounds.Size))
-                .ConfigureAwait(false);
-            if (scaled is null || _closed || IsDisposed || !IsHandleCreated)
-                return;
-
-            SD.Bitmap ready = scaled;
-            scaled = null;
-            try
-            {
-                Invoke(new Action(() => InstallTallCapturePreview(ready, bounds, version)));
-            }
-            catch
-            {
-                // The install never ran, so nothing took the bitmap over; hand it back to the
-                // finally rather than leaving a monitor-sized GDI handle to the finalizer.
-                scaled = ready;
-                throw;
-            }
-        }
-        catch (Exception) when (_closed || IsDisposed)
-        {
-            // Closing the card can destroy its handle while the resample completes.
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Tall-capture preview failed to build (non-fatal)", ex);
-        }
-        finally
-        {
-            scaled?.Dispose();
-        }
-    }
-
-    private void InstallTallCapturePreview(SD.Bitmap scaled, SD.Rectangle bounds, int version)
-    {
-        if (_closed || IsDisposed || version != _imageVersion)
-        {
-            scaled.Dispose();
-            return;
-        }
-
-        _tallScaled?.Dispose();
-        _tallScaled = scaled;
-        _tallScaledVersion = version;
-        _tallScaledSize = bounds.Size;
-        if (!_hovering)
-            return;
-
-        // Re-read the placement: another capture arriving while the pool thread resampled
-        // restacks the cards, and the bounds this started with are the old card's.
-        SD.Rectangle at = TallCapturePreviewWindow.PlaceFor(_image, Bounds, _dpi) is SD.Rectangle now
-            && now.Size == bounds.Size
-            ? now
-            : bounds;
-        ShowTallCapturePreview(at);
-    }
-
-    private void ShowTallCapturePreview(SD.Rectangle bounds)
-    {
-        if (_tallScaled is null || _tallPreview is not null || _closed || IsDisposed)
-            return;
-
-        try
-        {
-            TallCapturePreviewWindow preview =
-                TallCapturePreviewWindow.Create(_tallScaled, bounds, _dpi, _visuals);
-            _tallPreview = preview;
-            // The window is dropped when it finishes closing, not when the pointer leaves, so
-            // a pointer that comes back mid-fade finds it and reverses it.
-            preview.FormClosed += (_, _) =>
-            {
-                if (ReferenceEquals(_tallPreview, preview))
-                    _tallPreview = null;
-            };
-            preview.Show(this);
-        }
-        catch (Exception ex)
-        {
-            // A preview that cannot be shown must never take the hover down with it.
-            Log.Error("Tall-capture preview failed to open (non-fatal)", ex);
-            HideTallCapturePreview();
-        }
-    }
-
-    private void HideTallCapturePreview()
-    {
-        TallCapturePreviewWindow? preview = _tallPreview;
-        try { preview?.FadeOutAndClose(); }
-        catch (Exception ex)
-        {
-            Log.Error("Tall-capture preview failed to close (non-fatal)", ex);
-        }
-        finally
-        {
-            // Cleared here, not only from FormClosed: FadeOutAndClose's already-hidden branch
-            // closes and disposes a form that never raised it, which used to leave this field
-            // holding a disposed window until the next hover noticed.
-            if (preview is not null && preview.IsDisposed && ReferenceEquals(_tallPreview, preview))
-                _tallPreview = null;
-        }
-    }
-
-    /// <summary>
-    /// Takes the flyout down <em>with</em> its exit tween and does not let a returning pointer
-    /// revive it: used when what it is showing has gone stale -- the pixels were edited, or the
-    /// card has started moving out from under it. The closing window is handed the scaled
-    /// bitmap so it can keep painting itself through the 140 ms fade while the card resamples
-    /// the replacement, which is why the cache is handed over here rather than disposed. The
-    /// old strip sinks out under the new one instead of blinking away in a single frame.
-    /// </summary>
-    private void RetireTallCapturePreview()
-    {
-        TallCapturePreviewWindow? preview = _tallPreview;
-        // Cleared, unlike the hover-out path: this window is showing something that is no
-        // longer true, so a pointer coming back must build a new one rather than reverse it.
-        _tallPreview = null;
-        SD.Bitmap? scaled = _tallScaled;
-        _tallScaled = null;
-        _tallScaledVersion = -1;
-        _tallScaledSize = SD.Size.Empty;
-
-        if (preview is null || preview.IsDisposed)
-        {
-            scaled?.Dispose();
-            return;
-        }
-
-        try { preview.FadeOutAndCloseOwningBitmap(); }
-        catch (Exception ex)
-        {
-            Log.Error("Tall-capture preview failed to close (non-fatal)", ex);
-            scaled?.Dispose();
-        }
-    }
-
-    /// <summary>Takes the flyout down at once, skipping its exit tween: used when the pixels
-    /// it is painting from are about to be disposed underneath it.</summary>
-    private void CloseTallCapturePreviewNow()
-    {
-        TallCapturePreviewWindow? preview = _tallPreview;
-        _tallPreview = null;
-        try
-        {
-            preview?.Close();
-            preview?.Dispose();
-        }
-        catch (Exception ex) { Log.Error("Tall-capture preview failed to close (non-fatal)", ex); }
-    }
-
-    private void DiscardTallCapturePreviewCache()
-    {
-        _tallScaled?.Dispose();
-        _tallScaled = null;
-        _tallScaledVersion = -1;
     }
 
     /// <summary>
@@ -964,8 +739,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             _copiedDwell?.Dispose();
             _copiedDwell = null;
             HideActionTooltip();
-            CloseTallCapturePreviewNow();
-            DiscardTallCapturePreviewCache();
             _tooltipTimer.Dispose();
             _dragPreview?.Dispose();
             _dragPreview = null;
@@ -1844,10 +1617,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         StopStackMotionTimer();
         StopAutoCloseTimer();
         HideActionTooltip();
-        // The flyout is placed against the card and is not carried by it, so a card that flies
-        // off screen would leave it hanging at full opacity until the handle died. Its 140 ms
-        // fade fits inside the card's 360 ms exit, so both are gone together.
-        RetireTallCapturePreview();
         if (_overflowMenu.Visible)
             _overflowMenu.Close();
 
@@ -1941,14 +1710,9 @@ public sealed class FastQuickActionsWindow : WF.Form
         StopEnterMotion();
         if (Location == target)
             return;
-        // The card is about to slide up into the band the flyout occupies, and the band it
-        // ends up with is a different size, so the flyout cannot simply be slid along with it:
-        // it leaves, and comes back correctly sized once the card has landed.
-        RetireTallCapturePreview();
         if (!WinShot.Core.Motion.AnimationsEnabled())
         {
             Location = target;
-            UpdateTallCapturePreview(_hovering);
             return;
         }
 
@@ -1975,7 +1739,6 @@ public sealed class FastQuickActionsWindow : WF.Form
             {
                 MoveWithoutActivation(target);
                 StopStackMotionTimer();
-                UpdateTallCapturePreview(_hovering);
             }
         };
         _stackMotionTimer.Start();
@@ -2319,15 +2082,13 @@ public sealed class FastQuickActionsWindow : WF.Form
     /// throws "Object is currently in use elsewhere". Every pixel edit waits the in-flight
     /// render out first. The wait is awaited rather than blocked: that render finishes by
     /// posting its bitmaps back to this thread, so blocking here would deadlock it.
-    /// The tall-capture resample reads the same bitmap from the pool, so it waits here too.
     /// </summary>
     private async Task<bool> WaitForRenderIdleAsync()
     {
         while (true)
         {
             Task? pending =
-                _previewTask is { IsCompleted: false } render ? render :
-                _tallScaleTask is { IsCompleted: false } resample ? resample : null;
+                _previewTask is { IsCompleted: false } render ? render : null;
             if (pending is null)
                 break;
             await pending;
@@ -2565,11 +2326,6 @@ public sealed class FastQuickActionsWindow : WF.Form
         // handover runs through, and the card is made visible again on the same turn.
         RenderFirstPreview();
         _previewTask = LoadPreviewAsync();
-        // The flyout caches its own scaled copy, and a rotate/flip/resize is invoked with the
-        // pointer still on the card -- it would otherwise keep showing the pre-edit image
-        // until the pointer left and came back.
-        RetireTallCapturePreview();
-        UpdateTallCapturePreview(_hovering);
         Invalidate();
 
         _dragFileTask = null;
@@ -2911,9 +2667,8 @@ public sealed class FastQuickActionsWindow : WF.Form
 
     private Task? PendingImageUseTask()
     {
-        var tasks = new List<Task>(4);
+        var tasks = new List<Task>(3);
         if (_previewTask is { IsCompleted: false } previewTask) tasks.Add(previewTask);
-        if (_tallScaleTask is { IsCompleted: false } scaleTask) tasks.Add(scaleTask);
         if (_releaseAfterTask is { IsCompleted: false } releaseTask) tasks.Add(releaseTask);
         if (_copyTask is { IsCompleted: false } copyTask) tasks.Add(copyTask);
 

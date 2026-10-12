@@ -18,13 +18,42 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $repo 'src\WinShot\WinShot.csproj'
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$stage = Join-Path $repo ('artifacts\install-stage-' + [Guid]::NewGuid().ToString('N'))
 
-Write-Host "Stopping any running WinShot..."
-Get-Process WinShot -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 800
+Write-Host "Publishing self-contained build before stopping WinShot ..."
+dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -o $stage --nologo
+if ($LASTEXITCODE -ne 0) { throw "Publish failed with exit code $LASTEXITCODE; the installed app was not changed." }
+if (-not (Test-Path -LiteralPath (Join-Path $stage 'WinShot.exe'))) { throw 'Publish did not produce WinShot.exe.' }
 
-Write-Host "Publishing self-contained build to $InstallDir ..."
-dotnet publish $proj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -o $InstallDir --nologo
+Write-Host "Stopping the installed WinShot ..."
+Get-Process WinShot -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -eq (Join-Path $InstallDir 'WinShot.exe')
+} | ForEach-Object {
+    Stop-Process -Id $_.Id -Force
+    if (-not $_.WaitForExit(10000)) { throw "WinShot process $($_.Id) did not exit." }
+}
+
+New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+$backup = Join-Path $repo ('artifacts\install-backup-' + [Guid]::NewGuid().ToString('N'))
+Get-ChildItem -LiteralPath $stage -File -Recurse | ForEach-Object {
+    $relative = [IO.Path]::GetRelativePath($stage, $_.FullName)
+    $target = Join-Path $InstallDir $relative
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    try { Copy-Item -LiteralPath $_.FullName -Destination $target -Force }
+    catch [IO.IOException] {
+        # Windows can retain a file mapping briefly after the process exits.
+        # Keep the old file in the repo's build artifacts before replacing it.
+        if (-not (Test-Path -LiteralPath $target)) { throw }
+        $saved = Join-Path $backup $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $saved) -Force | Out-Null
+        Move-Item -LiteralPath $target -Destination $saved
+        Copy-Item -LiteralPath $_.FullName -Destination $target
+    }
+    if ((Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {
+        throw "Installed file did not match the staged build: $relative"
+    }
+}
 $exe = Join-Path $InstallDir 'WinShot.exe'
 if (-not (Test-Path $exe)) { throw "Publish failed: $exe not found." }
 
@@ -44,5 +73,5 @@ Set-Shortcut (Join-Path ([Environment]::GetFolderPath('Desktop')) 'WinShot.lnk')
 Set-Shortcut (Join-Path ([Environment]::GetFolderPath('Programs')) 'WinShot.lnk')
 Start-Process ie4uinit.exe -ArgumentList '-show' -WindowStyle Hidden  # refresh icon cache
 
-if (-not $NoLaunch) { Start-Process $exe }
+if (-not $NoLaunch) { Start-Process -FilePath $exe -WindowStyle Hidden }
 Write-Host "Installed WinShot -> $exe"

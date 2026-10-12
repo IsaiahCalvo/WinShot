@@ -40,11 +40,13 @@ install or run it — click **More info → Run anyway**.
 
 ```powershell
 dotnet build src\WinShot\WinShot.csproj -c Release
-src\WinShot\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\WinShot.exe
+src\WinShot\bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\WinShot.exe
 ```
 
 x64 only (ScreenRecorderLib ships native binaries). Tests:
-`dotnet test tests\WinShot.Tests\WinShot.Tests.csproj`.
+`./tools/run-tests.ps1`. Tests run on a hidden desktop to keep test windows off your screen.
+
+See [CHANGELOG.md](CHANGELOG.md) for changes and [GitHub releases](https://github.com/IsaiahCalvo/WinShot/releases) for installers.
 
 Settings live in `%APPDATA%\WinShot\settings.json`; history and logs in
 `%LOCALAPPDATA%\WinShot\`. The app is tray-only — look for the blue circle icon.
