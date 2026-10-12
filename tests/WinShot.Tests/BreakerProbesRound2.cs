@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -16,7 +16,7 @@ namespace WinShot.Tests;
 
 /// <summary>
 /// The second review round's probes, kept as tests. Every one of these failed on the branch
-/// before the fix beside it: the tall-capture resample racing a pixel edit, the horizontal
+/// before the fix beside it: the thumbnail render racing a pixel edit, the horizontal
 /// axis probe being graded on the vertical axis, the scroll chrome's fade surviving a bare
 /// Dispose, a sticky toast with no bound on how long it can hold the screen, and Toggle pins
 /// visibility snapping in both directions.
@@ -45,16 +45,20 @@ public class BreakerProbesRound2
         while (d.ElapsedMilliseconds < ms) { WF.Application.DoEvents(); Thread.Sleep(1); }
     }
 
+    private static void QueueThumbnailRender(FastQuickActionsWindow card)
+        => typeof(FastQuickActionsWindow).GetField("_previewTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(card, Call(card, "LoadPreviewAsync"));
+
     private static bool Resampling(FastQuickActionsWindow card)
-        => Priv(card, "_tallScaleTask") is Task { IsCompleted: false };
+        => Priv(card, "_previewTask") is Task { IsCompleted: false };
 
     // ------------------------------------------------------------------
-    // The tall-capture resample is a SECOND background reader of _image, so
-    // the gate every pixel edit uses has to cover it.
+    // The thumbnail reads _image in the background, so every pixel edit
+    // must wait until it finishes. Hover must not open another preview.
     // ------------------------------------------------------------------
 
     [Fact]
-    public void RenderIdleGate_CoversTheTallCaptureResample()
+    public void RenderIdleGate_CoversTheThumbnailRender()
     {
         RunSta(() =>
         {
@@ -67,12 +71,13 @@ public class BreakerProbesRound2
             card.Show();
             PumpFor(600); // let the first thumbnail render land, so _previewTask is complete
 
-            Call(card, "SetHovering", true); // kicks off the resample on the pool
-            Assert.True(Resampling(card), "expected the resample to have started");
+            Call(card, "SetHovering", true);
+            QueueThumbnailRender(card);
+            Assert.DoesNotContain(card.OwnedForms, f => f is TallCapturePreviewWindow);
 
             var idleTask = (Task<bool>)Call(card, "WaitForRenderIdleAsync")!;
             Assert.False(idleTask.IsCompleted && Resampling(card),
-                "WaitForRenderIdleAsync reported idle while the resample was still reading _image - " +
+                "WaitForRenderIdleAsync reported idle while the thumbnail render was still reading _image - " +
                 "a rotate here lands inside the pool thread's DrawImage.");
 
             for (int i = 0; i < 800 && !idleTask.IsCompleted; i++)
@@ -82,7 +87,7 @@ public class BreakerProbesRound2
     }
 
     [Fact]
-    public void RotatingWhileTheTallPreviewResamples_DoesNotThrow()
+    public void RotatingWhileTheThumbnailRenders_DoesNotThrow()
     {
         RunSta(() =>
         {
@@ -102,7 +107,8 @@ public class BreakerProbesRound2
                 PumpFor(240);
 
                 Call(card, "SetHovering", true);
-                Assert.True(Resampling(card), "resample did not start");
+                QueueThumbnailRender(card);
+                Assert.DoesNotContain(card.OwnedForms, f => f is TallCapturePreviewWindow);
 
                 int before = (int)Priv(card, "_imageVersion")!;
                 var run = typeof(FastQuickActionsWindow)
@@ -111,8 +117,8 @@ public class BreakerProbesRound2
                 catch (TargetInvocationException ex) { crash = ex.InnerException; }
                 catch (Exception ex) { crash = ex; }
 
-                // The rotate is now deferred behind the resample, so wait for it to land
-                // rather than for the resample alone -- that is the whole point of the gate.
+                // The rotate is now deferred behind the thumbnail render, so wait for it to land
+                // rather than for the thumbnail render alone -- that is the whole point of the gate.
                 for (int i = 0; i < 800 && (int)Priv(card, "_imageVersion")! == before; i++)
                 { WF.Application.DoEvents(); Thread.Sleep(5); }
                 if (crash is null)
@@ -126,12 +132,12 @@ public class BreakerProbesRound2
             }
 
             Assert.True(crash is null,
-                "rotating while the tall-capture flyout resamples threw: " + crash);
+                "rotating while the thumbnail renders threw: " + crash);
         });
     }
 
     [Fact]
-    public void ReplacingTheImageWhileTheTallPreviewResamples_DoesNotThrow()
+    public void ReplacingTheImageWhileTheThumbnailRenders_DoesNotThrow()
     {
         RunSta(() =>
         {
@@ -147,6 +153,9 @@ public class BreakerProbesRound2
 
                 Call(card, "SetHovering", true);
 
+                QueueThumbnailRender(card);
+                Assert.DoesNotContain(card.OwnedForms, f => f is TallCapturePreviewWindow);
+
                 // The resize dialog's exit. It disposes the bitmap the pool thread may still
                 // be drawing from, so it goes through the same gate a rotate does.
                 var replace = typeof(FastQuickActionsWindow)
@@ -159,7 +168,7 @@ public class BreakerProbesRound2
                     { WF.Application.DoEvents(); Thread.Sleep(5); }
                     Assert.True(gate.IsCompleted, "the render-idle gate never completed");
                     Assert.False(Resampling(card),
-                        "the gate opened while the resample was still reading _image");
+                        "the gate opened while the thumbnail render was still reading _image");
                     if (gate.Result) replace.Invoke(card, new object[] { smaller });
                     else smaller.Dispose();
                 }
@@ -173,7 +182,7 @@ public class BreakerProbesRound2
             }
 
             Assert.True(crash is null,
-                "replacing the image while the tall-capture flyout resamples threw: " + crash);
+                "replacing the image while the thumbnail renders threw: " + crash);
         });
     }
 

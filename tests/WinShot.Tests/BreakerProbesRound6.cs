@@ -10,15 +10,7 @@ using WF = System.Windows.Forms;
 
 namespace WinShot.Tests;
 
-/// <summary>
-/// The sixth review round's probes, kept as tests. The two that failed on the branch before the
-/// fix beside them are both the tall-capture flyout outliving what it was placed against: it was
-/// cut down in one frame whenever the card's pixels were edited, and it was never told when the
-/// card itself moved -- so it hung at full opacity while the card flew off screen, and covered
-/// the card it belongs to after a restack. The rest are the round's probes that passed and are
-/// worth keeping: chip reachability on odd-shaped pins, a locked pin's way back, the toast's link
-/// vocabulary fitting its own card, and a reverse capture's previews reading the right way up.
-/// </summary>
+/// <summary>Hover-preview removal, pin controls, toast links, and scroll direction checks.</summary>
 public class BreakerProbesRound6
 {
     private sealed class Anim : IDisposable
@@ -72,29 +64,20 @@ public class BreakerProbesRound6
         return b;
     }
 
-    /// <summary>Brings a card up over a strip tall enough to earn a flyout and waits for the
-    /// off-thread resample to raise one.</summary>
-    private static WF.Form RaiseFlyout(FastQuickActionsWindow card)
+    private static void HoverWithoutPreview(FastQuickActionsWindow card)
     {
         card.Show();
         PumpFor(240);
         Call(card, "SetHovering", true);
-        PumpUntil(() => Fld(card, "_tallPreview") is not null);
-        object? preview = Fld(card, "_tallPreview");
-        Assert.True(preview is not null, "the tall-capture flyout never came up; the probe proves nothing");
-        return (WF.Form)preview!;
+        PumpFor(300);
+        AssertNoPreview(card);
     }
 
-    // ---- A. the flyout leaves when the pixels under it change ---------------
+    private static void AssertNoPreview(FastQuickActionsWindow card)
+        => Assert.DoesNotContain(card.OwnedForms, f => f is TallCapturePreviewWindow);
 
-    /// <summary>
-    /// A rotate/flip/resize from the card used to call CloseTallCapturePreviewNow, which skipped
-    /// the exit tween because the card was about to dispose the bitmap the flyout was painting
-    /// from. The window is handed that bitmap now, so it sinks out under the replacement instead
-    /// of blinking away in a single frame.
-    /// </summary>
     [Fact]
-    public void A_EditingTheCardsImage_RetiresTheFlyoutWithItsExitTween()
+    public void A_EditingATallCaptureDoesNotOpenAHoverPreview()
     {
         RunSta(() =>
         {
@@ -103,33 +86,19 @@ public class BreakerProbesRound6
             using (var g = SD.Graphics.FromImage(tall)) g.Clear(SD.Color.SteelBlue);
 
             using var card = new FastQuickActionsWindow(tall, new SettingsService());
-            WF.Form flyout = RaiseFlyout(card);
+            HoverWithoutPreview(card);
 
             Call(card, "OnImageChanged");
 
-            // Synchronous, no pumping: the old window must still be on screen the instant the
-            // edit returns. It used to be Close()d and Dispose()d inside this call.
-            Assert.False(flyout.IsDisposed,
-                "the flyout was torn down inside the edit, so its 140 ms exit fade never ran");
-            Assert.Null(Fld(card, "_tallPreview"));
-            Assert.Null(Fld(card, "_tallScaled"));
-
-            PumpUntil(() => flyout.IsDisposed, 3000);
-            Assert.True(flyout.IsDisposed, "the retired flyout never finished its exit");
+            PumpFor(300);
+            AssertNoPreview(card);
             card.Close();
             PumpFor(150);
         });
     }
 
-    // ---- B. the flyout leaves when the card flies out -----------------------
-
-    /// <summary>
-    /// The flyout is placed from the card's bounds once and is an owned window, so it follows the
-    /// card's show/hide but not its position. BeginExitMotion used to leave it hanging at full
-    /// opacity for the whole 360 ms fly-out and then blink out with the handle.
-    /// </summary>
     [Fact]
-    public void B_TheCardFlyingOut_TakesItsFlyoutWithIt()
+    public void B_ClosingATallCaptureLeavesNoHoverPreview()
     {
         RunSta(() =>
         {
@@ -137,34 +106,19 @@ public class BreakerProbesRound6
             var tall = new SD.Bitmap(700, 6000, SD.Imaging.PixelFormat.Format32bppPArgb);
             using (var g = SD.Graphics.FromImage(tall)) g.Clear(SD.Color.SteelBlue);
 
-            var card = new FastQuickActionsWindow(tall, new SettingsService());
-            WF.Form flyout = RaiseFlyout(card);
-            SD.Rectangle cardBefore = card.Bounds;
+            using var card = new FastQuickActionsWindow(tall, new SettingsService());
+            HoverWithoutPreview(card);
 
             Call(card, "BeginExitMotion");
-            Assert.False(flyout.IsDisposed, "the flyout was cut rather than faded");
-            Assert.Null(Fld(card, "_tallPreview"));
-
-            // 140 ms of fade inside a 360 ms fly-out: the flyout is gone before the card is.
-            PumpUntil(() => flyout.IsDisposed, 3000);
-            Assert.True(flyout.IsDisposed,
-                $"card flew from {cardBefore} to {card.Bounds} while its flyout stayed at {flyout.Bounds}");
-
+            AssertNoPreview(card);
             PumpUntil(() => card.IsDisposed, 3000);
-            if (!card.IsDisposed) card.Dispose();
+            Assert.True(card.IsDisposed, "the card did not finish closing");
+            Assert.DoesNotContain(WF.Application.OpenForms.Cast<WF.Form>(), f => f is TallCapturePreviewWindow);
         });
     }
 
-    // ---- C. the flyout leaves when a second capture restacks the card -------
-
-    /// <summary>
-    /// A restack slides the card by its own height + 12 while the flyout stays where it was
-    /// placed, so the flyout ended up detached from -- and overlapping -- the card it belongs
-    /// to. The card retires it when it starts moving and raises a correctly placed one once it
-    /// has landed.
-    /// </summary>
     [Fact]
-    public void C_ARestackDoesNotLeaveTheFlyoutOverTheCard()
+    public void C_RestackingATallCaptureDoesNotOpenAHoverPreview()
     {
         RunSta(() =>
         {
@@ -175,12 +129,12 @@ public class BreakerProbesRound6
             var settings = new SettingsService();
             // The card under it is what makes the tall card restack: a new card stacks above
             // the open ones, and the ones above a card that closes slide down into its place.
-            var below = new FastQuickActionsWindow(Solid(400, 300, SD.Color.Coral), settings);
+            using var below = new FastQuickActionsWindow(Solid(400, 300, SD.Color.Coral), settings);
             below.Show();
             PumpFor(300);
 
             using var card = new FastQuickActionsWindow(tall, settings);
-            WF.Form flyout = RaiseFlyout(card);
+            HoverWithoutPreview(card);
             SD.Rectangle cardBefore = card.Bounds;
 
             below.Close();
@@ -188,13 +142,7 @@ public class BreakerProbesRound6
 
             SD.Rectangle cardAfter = card.Bounds;
             Assert.True(cardAfter != cardBefore, "the card never restacked; the probe proves nothing");
-            Assert.True(flyout.IsDisposed,
-                $"card restacked {cardBefore} -> {cardAfter}; its flyout stayed at {flyout.Bounds}");
-
-            // Whatever is up now was placed against the card's new bounds, so it sits clear of it.
-            if (Fld(card, "_tallPreview") is WF.Form raised && !raised.IsDisposed && raised.Visible)
-                Assert.False(raised.Bounds.IntersectsWith(cardAfter),
-                    $"the re-raised flyout at {raised.Bounds} covers the card at {cardAfter}");
+            AssertNoPreview(card);
 
             card.Close();
             PumpFor(200);
