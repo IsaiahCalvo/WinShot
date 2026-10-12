@@ -52,6 +52,17 @@ public class SnapScanWindowTests
 {
     private static readonly Rectangle ProbeBounds = new(0, 0, 500, 400);
 
+    private static List<SnapRect> ScanProbe(IntPtr handle, bool excludeProbe = false, int timeoutMs = 400)
+    {
+        // CI shares a desktop with other windows. Their coverage must not remove the
+        // controls of the window this test created to check ordering and exclusion.
+        var excluded = WindowEnumerator.GetSnapRectangles()
+            .Where(r => r.IsWindow && r.Handle != handle)
+            .Select(r => r.Handle).ToHashSet();
+        if (excludeProbe) excluded.Add(handle);
+        return WindowEnumerator.GetSnapRectangles(excluded, timeoutMs);
+    }
+
     /// <summary>The previous test's probe, so this one can wait for it to actually go away.</summary>
     private static IntPtr _lastProbe;
 
@@ -93,6 +104,8 @@ public class SnapScanWindowTests
         outer.Controls.Add(inner);
         form.Controls.Add(outer);
         form.Show();
+        outer.CreateControl();
+        inner.CreateControl();
         Pump();
 
         // Showing a window is asynchronous — DWM has to compose it before the walk can see it.
@@ -118,7 +131,7 @@ public class SnapScanWindowTests
     public void ChildControlsComeBeforeTheClientAreaWhichComesBeforeTheFrame()
     {
         using var form = ShowProbeWindow(out var outer, out var inner);
-        var rects = WindowEnumerator.GetSnapRectangles();
+        var rects = ScanProbe(form.Handle);
 
         int frame = rects.FindIndex(r => r.Handle == form.Handle && r.IsWindow);
         int client = rects.FindIndex(r => r.Handle == form.Handle && !r.IsWindow);
@@ -159,12 +172,12 @@ public class SnapScanWindowTests
 
         // Establish the handles are there to be dropped. Without this the exclusion assertions
         // below pass trivially for any handle the walk never emitted in the first place.
-        var unfiltered = WindowEnumerator.GetSnapRectangles();
+        var unfiltered = ScanProbe(form.Handle);
         Assert.Contains(unfiltered, r => r.Handle == form.Handle);
         Assert.Contains(unfiltered, r => r.Handle == outer.Handle);
         Assert.Contains(unfiltered, r => r.Handle == inner.Handle);
 
-        var rects = WindowEnumerator.GetSnapRectangles(new HashSet<IntPtr> { form.Handle });
+        var rects = ScanProbe(form.Handle, excludeProbe: true);
 
         Assert.DoesNotContain(rects, r => r.Handle == form.Handle);
         Assert.DoesNotContain(rects, r => r.Handle == outer.Handle);
@@ -200,8 +213,8 @@ public class SnapScanWindowTests
         using var form = ShowProbeWindow(out _, out _);
 
         // Without this the assertion below is vacuous: an empty desktop yields an empty list.
-        Assert.NotEmpty(WindowEnumerator.GetSnapRectangles());
+        Assert.NotEmpty(ScanProbe(form.Handle));
 
-        Assert.Empty(WindowEnumerator.GetSnapRectangles(timeoutMs: -1));
+        Assert.Empty(ScanProbe(form.Handle, timeoutMs: -1));
     }
 }
