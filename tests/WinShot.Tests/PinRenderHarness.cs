@@ -123,9 +123,15 @@ public class PinRenderHarness
             $"chip {chip} is not inside the chrome repaint rect {invalid} (bar {bar})");
 
         // And it is actually painted there, at the fade's amount.
-        var centre = new SD.Point(chip.Left + chip.Width / 2, chip.Top + chip.Height / 2);
-        Assert.Equal(238, BrightnessAt(pin, 0d, centre));
-        Assert.True(BrightnessAt(pin, 1d, centre) < 200, "the chip did not paint over the capture");
+        // Sample the background padding. The centre can land on the white percentage
+        // text, so its brightness does not tell us whether the dark chip was painted.
+        var background = new SD.Point(chip.Left + 3, chip.Top + chip.Height / 2);
+        int gone = BrightnessAt(pin, 0d, background);
+        int half = BrightnessAt(pin, 0.5d, background);
+        int up = BrightnessAt(pin, 1d, background);
+        Assert.Equal(238, gone);
+        Assert.True(half < gone - 20, "the chip background did not fade over the capture");
+        Assert.True(up < half - 20, "the chip background did not finish its fade");
     }
 
     /// <summary>
