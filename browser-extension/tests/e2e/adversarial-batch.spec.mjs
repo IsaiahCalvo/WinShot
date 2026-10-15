@@ -259,7 +259,8 @@ test("URL batch enforces the 20-URL cap with explicit messaging and closes every
     await startBatchTask(run, "__advCapBatch", "urls", urls, { settings: { batchMode: "visible" } });
     const outcome = await settleWorkerTask(run, "__advCapBatch", 160_000);
     expect(outcome.err, `batch rejected: ${outcome.err}`).toBeUndefined();
-    expect(outcome.ok.complete).toBe(20);
+    const diagnostic = await readBatchSummary(run, outcome.ok.batchId);
+    expect(outcome.ok.complete, JSON.stringify(diagnostic)).toBe(20);
     expect(outcome.ok.failed).toBe(0);
     expect(outcome.ok.skipped).toBe(1);
 

@@ -56,6 +56,9 @@ read just the first tile. Chrome limits screenshots to two calls per second, so
 the capture interval deliberately stays above 500 ms.
 Concurrent captures in separate windows share one screenshot queue so they cannot
 exceed that browser-wide quota.
+Capture timing uses a monotonic clock, and temporary Chrome quota/readback failures
+get one bounded retry. URL batches subscribe before checking load completion and
+recheck tabs after activation so reloading or discarded pages are not captured early.
 
 The build extracts all toolbar/package icons directly from the Windows app's
 `src/WinShot/Assets/winshot.ico`; popup/editor branding and page icons use the same

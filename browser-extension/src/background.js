@@ -16,7 +16,7 @@ const pickerFrames = new Map();
 const pickerSettings = new Map();
 const pendingCaptures = new Map();
 let activeBatch = null;
-let lastScreenshotAt = 0;
+let lastScreenshotAt = -Infinity;
 let screenshotQueue = Promise.resolve();
 
 const MODE_LABELS = {
@@ -145,7 +145,7 @@ function throwIfAborted(signal) {
 }
 
 async function throttleCapture(minIntervalMs, signal) {
-  const remaining = minIntervalMs - (Date.now() - lastScreenshotAt);
+  const remaining = minIntervalMs - (performance.now() - lastScreenshotAt);
   if (remaining > 0) await wait(remaining, signal);
 }
 
@@ -172,11 +172,23 @@ function screenshot(windowId, minIntervalMs, signal, session = null) {
 }
 
 async function takeScreenshot(windowId, minIntervalMs, signal, session) {
-  await throttleCapture(minIntervalMs, signal);
-  throwIfAborted(signal);
-  if (session) await assertStillActive(session);
-  const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
-  lastScreenshotAt = Date.now();
+  let dataUrl;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await throttleCapture(minIntervalMs, signal);
+    throwIfAborted(signal);
+    if (session) await assertStillActive(session);
+    try {
+      dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+      lastScreenshotAt = performance.now();
+      break;
+    } catch (error) {
+      lastScreenshotAt = performance.now();
+      // Chrome can temporarily reject readback while activating a background tab.
+      // A quota rejection also needs a full quiet second before the next attempt.
+      if (attempt || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|image readback failed|failed to capture tab/i.test(error.message)) throw error;
+      await wait(Math.max(1000, minIntervalMs), signal);
+    }
+  }
   // Verify the intended tab was still active when the pixels were taken — a tab
   // switch in the throttle gap would silently stitch another site's pixels.
   if (session) await assertStillActive(session);
@@ -326,7 +338,7 @@ async function storeScrollingCapture(session, controller) {
   const semanticTextKeys = new Set();
   const semanticLinkKeys = new Set();
   const capturedPositions = new Set();
-  const startTime = Date.now();
+  const startTime = performance.now();
   let expectedScale = null;
   let frameHost = null;
   let frameHostPrepared = [];
@@ -398,7 +410,7 @@ async function storeScrollingCapture(session, controller) {
           safetyStopReason = `Capture stopped at the configured ${session.limits.maxTiles}-tile limit.`;
           break captureLoop;
         }
-        if (Date.now() - startTime >= session.limits.maxDurationMs) {
+        if (performance.now() - startTime >= session.limits.maxDurationMs) {
           safetyStopReason = "Capture stopped at the configured time limit.";
           break captureLoop;
         }
@@ -667,31 +679,43 @@ function supportedBatchUrl(url) {
 }
 
 async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
-  const current = await chrome.tabs.get(tabId);
-  if (current.status === "complete") return current;
+  throwIfAborted(signal);
   return await new Promise((resolve, reject) => {
+    let settled = false;
+    const ready = (tab) => tab.status === "complete" && supportedBatchUrl(tab.url) && !tab.discarded && !tab.pendingUrl;
     const timeout = setTimeout(() => finish(new Error("The page did not finish loading within 30 seconds.")), timeoutMs);
     const onUpdated = (updatedId, info, tab) => {
-      if (updatedId === tabId && info.status === "complete") finish(null, tab);
+      if (updatedId === tabId && ready(tab)) finish(null, tab);
     };
+    const onRemoved = (removedId) => { if (removedId === tabId) finish(new Error("The tab was closed before loading finished.")); };
     const onAbort = () => finish(new DOMException("Batch capture cancelled.", "AbortError"));
     const finish = (error, tab) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
       signal.removeEventListener("abort", onAbort);
       if (error) reject(error); else resolve(tab);
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
     signal.addEventListener("abort", onAbort, { once: true });
+    // Subscribe before reading: completion can otherwise fall into the gap
+    // between tabs.get and addListener, leaving an already loaded tab waiting.
+    chrome.tabs.get(tabId).then((tab) => { if (ready(tab)) finish(null, tab); }, finish);
   });
 }
 
 async function captureBatchTab(tab, controller, mode, settings) {
   throwIfAborted(controller.signal);
   await chrome.tabs.update(tab.id, { active: true });
-  const ready = await waitForTabComplete(tab.id, controller.signal);
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await waitForTabComplete(tab.id, controller.signal);
+  await wait(250, controller.signal);
   throwIfAborted(controller.signal);
+  // Discarded tabs can begin reloading just after activation; never use the
+  // pre-activation URL/status snapshot as the capture session's identity.
+  const ready = await waitForTabComplete(tab.id, controller.signal);
   const result = await runCapture(mode, null, ready, { batch: true, openEditor: false, settings, limits: captureLimits(settings) });
   return { tabId: tab.id, title: ready.title || tab.title || ready.url, url: ready.url, ...result };
 }
@@ -792,10 +816,10 @@ async function waitCaptureDelay(tab, delayMs) {
   updateBadge();
   refreshContextMenu().catch(() => {});
   try {
-    const deadline = Date.now() + delayMs;
-    while (Date.now() < deadline) {
-      chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", busy: true, message: `Capture starts in ${Math.ceil((deadline - Date.now()) / 1000)} seconds...` }).catch(() => {});
-      await wait(Math.min(1000, deadline - Date.now()), controller.signal);
+    const deadline = performance.now() + delayMs;
+    while (performance.now() < deadline) {
+      chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", busy: true, message: `Capture starts in ${Math.ceil((deadline - performance.now()) / 1000)} seconds...` }).catch(() => {});
+      await wait(Math.min(1000, Math.max(0, deadline - performance.now())), controller.signal);
       await chrome.storage.session.set({ "winshot:delay-keepalive": Date.now() }).catch(() => {});
     }
     throwIfAborted(controller.signal);
@@ -954,8 +978,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
       // A capture this picker superseded may still be unwinding and holding the
       // tab/window lock — wait briefly so the pick is not silently rejected.
-      const lockDeadline = Date.now() + 5000;
-      while ((activeCaptures.has(tab.id) || activeWindowLocks.has(tab.windowId)) && Date.now() < lockDeadline) {
+      const lockDeadline = performance.now() + 5000;
+      while ((activeCaptures.has(tab.id) || activeWindowLocks.has(tab.windowId)) && performance.now() < lockDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       runCapture(message.mode, target, tab, { settings, limits: captureLimits(settings) }).catch(() => {});

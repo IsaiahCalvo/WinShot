@@ -309,3 +309,65 @@ test("captures in two browser windows share Chrome's screenshot rate limit", asy
     expect(run.errors).toEqual([]);
   } finally { await run.close(); }
 });
+
+test("wall-clock adjustments cannot break Chrome's screenshot rate limit", async () => {
+  const run = await launch();
+  try {
+    const worker = await (await run.browser.waitForTarget((target) => target.type() === "service_worker")).worker();
+    const result = await worker.evaluate(async () => {
+      const originalNow = Date.now;
+      const originalCapture = chrome.tabs.captureVisibleTab;
+      let offset = 0;
+      const times = [];
+      Date.now = () => originalNow() + offset;
+      chrome.tabs.captureVisibleTab = async (...args) => {
+        times.push(performance.now());
+        const pixels = await originalCapture.apply(chrome.tabs, args);
+        offset += 600_000;
+        return pixels;
+      };
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const capture = await globalThis.__winshotTest.runCapture("full-page", null, tab, { openEditor: false });
+        return { capture, times };
+      } finally {
+        Date.now = originalNow;
+        chrome.tabs.captureVisibleTab = originalCapture;
+      }
+    });
+    expect(result.capture.state, JSON.stringify(result)).toBe("complete");
+    for (let index = 1; index < result.times.length; index++) {
+      expect(result.times[index] - result.times[index - 1]).toBeGreaterThanOrEqual(500);
+    }
+    expect(run.errors).toEqual([]);
+  } finally { await run.close(); }
+});
+
+test("transient screenshot readback retries once while permission errors fail immediately", async () => {
+  const run = await launch();
+  try {
+    const worker = await (await run.browser.waitForTarget((target) => target.type() === "service_worker")).worker();
+    const result = await worker.evaluate(async () => {
+      const original = chrome.tabs.captureVisibleTab;
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      let attempts = 0;
+      try {
+        chrome.tabs.captureVisibleTab = async (...args) => {
+          if (++attempts === 1) throw new Error("Failed to capture tab: image readback failed");
+          return original.apply(chrome.tabs, args);
+        };
+        const recovered = await globalThis.__winshotTest.runCapture("visible", null, tab, { openEditor: false });
+        const readbackAttempts = attempts;
+        attempts = 0;
+        chrome.tabs.captureVisibleTab = async () => { attempts++; throw new Error("Cannot access contents of url: missing host permission"); };
+        const denied = await globalThis.__winshotTest.runCapture("visible", null, tab, { openEditor: false });
+        return { recovered, readbackAttempts, denied, permissionAttempts: attempts };
+      } finally { chrome.tabs.captureVisibleTab = original; }
+    });
+    expect(result.recovered.state, JSON.stringify(result)).toBe("complete");
+    expect(result.readbackAttempts).toBe(2);
+    expect(result.denied.state).toBe("failed");
+    expect(result.permissionAttempts).toBe(1);
+    expect(run.errors).toEqual([]);
+  } finally { await run.close(); }
+});
