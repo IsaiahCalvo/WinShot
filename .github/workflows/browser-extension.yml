@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: browser-extension-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   capture-and-export:
     strategy:
@@ -26,6 +30,13 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - name: Allow sandboxed test Chrome user namespaces on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          capture_chrome_path="$(node --input-type=module -e 'import puppeteer from "puppeteer"; console.log(await puppeteer.executablePath());')"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-capture-test "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-capture-test > /dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/winshot-capture-test
       - run: npm run test:browser
       - run: npm run test:e2e -- --project=extension-puppeteer
       - uses: actions/upload-artifact@v4

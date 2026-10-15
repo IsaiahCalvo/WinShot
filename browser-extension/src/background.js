@@ -17,6 +17,7 @@ const pickerSettings = new Map();
 const pendingCaptures = new Map();
 let activeBatch = null;
 let lastScreenshotAt = 0;
+let screenshotQueue = Promise.resolve();
 
 const MODE_LABELS = {
   "visible": "Capture visible part",
@@ -162,7 +163,15 @@ function wait(ms, signal) {
   });
 }
 
-async function screenshot(windowId, minIntervalMs, signal, session = null) {
+function screenshot(windowId, minIntervalMs, signal, session = null) {
+  // Chrome's quota is shared across windows. Independent per-window captures
+  // must take turns, including their throttle wait, or both can fire at once.
+  const result = screenshotQueue.then(() => takeScreenshot(windowId, minIntervalMs, signal, session));
+  screenshotQueue = result.catch(() => {});
+  return result;
+}
+
+async function takeScreenshot(windowId, minIntervalMs, signal, session) {
   await throttleCapture(minIntervalMs, signal);
   throwIfAborted(signal);
   if (session) await assertStillActive(session);

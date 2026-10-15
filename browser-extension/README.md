@@ -51,6 +51,8 @@ indicator respect reduced-motion preferences. Full-resolution tiles stay in loca
 IndexedDB; seam checking loads only overlapping neighbors and History thumbnails
 read just the first tile. Chrome limits screenshots to two calls per second, so
 the capture interval deliberately stays above 500 ms.
+Concurrent captures in separate windows share one screenshot queue so they cannot
+exceed that browser-wide quota.
 
 The build extracts all toolbar/package icons directly from the Windows app's
 `src/WinShot/Assets/winshot.ico`; popup/editor branding and page icons use the same

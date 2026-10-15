@@ -3,12 +3,13 @@ import { launchCaptureBrowser } from "./launch-browser.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 async function launch() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-reliability-"));
   const browser = await launchCaptureBrowser(profile);
   try {
-    const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || new URL("../../dist/winshot-capture", import.meta.url).pathname);
+    const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || fileURLToPath(new URL("../../dist/winshot-capture", import.meta.url)));
     const extension = (await browser.extensions()).get(id);
     const page = await browser.newPage();
     const errors = [];
@@ -282,6 +283,29 @@ test("Entire page finds the main scrolling panel in a fixed-height application s
     expect(record.report.dimensionsCss.height).toBe(3200);
     expect(record.report.warnings.join(" ")).toMatch(/main scrolling area/);
     expect(await run.page.$eval("#app", (element) => element.scrollTop)).toBe(240);
+    expect(run.errors).toEqual([]);
+  } finally { await run.close(); }
+});
+
+test("captures in two browser windows share Chrome's screenshot rate limit", async () => {
+  const run = await launch();
+  try {
+    await run.page.goto("http://127.0.0.1:4173/frame", { waitUntil: "networkidle0" });
+    const worker = await (await run.browser.waitForTarget((target) => target.type() === "service_worker")).worker();
+    const results = await worker.evaluate(async () => {
+      const [first] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const secondWindow = await chrome.windows.create({ url: "http://127.0.0.1:4173/frame", type: "normal", focused: false, width: 1200, height: 1000 });
+      const secondId = secondWindow.tabs[0].id;
+      const deadline = Date.now() + 10_000;
+      let second;
+      while (Date.now() < deadline) {
+        second = await chrome.tabs.get(secondId);
+        if (second.status === "complete" && second.url?.endsWith("/frame")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return Promise.all([first, second].map((tab) => globalThis.__winshotTest.runCapture("full-page", null, tab, { openEditor: false })));
+    });
+    expect(results.map((result) => result.state), JSON.stringify(results)).toEqual(["complete", "complete"]);
     expect(run.errors).toEqual([]);
   } finally { await run.close(); }
 });
