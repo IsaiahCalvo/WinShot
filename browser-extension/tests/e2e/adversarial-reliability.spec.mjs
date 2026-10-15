@@ -215,7 +215,7 @@ test("popup uses the desktop icon, keeps Stop visible, and responds immediately"
     await expect.poll(() => ui.$eval("body", (node) => node.dataset.busy)).toBe("false");
     expect(await ui.$eval("[data-mode='full-page']", (node) => node.disabled)).toBe(false);
     await ui.evaluate(() => { document.querySelector("details").open = false; document.querySelector("main").scrollTop = 0; });
-    await ui.screenshot({ path: "/tmp/winshot-popup-after.png" });
+    await ui.screenshot({ path: path.join(os.tmpdir(), "winshot-popup-after.png") });
     expect(run.errors).toEqual([]);
   } finally { await run.close(); }
 });

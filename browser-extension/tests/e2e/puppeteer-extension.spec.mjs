@@ -1091,6 +1091,15 @@ test("dynamic, horizontal, frame, and pixel-surface fixtures report honest resul
     expect(frames.record.report.warnings.join(" ")).toMatch(/cross-origin frame/i);
 
     await page.goto("http://127.0.0.1:4173/media", { waitUntil: "networkidle0" });
+    const webGlState = await page.$eval("#gl", (canvas) => {
+      const context = canvas.getContext("webgl");
+      if (!context) return { available: false };
+      const pixel = new Uint8Array(4);
+      context.readPixels(100, 100, 1, 1, context.RGBA, context.UNSIGNED_BYTE, pixel);
+      return { available: true, lost: context.isContextLost(), retained: context.getContextAttributes().preserveDrawingBuffer, pixel: [...pixel] };
+    });
+    expect(webGlState, JSON.stringify({ webGlState, errors: run.errors })).toMatchObject({ available: true, lost: false, retained: true });
+    expect(webGlState.pixel[1], "The fixture must render green pixels before capture starts.").toBeGreaterThan(140);
     const media = await captureFromPopup(run, page, "[data-mode='full-page']");
     expect(media.record.state).toBe("complete");
     expect(media.record.report.warnings.join(" ")).toMatch(/Canvas\/WebGL/);
@@ -1120,7 +1129,7 @@ test("dynamic, horizontal, frame, and pixel-surface fixtures report honest resul
       return { blueCanvas, greenWebGl };
     });
     expect(surfacePixels.blueCanvas).toBeGreaterThan(100);
-    expect(surfacePixels.greenWebGl).toBeGreaterThan(100);
+    expect(surfacePixels.greenWebGl, JSON.stringify({ surfacePixels, webGlState, errors: run.errors })).toBeGreaterThan(100);
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);

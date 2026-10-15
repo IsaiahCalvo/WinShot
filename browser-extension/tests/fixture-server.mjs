@@ -59,7 +59,9 @@ function fixture(name, crossPort) {
         function render(){const first=Math.floor(view.scrollTop/itemHeight);rail.replaceChildren(...Array.from({length:14},(_,slot)=>{const index=Math.min(total-1,first+slot);const node=document.createElement('div');node.className='virtual-row';node.style.transform='translateY('+(index*itemHeight)+'px)';node.textContent='VIRTUAL '+String(index).padStart(4,'0');node.dataset.index=index;return node}))}view.addEventListener('scroll',render);render();
       `, "#virtual{margin:30px;width:760px;height:520px;overflow:auto;border:4px solid #1687ff;position:relative}#rail{position:relative}.virtual-row{position:absolute;left:0;right:0;height:64px;padding:18px;border-bottom:1px solid #556;background:#fff}");
     case "media":
-      return shell("pixel-surfaces", `<canvas id="two" width="700" height="500"></canvas><canvas id="gl" width="700" height="500"></canvas><video controls width="700"></video>${rows(10)}`, `const c=document.querySelector('#two').getContext('2d');c.fillStyle='#1687ff';c.fillRect(0,0,700,500);c.fillStyle='white';c.font='40px sans-serif';c.fillText('CANVAS PIXELS',100,250);const gl=document.querySelector('#gl').getContext('webgl');gl.clearColor(.1,.7,.3,1);gl.clear(gl.COLOR_BUFFER_BIT);`);
+      // This fixture draws once, unlike an application's render loop. Retain its
+      // buffer so Windows/ANGLE cannot discard it between draw and capture.
+      return shell("pixel-surfaces", `<canvas id="two" width="700" height="500"></canvas><canvas id="gl" width="700" height="500"></canvas><video controls width="700"></video>${rows(10)}`, `const c=document.querySelector('#two').getContext('2d');c.fillStyle='#1687ff';c.fillRect(0,0,700,500);c.fillStyle='white';c.font='40px sans-serif';c.fillText('CANVAS PIXELS',100,250);const gl=document.querySelector('#gl').getContext('webgl',{preserveDrawingBuffer:true});gl.clearColor(.1,.7,.3,1);gl.clear(gl.COLOR_BUFFER_BIT);`);
     case "recovery":
       return shell("recovery", `<input id="focus" value="original"><div id="snap" style="scroll-snap-type:y mandatory;height:500px;overflow:auto">${rows(20,"RECOVERY")}</div>`);
     case "fixed-badge":
