@@ -23,6 +23,8 @@ jobs:
         os: [ubuntu-latest, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    env:
+      WINSHOT_TEST_SOFTWARE_GL: ${{ matrix.os == 'windows-2022' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

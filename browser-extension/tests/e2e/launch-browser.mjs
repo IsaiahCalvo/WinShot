@@ -11,6 +11,11 @@ export async function launchCaptureBrowser(userDataDir, viewport = { width: 1200
     args: [
       `--window-size=${viewport.width},${viewport.height}`,
       ...(viewport.deviceScaleFactor ? [`--force-device-scale-factor=${viewport.deviceScaleFactor}`] : []),
+      // GPU-less Windows CI must render the fixture's WebGL surface, not silently
+      // assert against a blank canvas. Opt in only for the isolated fixture run.
+      ...(process.env.WINSHOT_TEST_SOFTWARE_GL === "1"
+        ? ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+        : []),
       ...args
     ]
   });

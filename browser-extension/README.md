@@ -25,6 +25,9 @@ binary when the default Puppeteer browser download is unavailable. Set
 `PUPPETEER_SKIP_DOWNLOAD=true` during `npm ci` in that case. The tests also accept
 `WINSHOT_EXTENSION_PATH` to verify a specific unpacked build. Every test uses a
 disposable profile; never point the harness at your everyday Chrome profile.
+The Windows CI runner uses `WINSHOT_TEST_SOFTWARE_GL=1` for a software WebGL
+renderer because that VM has no usable GPU context. This is limited to isolated
+fixture tests; normal test and live-site runs retain Chrome's default renderer.
 
 For a repeatable check on real websites, run
 `npm run test:live -- https://example.com/article https://example.org/another-page`.
