@@ -7,13 +7,14 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
-import { deleteCapture, getTiles, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
+import { deleteCapture, getTile, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
 import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
 const activeCaptures = new Map();     // keyed by tabId
 const activeWindowLocks = new Set();  // captureVisibleTab is window-scoped — one capture per window
 const pickerFrames = new Map();
 const pickerSettings = new Map();
+const pendingCaptures = new Map();
 let activeBatch = null;
 let lastScreenshotAt = 0;
 
@@ -144,20 +145,27 @@ function throwIfAborted(signal) {
 
 async function throttleCapture(minIntervalMs, signal) {
   const remaining = minIntervalMs - (Date.now() - lastScreenshotAt);
-  if (remaining > 0) {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, remaining);
-      signal.addEventListener("abort", () => {
-        clearTimeout(timer);
-        reject(new DOMException("Capture cancelled.", "AbortError"));
-      }, { once: true });
-    });
-  }
+  if (remaining > 0) await wait(remaining, signal);
+}
+
+function wait(ms, signal) {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const finish = () => { signal.removeEventListener("abort", abort); resolve(); };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(new DOMException("Capture cancelled.", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 async function screenshot(windowId, minIntervalMs, signal, session = null) {
   await throttleCapture(minIntervalMs, signal);
   throwIfAborted(signal);
+  if (session) await assertStillActive(session);
   const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
   lastScreenshotAt = Date.now();
   // Verify the intended tab was still active when the pixels were taken — a tab
@@ -169,8 +177,11 @@ async function screenshot(windowId, minIntervalMs, signal, session = null) {
 async function cropScreenshot(blob, metrics) {
   const bitmap = await createImageBitmap(blob);
   try {
-    const scaleX = bitmap.width / metrics.viewport.width;
-    const scaleY = bitmap.height / metrics.viewport.height;
+    // Screenshots include the scrollbar gutter; visualViewport excludes it.
+    // Scaling by the latter stretches the image and contaminates every tile edge
+    // on Windows with classic scrollbars.
+    const scaleX = bitmap.width / (metrics.viewport.rasterWidth || metrics.viewport.width);
+    const scaleY = bitmap.height / (metrics.viewport.rasterHeight || metrics.viewport.height);
     if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) {
       throw new Error("The browser returned an invalid screenshot scale.");
     }
@@ -241,7 +252,7 @@ function progress(session, message) {
 
 // Toolbar badge is the progress surface that can never contaminate captured pixels.
 function updateBadge(text = "…") {
-  const busy = activeCaptures.size > 0 || Boolean(activeBatch);
+  const busy = activeCaptures.size > 0 || pendingCaptures.size > 0 || Boolean(activeBatch);
   chrome.action.setBadgeText({ text: busy ? text : "" }).catch(() => {});
   if (busy) chrome.action.setBadgeBackgroundColor({ color: "#0A84FF" }).catch(() => {});
 }
@@ -312,6 +323,7 @@ async function storeScrollingCapture(session, controller) {
   let frameHostPrepared = [];
   let extent;
   let viewportSize;
+  let allTilesStable = true;
 
   try {
     await injectCaptureScript(session.tabId, session.frameId);
@@ -395,7 +407,10 @@ async function storeScrollingCapture(session, controller) {
           settleTimeoutMs: session.limits.settleTimeoutMs
         }, session.frameId);
         if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) throw new Error("The page navigated during capture.");
-        if (!result.stable) session.report.warnings.push(`Tile ${index + 1} did not reach full layout stability before capture.`);
+        if (!result.stable) {
+          allTilesStable = false;
+          session.report.warnings.push(`Tile ${index + 1} still had changing layout or loading images at the capture deadline.`);
+        }
         for (const entry of result.semantics?.text || []) {
           const key = `${entry.text}|${entry.x.toFixed(1)}|${entry.y.toFixed(1)}`;
           if (!semanticTextKeys.has(key) && semanticText.length < 50000) {
@@ -446,7 +461,11 @@ async function storeScrollingCapture(session, controller) {
           candidate.destXPx < tile.destXPx + tile.widthPx && candidate.destXPx + candidate.widthPx > tile.destXPx &&
           candidate.destYPx < tile.destYPx + tile.heightPx && candidate.destYPx + candidate.heightPx > tile.destYPx);
         for (const neighbor of neighbors) {
-          const score = await seamScore(neighbor, tile);
+          // IndexedDB owns the raster history. Keep placement metadata in memory
+          // and decode only an overlapping neighbor, even on a 400-tile capture.
+          const raster = await getTile(session.id, neighbor.index);
+          if (!raster) throw new DOMException("This capture was deleted from history.", "AbortError");
+          const score = await seamScore(raster, tile);
           if (score === null) continue;
           tile.seamScore = tile.seamScore === null || tile.seamScore === undefined ? score : Math.min(tile.seamScore, score);
           seamScores.push(score);
@@ -454,8 +473,9 @@ async function storeScrollingCapture(session, controller) {
         tile.seamScore ??= null;
 
         await putTile(tile);
-        workingTiles.push(tile);
-        tileMetadata.push({ ...tile, blob: undefined });
+        const metadata = { ...tile, blob: undefined };
+        workingTiles.push(metadata);
+        tileMetadata.push(metadata);
         capturedPositions.add(key);
         index++;
         capturedThisPass++;
@@ -529,7 +549,7 @@ async function storeScrollingCapture(session, controller) {
     session.semantics = { text: semanticText, links: semanticLinks };
     if (minimum < 0.7) session.report.warnings.push("One or more overlaps changed substantially; the result is marked partial rather than silently accepted.");
     if (!coverage.complete) session.report.warnings.push(...coverage.gaps);
-    session.state = coverage.complete && minimum >= 0.7 && !safetyStopReason
+    session.state = coverage.complete && minimum >= 0.7 && allTilesStable && !safetyStopReason
       ? SessionState.COMPLETE
       : SessionState.PARTIAL;
   } finally {
@@ -555,6 +575,7 @@ async function storeScrollingCapture(session, controller) {
 async function runCapture(mode, target = null, tabOverride = null, options = {}) {
   const tab = tabOverride || await activeTab();
   if (!tab.id) throw new Error("No active tab.");
+  if (activeBatch && !options.batch) throw new Error("A WinShot batch is already running. Press Stop before starting another capture.");
   // A capture started while a picker overlay is open (hotkey, context menu) would
   // burn the overlay into the pixels and strand its modal event shield — dismiss it.
   if (pickerFrames.has(tab.id)) {
@@ -610,11 +631,20 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     session.finishedAt = new Date().toISOString();
     // Never resurrect a record the user deleted from History mid-capture; sweep any
     // tiles written after the delete.
-    if (!(await updateRecord(session))) await deleteCapture(session.id).catch(() => {});
-    activeCaptures.delete(tab.id);
-    activeWindowLocks.delete(tab.windowId);
-    refreshContextMenu().catch(() => {});
-    updateBadge();
+    try {
+      if (!(await updateRecord(session))) await deleteCapture(session.id).catch(() => {});
+    } catch (error) {
+      session.state = SessionState.FAILED;
+      session.error = friendlyError(error);
+      throw error;
+    } finally {
+      // Storage failures must never strand the window lock or disable future captures.
+      activeCaptures.delete(tab.id);
+      activeWindowLocks.delete(tab.windowId);
+      refreshContextMenu().catch(() => {});
+      updateBadge();
+      progress(session, session.error || `Capture ${session.state}.`);
+    }
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
@@ -653,7 +683,7 @@ async function captureBatchTab(tab, controller, mode, settings) {
   const ready = await waitForTabComplete(tab.id, controller.signal);
   await new Promise((resolve) => setTimeout(resolve, 250));
   throwIfAborted(controller.signal);
-  const result = await runCapture(mode, null, ready, { openEditor: false, settings, limits: captureLimits(settings) });
+  const result = await runCapture(mode, null, ready, { batch: true, openEditor: false, settings, limits: captureLimits(settings) });
   return { tabId: tab.id, title: ready.title || tab.title || ready.url, url: ready.url, ...result };
 }
 
@@ -661,7 +691,7 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   if (activeBatch) throw new Error("A WinShot batch is already running.");
   // captureBatchTab activates other tabs, which would make a running capture's
   // assertStillActive throw and destroy it — refuse instead of wrecking it.
-  if (activeCaptures.size > 0 || activeWindowLocks.size > 0) {
+  if (activeCaptures.size > 0 || pendingCaptures.size > 0 || activeWindowLocks.size > 0) {
     throw new Error("A WinShot capture is already running. Wait for it to finish or press Stop before starting a batch.");
   }
   const original = await activeTab();
@@ -741,24 +771,40 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
 }
 
 async function waitCaptureDelay(tab, delayMs) {
+  if (pendingCaptures.has(tab.id) || [...pendingCaptures.values()].some((entry) => entry.windowId === tab.windowId)) {
+    throw new Error("A WinShot capture is already waiting in this browser window. Press Stop to cancel it.");
+  }
   if (!delayMs) return;
+  if (activeWindowLocks.has(tab.windowId) || activeBatch) throw new Error("A WinShot capture is already running in this browser window.");
   // Ping an extension API every few seconds so the service worker's 30s idle timer
   // cannot fire in the middle of a long capture delay.
-  const deadline = Date.now() + delayMs;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, Math.min(5000, deadline - Date.now())));
-    await chrome.storage.session.set({ "winshot:delay-keepalive": Date.now() }).catch(() => {});
+  const controller = new AbortController();
+  pendingCaptures.set(tab.id, { controller, windowId: tab.windowId });
+  updateBadge();
+  refreshContextMenu().catch(() => {});
+  try {
+    const deadline = Date.now() + delayMs;
+    while (Date.now() < deadline) {
+      chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", busy: true, message: `Capture starts in ${Math.ceil((deadline - Date.now()) / 1000)} seconds...` }).catch(() => {});
+      await wait(Math.min(1000, deadline - Date.now()), controller.signal);
+      await chrome.storage.session.set({ "winshot:delay-keepalive": Date.now() }).catch(() => {});
+    }
+    throwIfAborted(controller.signal);
+    const current = await chrome.tabs.get(tab.id);
+    if (!current?.id || current.url !== tab.url) throw new Error("The page changed during the capture delay.");
+  } finally {
+    pendingCaptures.delete(tab.id);
+    updateBadge();
+    refreshContextMenu().catch(() => {});
+    if (controller.signal.aborted) chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", busy: false, message: "Capture cancelled." }).catch(() => {});
   }
-  const current = await chrome.tabs.get(tab.id);
-  if (!current?.id || current.url !== tab.url) throw new Error("The page changed during the capture delay.");
 }
 
 // Small preview stored on the record so History can render without loading full tiles.
 async function attachThumbnail(session) {
   try {
-    const tiles = await getTiles(session.id);
-    if (!tiles.length) return;
-    const first = tiles.find((tile) => tile.destYPx === 0 && tile.destXPx === 0) || tiles[0];
+    const first = await getTile(session.id, 0);
+    if (!first) return;
     const bitmap = await createImageBitmap(first.blob);
     const scale = Math.min(1, 240 / bitmap.width);
     const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(Math.min(bitmap.height, bitmap.width) * scale)));
@@ -775,7 +821,7 @@ async function refreshContextMenu() {
   const settings = await loadSettings();
   await chrome.contextMenus.removeAll();
   if (!settings.contextMenu) return;
-  const capturing = activeCaptures.size > 0 || activeBatch;
+  const capturing = activeCaptures.size > 0 || pendingCaptures.size > 0 || activeBatch;
   chrome.contextMenus.create({
     id: capturing ? "winshot-stop" : "winshot-last",
     title: capturing ? "Stop WinShot capture" : `WinShot: ${MODE_LABELS[settings.lastMode] || MODE_LABELS["full-page"]}`,
@@ -844,8 +890,10 @@ async function stopPickers(tabId, keepFrameId = null) {
 
 async function cancelActiveCapture() {
   const tab = await activeTab();
-  const active = activeCaptures.get(tab.id);
+  const active = [...activeCaptures.values()].find((entry) => entry.session.windowId === tab.windowId);
   active?.controller.abort();
+  const pending = [...pendingCaptures.values()].find((entry) => entry.windowId === tab.windowId);
+  pending?.controller.abort();
   if (activeBatch) {
     activeBatch.controller.abort();
     activeCaptures.get(activeBatch.currentTabId)?.controller.abort();
@@ -857,11 +905,20 @@ async function cancelActiveCapture() {
     await stopPickers(tab.id);
   }
   refreshContextMenu().catch(() => {});
-  return { cancelled: Boolean(active || activeBatch || hadPicker) };
+  return { cancelled: Boolean(active || pending || activeBatch || hadPicker) };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
+    if (message.type === "WINSHOT_GET_CAPTURE_STATUS") {
+      const tab = await activeTab();
+      const active = [...activeCaptures.values()].find((entry) => entry.session.windowId === tab.windowId);
+      const pending = [...pendingCaptures.values()].some((entry) => entry.windowId === tab.windowId);
+      return {
+        busy: Boolean(active || pending || activeBatch),
+        message: pending ? "Waiting to capture. Press Stop to cancel." : active ? `Capturing tile ${active.session.report.tileCount + 1}…` : activeBatch ? "Batch capture running…" : "Captures stay on this device."
+      };
+    }
     if (message.type === "WINSHOT_START_CAPTURE") {
       await rememberMode(message.mode);
       return await runConfiguredCapture(message.mode, message.target || null, null, message.settings);
@@ -912,7 +969,7 @@ async function handleCommand(command) {
   if (command === "capture-full-page") return await startByMode(CaptureMode.FULL_PAGE);
   if (command === "capture-region") return await startByMode(CaptureMode.REGION);
   if (command === "last-used-action") {
-    if (activeCaptures.size > 0 || activeBatch) return await cancelActiveCapture();
+    if (activeCaptures.size > 0 || pendingCaptures.size > 0 || activeBatch) return await cancelActiveCapture();
     const settings = await loadSettings();
     return await startByMode(settings.lastMode);
   }
@@ -949,6 +1006,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.status === "loading") pendingCaptures.get(tabId)?.controller.abort();
   const active = activeCaptures.get(tabId);
   if (!active || (!changeInfo.url && changeInfo.status !== "loading")) return;
   active.failureReason = "The page navigated during capture. WinShot stopped without claiming a complete image.";
@@ -956,6 +1014,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  pendingCaptures.get(tabId)?.controller.abort();
   const active = activeCaptures.get(tabId);
   if (!active) return;
   active.failureReason = "The captured tab closed during capture. No complete image was claimed.";

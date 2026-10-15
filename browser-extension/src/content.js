@@ -11,7 +11,14 @@
   const announcedFrames = new Map();
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const nextPaint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const nextPaint = () => new Promise((resolve) => {
+    let frame;
+    const finish = () => { clearTimeout(timer); cancelAnimationFrame(frame); resolve(); };
+    // A hidden frame/tab can suspend rAF. Keep messages bounded so cancellation
+    // and the watchdog can still unwind a capture when the user switches tabs.
+    const timer = setTimeout(finish, 250);
+    frame = requestAnimationFrame(() => { frame = requestAnimationFrame(finish); });
+  });
 
   function scrollingElement() {
     return document.scrollingElement || document.documentElement;
@@ -31,6 +38,16 @@
     if (node?.parentElement) return node.parentElement;
     const root = node?.getRootNode?.();
     return root instanceof ShadowRoot ? root.host : null;
+  }
+
+  function openRoots() {
+    const roots = [document];
+    for (let index = 0; index < roots.length; index++) {
+      for (const element of roots[index].querySelectorAll("*")) {
+        if (element.shadowRoot) roots.push(element.shadowRoot);
+      }
+    }
+    return roots;
   }
 
   function nearestScrollOwner(element) {
@@ -83,14 +100,18 @@
         }
       }
     }
-    current.freezeStyle?.remove();
-    if (current.freezeStyle?.isConnected) failures.push("freeze-style");
+    for (const style of current.freezeStyles) {
+      style.remove();
+      if (style.isConnected) failures.push("freeze-style");
+    }
 
     if (current.owner instanceof Element && current.owner !== scrollingElement()) {
-      current.owner.scrollTo(current.ownerScroll.left, current.ownerScroll.top);
-      if (Math.abs(current.owner.scrollTop - current.ownerScroll.top) > 2) failures.push("owner-scroll");
+      current.owner.scrollTo({ ...current.ownerScroll, behavior: "instant" });
+      if (Math.abs(current.owner.scrollTop - current.ownerScroll.top) > 2 || Math.abs(current.owner.scrollLeft - current.ownerScroll.left) > 2) failures.push("owner-scroll");
     }
-    window.scrollTo(current.windowScroll.left, current.windowScroll.top);
+    // The original CSS may enable smooth scrolling again. Restoration must finish
+    // before acknowledging it, rather than leave the page animating toward home.
+    window.scrollTo({ ...current.windowScroll, behavior: "instant" });
     // Read back — restoration is only "verified" if the page actually ended up there.
     if (Math.abs(window.scrollY - current.windowScroll.top) > 2 || Math.abs(window.scrollX - current.windowScroll.left) > 2) {
       failures.push("window-scroll");
@@ -171,6 +192,8 @@
       offsetTop: visual?.offsetTop ?? 0,
       width: visual?.width ?? document.documentElement.clientWidth,
       height: visual?.height ?? document.documentElement.clientHeight,
+      rasterWidth: innerWidth / (visual?.scale || 1),
+      rasterHeight: innerHeight / (visual?.scale || 1),
       scale: visual?.scale ?? 1,
       devicePixelRatio: window.devicePixelRatio
     };
@@ -202,7 +225,9 @@
           offsetLeft: visual?.offsetLeft ?? 0,
           offsetTop: visual?.offsetTop ?? 0,
           width: visual?.width ?? current.document.documentElement.clientWidth,
-          height: visual?.height ?? current.document.documentElement.clientHeight
+          height: visual?.height ?? current.document.documentElement.clientHeight,
+          rasterWidth: current.innerWidth / (visual?.scale || 1),
+          rasterHeight: current.innerHeight / (visual?.scale || 1)
         }
       };
     } catch {
@@ -287,17 +312,26 @@
       return { left: 0, top: 0, width: view.width, height: view.height };
     }
     const rect = owner.getBoundingClientRect();
+    const scale = ownerScale(owner);
     return {
-      left: rect.left + owner.clientLeft,
-      top: rect.top + owner.clientTop,
-      width: owner.clientWidth,
-      height: owner.clientHeight
+      left: rect.left + owner.clientLeft * scale.x,
+      top: rect.top + owner.clientTop * scale.y,
+      width: owner.clientWidth * scale.x,
+      height: owner.clientHeight * scale.y
+    };
+  }
+
+  function ownerScale(owner) {
+    const rect = owner.getBoundingClientRect();
+    return {
+      x: owner.offsetWidth ? rect.width / owner.offsetWidth : 1,
+      y: owner.offsetHeight ? rect.height / owner.offsetHeight : 1
     };
   }
 
   function visibleClientRect(element) {
     let result = ownerClientRect(element);
-    for (let ancestor = element.parentElement; ancestor && ancestor !== document.body; ancestor = ancestor.parentElement) {
+    for (let ancestor = composedParent(element); ancestor && ancestor !== document.body; ancestor = composedParent(ancestor)) {
       if (!isScrollable(ancestor).any) continue;
       const rect = ownerClientRect(ancestor);
       const left = Math.max(result.left, rect.left);
@@ -362,15 +396,17 @@
       reachedY = window.scrollY;
     } else if (session.kind === "self-scroller") {
       const rect = visibleClientRect(owner);
-      width = owner.scrollWidth;
-      height = owner.scrollHeight;
+      const scale = ownerScale(owner);
+      width = owner.scrollWidth * scale.x;
+      height = owner.scrollHeight * scale.y;
       const left = Math.max(0, rect.left);
       const top = Math.max(0, rect.top);
       const right = Math.min(view.width, rect.left + rect.width);
       const bottom = Math.min(view.height, rect.top + rect.height);
       clip = { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-      destX = owner.scrollLeft + Math.max(0, -rect.left);
-      destY = owner.scrollTop + Math.max(0, -rect.top);
+      const fullRect = ownerClientRect(owner);
+      destX = owner.scrollLeft * scale.x + left - fullRect.left;
+      destY = owner.scrollTop * scale.y + top - fullRect.top;
       reachedX = owner.scrollLeft;
       reachedY = owner.scrollTop;
     } else {
@@ -412,6 +448,7 @@
     while (performance.now() - start < timeoutMs) {
       await nextPaint();
       const metrics = currentMetrics();
+      const pendingImages = visibleImages(metrics).some((image) => !image.complete);
       const signature = JSON.stringify([
         Math.round(metrics.width * 10), Math.round(metrics.height * 10),
         Math.round(metrics.reachedX * 10), Math.round(metrics.reachedY * 10),
@@ -420,11 +457,29 @@
       ]);
       if (signature === previous) repeats++;
       else repeats = 0;
-      if (repeats >= 1) return { stable: true, metrics };
+      if (repeats >= 1 && !pendingImages) {
+        // Image dimensions can be stable while their pixels are still loading.
+        // Decode only images in this tile; offscreen lazy images must not block it.
+        const remaining = Math.max(0, timeoutMs - (performance.now() - start));
+        const decoded = await Promise.race([
+          Promise.allSettled(visibleImages(metrics).map((image) => image.decode())).then(() => true),
+          sleep(remaining).then(() => false)
+        ]);
+        if (decoded) return { stable: true, metrics: currentMetrics() };
+      }
       previous = signature;
       await sleep(60);
     }
     return { stable: false, metrics: currentMetrics() };
+  }
+
+  function visibleImages(metrics) {
+    const { left, top, width, height } = metrics.clip;
+    return session.roots.flatMap((root) => [...root.querySelectorAll("img[src], img[srcset]")]).filter((image) => {
+      const rect = image.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.right > left && rect.bottom > top &&
+        rect.left < left + width && rect.top < top + height && getComputedStyle(image).visibility !== "hidden";
+    });
   }
 
   function semanticSnapshot(metrics, limit = 5000) {
@@ -450,12 +505,7 @@
       };
     };
 
-    const roots = [document];
-    for (let index = 0; index < roots.length; index++) {
-      for (const element of roots[index].querySelectorAll("*")) {
-        if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
-      }
-    }
+    const roots = session?.roots || openRoots();
 
     for (const root of roots) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -505,7 +555,7 @@
       destX: 0,
       destY: 0
     };
-    return { metrics: { width: view.width, height: view.height }, semantics: semanticSnapshot(metrics) };
+    return { metrics: { width: view.rasterWidth, height: view.rasterHeight }, semantics: semanticSnapshot(metrics) };
   }
 
   function collectWarnings() {
@@ -545,8 +595,35 @@
     return null;
   }
 
+  function mainScrollOwner() {
+    const view = viewport();
+    const size = documentSize();
+    if (size.height > view.height + 2 || size.width > view.width + 2) return null;
+    const candidates = new Set();
+    for (const [x, y] of [[0.5, 0.5], [0.65, 0.5], [0.5, 0.75]]) {
+      let element = document.elementFromPoint(view.width * x, view.height * y);
+      while (element?.shadowRoot) {
+        const child = element.shadowRoot.elementFromPoint(view.width * x, view.height * y);
+        if (!child || child === element) break;
+        element = child;
+      }
+      for (let node = element; node && node !== document.body; node = composedParent(node)) {
+        if (node === scrollingElement() || !isScrollable(node).y) continue;
+        const rect = visibleClientRect(node);
+        if (rect.width >= view.width * 0.4 && rect.height >= view.height * 0.55 &&
+            rect.width * rect.height >= view.width * view.height * 0.3) candidates.add(node);
+      }
+    }
+    return [...candidates].sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] || null;
+  }
+
   function classifyTarget(request) {
     if (request.mode === "full-page") {
+      const owner = mainScrollOwner();
+      if (owner) return {
+        kind: "self-scroller", owner, targetElement: owner, automaticScroller: true,
+        targetRect: { left: 0, top: 0, width: owner.scrollWidth, height: owner.scrollHeight }
+      };
       return { kind: "document", owner: scrollingElement(), targetRect: { left: 0, top: 0, ...documentSize() } };
     }
     if (request.mode === "region") {
@@ -594,13 +671,14 @@
         };
       }
       const ownerRect = ownerClientRect(owner);
+      const scale = ownerScale(owner);
       return {
         kind: "ancestor-scroller",
         owner,
         targetElement: element,
         ownerOffset: {
-          left: owner.scrollLeft + rect.left - ownerRect.left,
-          top: owner.scrollTop + rect.top - ownerRect.top
+          left: owner.scrollLeft + (rect.left - ownerRect.left) / scale.x,
+          top: owner.scrollTop + (rect.top - ownerRect.top) / scale.y
         },
         targetRect: { left: 0, top: 0, width: rect.width, height: rect.height }
       };
@@ -609,20 +687,23 @@
   }
 
   function freezePage(classification, request) {
-    const freezeStyle = document.createElement("style");
-    freezeStyle.dataset.winshotCapture = request.sessionId;
-    freezeStyle.textContent = `
+    for (const root of session.roots) {
+      const freezeStyle = document.createElement("style");
+      freezeStyle.dataset.winshotCapture = request.sessionId;
+      freezeStyle.textContent = `
       html { scroll-behavior: auto !important; scroll-snap-type: none !important; overflow-anchor: none !important; }
       *, *::before, *::after {
         animation-play-state: paused !important;
+        transition: none !important;
         scroll-behavior: auto !important;
         scroll-snap-type: none !important;
         overflow-anchor: none !important;
         caret-color: transparent !important;
       }
     `;
-    (document.head || document.documentElement).append(freezeStyle);
-    session.freezeStyle = freezeStyle;
+      (root === document ? document.head || document.documentElement : root).append(freezeStyle);
+      session.freezeStyles.push(freezeStyle);
+    }
 
     if (classification.owner instanceof Element) {
       rememberStyle(classification.owner, "scroll-behavior", "auto");
@@ -630,7 +711,7 @@
       rememberStyle(classification.owner, "overflow-anchor", "none");
     }
 
-    const nodes = document.querySelectorAll("body *");
+    const nodes = session.roots.flatMap((root) => [...root.querySelectorAll(root === document ? "body *" : "*")]);
     const cap = Math.min(nodes.length, 25000);
     for (let i = 0; i < cap; i++) {
       const node = nodes[i];
@@ -678,7 +759,8 @@
       activeElement: pickerState?.activeElement || document.activeElement,
       selection: pickerState?.selection || snapshotSelection(),
       changedStyles: new Map(),
-      freezeStyle: null,
+      freezeStyles: [],
+      roots: openRoots(),
       floating: [],
       mutationCount: 0,
       lastHeartbeat: Date.now(),
@@ -688,7 +770,9 @@
 
     freezePage(classification, request);
     session.observer = new MutationObserver(() => { if (session) session.mutationCount++; });
-    session.observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    for (const root of session.roots) {
+      session.observer.observe(root === document ? document.documentElement : root, { childList: true, subtree: true, attributes: true });
+    }
     session.watchdog = setInterval(() => {
       if (session && Date.now() - session.lastHeartbeat > WATCHDOG_MS) restore("watchdog");
     }, 1000);
@@ -696,6 +780,7 @@
     await nextPaint();
     const metrics = currentMetrics();
     const warnings = collectWarnings();
+    if (classification.automaticScroller) warnings.push('Captured the main scrolling area. Use "Select an element" to capture another panel.');
     if (classification.kind === "ancestor-scroller") {
       warnings.push("The selected element is inside a separate scrolling panel; WinShot will scroll that panel and validate coverage.");
     }
@@ -725,9 +810,11 @@
       const target = session.kind === "document" ? { left: 0, top: 0 } : session.targetRect;
       window.scrollTo(target.left + request.x, target.top + request.y);
     } else if (session.kind === "self-scroller") {
-      session.owner.scrollTo(request.x, request.y);
+      const scale = ownerScale(session.owner);
+      session.owner.scrollTo(request.x / scale.x, request.y / scale.y);
     } else {
-      session.owner.scrollTo(session.ownerOffset.left + request.x, session.ownerOffset.top + request.y);
+      const scale = ownerScale(session.owner);
+      session.owner.scrollTo(session.ownerOffset.left + request.x / scale.x, session.ownerOffset.top + request.y / scale.y);
     }
 
     const result = await waitForStable(request.settleTimeoutMs);
@@ -808,7 +895,7 @@
       if (!(candidate instanceof Element)) return null;
       if (!event.ctrlKey) {
         let scrollCandidate = candidate;
-        while (scrollCandidate && scrollCandidate !== document.body && !isScrollable(scrollCandidate).any) scrollCandidate = scrollCandidate.parentElement;
+        while (scrollCandidate && scrollCandidate !== document.body && !isScrollable(scrollCandidate).any) scrollCandidate = composedParent(scrollCandidate);
         if (scrollCandidate && scrollCandidate !== document.body) candidate = scrollCandidate;
       }
       return candidate;

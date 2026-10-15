@@ -11,6 +11,8 @@
 - All-open-tab and URL-list batches in visible or full-page mode, plus one-click all-tabs-to-one-PDF.
 - Browser-window capture exists in WinShot desktop. The extension requests it by navigating the active tab to `winshot://capture-window` (an external-protocol launch that leaves the page untouched), but the handoff still requires live manual acceptance and does not return a success acknowledgement.
 - Tile-backed captures above 32,000 pixels, cancellation, navigation failure, service-worker recovery, and exact page restoration.
+- Bounded visible-image loading/decoding, smooth-scroll restoration, open-shadow-root sticky handling, scaled 2D panels, and automatic main-panel capture on fixed-height app layouts.
+- Stop cancels a capture delay and remains visible while popup content scrolls. Package and UI icons are extracted from the Windows icon.
 - PNG, bounded-canvas JPEG/WebP, searchable linked PDF, single- or multipage PDF, standard/custom page sizes, headers, footers, and watermarks. An independent PDF reader extracts the Latin, Japanese, and Arabic text and link annotations in the end-to-end suite.
 
 The browser-native paths are covered by unit tests, packaged Manifest V3 end-to-end tests in disposable Chrome-for-Testing profiles, and Chrome/Edge fixture smoke tests. Desktop regressions are checked separately; selectors, global hotkeys, and the external-protocol handoff cannot be called fully end to end without interacting with the real Windows desktop.

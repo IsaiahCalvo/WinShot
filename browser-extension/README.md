@@ -18,6 +18,45 @@ extension tests use Puppeteer's supported Chrome-for-Testing extension API and a
 temporary profile. Branded Chrome and Edge are used only for isolated fixture/package
 smoke tests because current releases block command-line unpacked-extension sideloading.
 
+To run just the actual extension suite (without requiring separately installed
+Chrome and Edge), use `npm run test:e2e -- --project=extension-puppeteer`.
+`PUPPETEER_EXECUTABLE_PATH` can select an installed Chrome-for-Testing/Chromium
+binary when the default Puppeteer browser download is unavailable. Set
+`PUPPETEER_SKIP_DOWNLOAD=true` during `npm ci` in that case. The tests also accept
+`WINSHOT_EXTENSION_PATH` to verify a specific unpacked build. Every test uses a
+disposable profile; never point the harness at your everyday Chrome profile.
+
+For a repeatable check on real websites, run
+`npm run test:live -- https://example.com/article https://example.org/another-page`.
+It uses the real popup, captures each page, downloads PNG and PDF, checks PNG
+dimensions and parses the PDF with an independent reader. Results and screenshots
+go to a printed temporary folder. Failed or partial captures return a nonzero exit
+code. This is bounded to two minutes, 50,000 CSS pixels and 100 tiles per page;
+it uses a fresh profile with no account sessions and honors the environment's proxy.
+
+## Capture reliability and responsiveness
+
+Capture waits for visible images to load and decode within each tile's bounded
+settle deadline. Unfinished images or changing layout produce a partial result,
+with a warning, rather than a false complete claim. Capture styling and sticky
+handling reach open shadow roots. Axis-aligned scaled scrolling panels use visual
+coordinates consistently; scroll position and original CSS are restored afterward.
+On fixed-height app layouts, Entire page detects a large central scrolling panel
+and captures its hidden content. The result states which area was captured; use
+Select an element when a different panel is wanted.
+
+Stop remains visible in the popup, cancels delays as well as active captures, and
+new capture controls show a busy state immediately. Button feedback and the capture
+indicator respect reduced-motion preferences. Full-resolution tiles stay in local
+IndexedDB; seam checking loads only overlapping neighbors and History thumbnails
+read just the first tile. Chrome limits screenshots to two calls per second, so
+the capture interval deliberately stays above 500 ms.
+
+The build extracts all toolbar/package icons directly from the Windows app's
+`src/WinShot/Assets/winshot.ico`; popup/editor branding and page icons use the same
+mark. See [third-party notices](THIRD_PARTY_NOTICES.md#capture-research) for the
+open-source capture implementations reviewed during this work.
+
 ## Permissions
 
 The package requires site access plus `activeTab`, `scripting`, `downloads`, `storage`, and

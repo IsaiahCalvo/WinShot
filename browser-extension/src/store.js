@@ -104,6 +104,15 @@ export async function getTiles(captureId) {
   }
 }
 
+export async function getTile(captureId, index) {
+  const db = await openDatabase();
+  try {
+    return await requestResult(db.transaction(TILES).objectStore(TILES).get([captureId, index]));
+  } finally {
+    db.close();
+  }
+}
+
 // Delete all records finished before `cutoffIso`, their tiles, and any orphaned tiles
 // whose parent record no longer exists. Returns the number of records removed.
 export async function pruneOlderThan(cutoffIso) {

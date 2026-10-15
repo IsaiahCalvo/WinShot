@@ -7,8 +7,12 @@ Automated tests use disposable browser profiles. They cover every browser-native
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Choose **Load unpacked**.
-4. Select `C:\Users\icalvo\.codex\worktrees\8d13\winshot\browser-extension\dist\winshot-capture`.
+4. Select `C:\Users\icalvo\winshot\browser-extension\dist\winshot-capture`.
 5. Pin **WinShot Capture** to the toolbar.
+
+After rebuilding, use **Reload** on this extension's card. Check that its icon is
+the same capture-corner mark as WinShot desktop. Remove an older WinShot Capture
+entry loaded from a different folder so hotkeys and the toolbar use this build.
 
 ## Short browser acceptance
 

@@ -1,0 +1,43 @@
+name: browser-extension
+
+on:
+  pull_request:
+    paths: ['browser-extension/**', 'src/WinShot/Assets/winshot.ico', 'package.json', 'package-lock.json', '.github/workflows/browser-extension.yml']
+  push:
+    branches: ['main']
+    paths: ['browser-extension/**', 'src/WinShot/Assets/winshot.ico', 'package.json', 'package-lock.json', '.github/workflows/browser-extension.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture-and-export:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:browser
+      - run: npm run test:e2e -- --project=extension-puppeteer
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-test-results-${{ matrix.os }}
+          path: |
+            output/playwright
+            browser-extension/playwright-report
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinShot-Capture-${{ matrix.os }}
+          path: browser-extension/dist/winshot-capture
+          if-no-files-found: error

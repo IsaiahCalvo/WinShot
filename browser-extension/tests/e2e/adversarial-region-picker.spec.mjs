@@ -9,14 +9,14 @@
 //   - selection on a pre-scrolled page: document-anchored rect, mid-drag Ctrl square, focus/scroll restore
 //   - picker left open/dragging past the 9s state watchdog (scroll must not be yanked mid-drag)
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -39,14 +39,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension() {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);

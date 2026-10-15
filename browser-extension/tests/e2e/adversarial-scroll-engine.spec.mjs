@@ -10,14 +10,14 @@
 // test can run the real extension at deviceScaleFactor 2.
 
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 function removeOwnedDirectory(directory, prefix) {
   const resolved = path.resolve(directory);
@@ -38,21 +38,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension(viewport = { width: 1200, height: 1000 }) {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: viewport,
-    args: [
-      `--window-size=${viewport.width},${viewport.height}`,
-      // Viewport emulation alone does not reach chrome.tabs.captureVisibleTab
-      // (the physical surface stays 1x), so a DPR test must scale the real window.
-      ...(viewport.deviceScaleFactor && viewport.deviceScaleFactor !== 1
-        ? [`--force-device-scale-factor=${viewport.deviceScaleFactor}`]
-        : [])
-    ]
-  });
+  const browser = await launchCaptureBrowser(profileRoot, viewport);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -351,7 +337,7 @@ test("growing page with a tall fixed footer leaves no stale footer band mid-imag
   }
 });
 
-test("transform-scaled scroll container is never reported as a clean complete capture", async () => {
+test("transform-scaled scroll container captures its complete rendered extent", async () => {
   const run = await launchExactExtension();
   try {
     const page = await run.browser.newPage();
@@ -368,23 +354,13 @@ test("transform-scaled scroll container is never reported as a clean complete ca
     const { record } = await recordFromEditorTarget(await waitingEditor);
 
     expect(record.report.target).toBe("self-scroller");
-    // The engine mixes layout-space scroll offsets with visually-scaled clip
-    // rectangles for transformed scrollers, so a genuinely correct complete
-    // capture is impossible today. The contract under test: it must self-report
-    // (coverage gap and/or seam mismatch), never claim a clean complete result.
-    if (record.state === "complete") {
-      expect(record.report.coverage.complete).toBe(true);
-      expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
-      // A complete claim must also cover the scroller's full layout extent
-      // (25 rows x 120px = exactly 3000 CSS px).
-      expect(record.report.dimensionsCss.height).toBeGreaterThanOrEqual(3000);
-    } else {
-      expect(record.state).toBe("partial");
-      expect(
-        record.report.coverage.complete === false || record.report.seamConfidence.minimum < 0.7,
-        JSON.stringify(record.report)
-      ).toBe(true);
-    }
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    expect(record.report.coverage.complete).toBe(true);
+    expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
+    // 25 rows x 120 layout pixels, rendered at scale(.5). Keep image placement,
+    // crop rectangles and scroll offsets in the same visual coordinate space.
+    expect(record.report.dimensionsCss.height).toBe(1500);
+    expect(record.report.dimensionsPx.height).toBe(1500);
     // Whatever the outcome, the page must be restored exactly.
     expect(await page.$eval("#scaled", (element) => element.scrollTop)).toBe(0);
     expect(await page.$eval("#scaled", (element) => element.getAttribute("data-winshot-target"))).toBeNull();

@@ -2,6 +2,14 @@ import { loadSettings, normalizeSettings, saveSettings } from "./settings.js";
 
 const status = document.querySelector("#status");
 let settings = await loadSettings();
+let busy = false;
+const startButtons = [...document.querySelectorAll("[data-mode], [data-picker], #repeat-last, #all-tabs, #all-tabs-pdf, #url-batch, #browser-window")];
+
+function setBusy(value) {
+  busy = value;
+  document.body.dataset.busy = String(value);
+  for (const button of startButtons) button.disabled = value;
+}
 
 const delayNode = document.querySelector("#capture-delay");
 const infiniteNode = document.querySelector("#capture-infinite");
@@ -64,6 +72,8 @@ function launchSettings(event) {
 }
 
 async function startMode(mode, event) {
+  if (busy) return;
+  setBusy(true);
   try {
     await persistSettings();
     const launch = launchSettings(event);
@@ -72,12 +82,16 @@ async function startMode(mode, event) {
     if (result?.error) throw new Error(result.error);
     status.textContent = result?.state === "complete" ? "Capture complete." : `Capture ${result?.state || "finished"}.`;
   } catch (error) {
-    status.className = "error";
+    status.className = /cancelled/i.test(error.message) ? "" : "error";
     status.textContent = error.message;
+  } finally {
+    setBusy(false);
   }
 }
 
 async function startPicker(mode, event) {
+  if (busy) return;
+  setBusy(true);
   try {
     await persistSettings();
     const launch = launchSettings(event);
@@ -85,8 +99,10 @@ async function startPicker(mode, event) {
     await request({ type: "WINSHOT_START_PICKER", mode, settings: launch });
     window.close();
   } catch (error) {
-    status.className = "error";
+    status.className = /cancelled/i.test(error.message) ? "" : "error";
     status.textContent = error.message;
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -127,8 +143,13 @@ document.querySelector("#browser-window").addEventListener("click", async () => 
 });
 
 async function launchBatch(kind, urls = [], combinePdf = false) {
-  await persistSettings();
-  return await request({ type: "WINSHOT_START_BATCH", kind, urls, combinePdf, settings });
+  setBusy(true);
+  try {
+    await persistSettings();
+    return await request({ type: "WINSHOT_START_BATCH", kind, urls, combinePdf, settings });
+  } finally {
+    setBusy(false);
+  }
 }
 
 document.querySelector("#all-tabs").addEventListener("click", async () => {
@@ -183,6 +204,18 @@ document.querySelector("#open-history").addEventListener("click", async (event) 
 });
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === "WINSHOT_CAPTURE_STATUS") {
+    setBusy(message.busy);
+    if (message.message) status.textContent = message.message;
+    return;
+  }
   if (message.type !== "WINSHOT_PROGRESS") return;
+  setBusy(message.state === "preparing" || message.state === "capturing");
   status.textContent = message.message;
 });
+
+chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" }).then((result) => {
+  if (!result?.busy) return;
+  setBusy(true);
+  status.textContent = result.message;
+}).catch(() => {});

@@ -4,11 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>WinShot Capture</title>
+  <link rel="icon" href="../icons/32.png">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header>
-    <span class="mark" aria-hidden="true"></span>
+    <img class="mark" src="../icons/32.png" alt="" width="32" height="32">
     <div><strong>WinShot</strong><small>Browser capture</small></div>
   </header>
   <main>
@@ -62,10 +63,12 @@
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
     <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
-    <button id="cancel"><span>Cancel active capture</span><kbd>Ctrl Shift S</kbd><small>Restores the page and discards the result</small></button>
     <a id="open-history" href="#">Capture history…</a>
   </main>
-  <p id="status" role="status">Captures stay on this device.</p>
+  <footer>
+    <p id="status" role="status">Captures stay on this device.</p>
+    <button id="cancel" title="Stop capture and restore the page (Ctrl+Shift+S)">Stop</button>
+  </footer>
   <script type="module" src="popup.js"></script>
 </body>
 </html>
