@@ -40,13 +40,17 @@ jobs:
           printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-capture-test "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-capture-test > /dev/null
           sudo apparmor_parser -r /etc/apparmor.d/winshot-capture-test
       - run: npm run test:browser
-      - run: npm run test:e2e -- --project=extension-puppeteer
+      - run: npm run build:extension
+      - name: Platform rendering smoke
+        run: npx playwright test -c browser-extension/playwright.config.mjs --project=extension-smoke --reporter=list --output=output/platform-smoke
+      - name: Full capture suite
+        run: npx playwright test -c browser-extension/playwright.config.mjs --project=extension-puppeteer --no-deps
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: capture-test-results-${{ matrix.os }}
           path: |
-            output/playwright
+            output
             browser-extension/playwright-report
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
