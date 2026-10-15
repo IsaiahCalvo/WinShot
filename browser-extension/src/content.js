@@ -475,7 +475,7 @@
 
   function visibleImages(metrics) {
     const { left, top, width, height } = metrics.clip;
-    return session.roots.flatMap((root) => [...root.querySelectorAll("img[src], img[srcset]")]).filter((image) => {
+    return openRoots().flatMap((root) => [...root.querySelectorAll("img[src], img[srcset]")]).filter((image) => {
       const rect = image.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && rect.right > left && rect.bottom > top &&
         rect.left < left + width && rect.top < top + height && getComputedStyle(image).visibility !== "hidden";
