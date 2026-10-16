@@ -6,6 +6,80 @@ on:
 permissions:
   contents: read
 jobs:
+  public-paint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Allow sandboxed test Chrome user namespaces
+        shell: bash
+        run: |
+          capture_chrome_path="$(node --input-type=module -e 'import puppeteer from "puppeteer"; console.log(await puppeteer.executablePath());')"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-public-paint "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-public-paint > /dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/winshot-public-paint
+      - run: npm run build:extension
+      - name: Inspect real first-viewport readbacks without changing site code
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { launchCaptureBrowser } from './browser-extension/tests/e2e/launch-browser.mjs';
+          const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'winshot-public-paint-'));
+          const browser = await launchCaptureBrowser(profile);
+          try {
+            const id = await browser.installExtension(path.resolve('browser-extension/dist/winshot-capture'));
+            const extension = (await browser.extensions()).get(id);
+            const target = await browser.waitForTarget(t => t.type() === 'service_worker' && t.url().endsWith('/src/background.js'));
+            const worker = await target.worker();
+            worker.on('console', m => { if (m.text().startsWith('WINSHOT_PUBLIC_PAINT ')) console.log(m.text()); });
+            for (const url of ['https://lenis.dev/', 'https://gsap.com/', 'https://www.w3schools.com/html/html_iframe.asp']) {
+              const page = await browser.newPage();
+              const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+              if (!response?.ok()) throw new Error(`HTTP ${response?.status()} ${url}`);
+              await new Promise(r => setTimeout(r, 2500));
+              const tabs = await worker.evaluate(() => chrome.tabs.query({ active: true, currentWindow: true }));
+              await worker.evaluate(({ tabId, url }) => {
+                const original = globalThis.__paintOriginal || chrome.tabs.captureVisibleTab.bind(chrome.tabs);
+                globalThis.__paintOriginal = original;
+                let read = 0;
+                chrome.tabs.captureVisibleTab = async (...args) => {
+                  const data = await original(...args);
+                  if (++read <= 3) {
+                    const snapshot = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => ({
+                      title: document.title, scrollY, height: document.scrollingElement.scrollHeight,
+                      canvas: [...document.querySelectorAll('canvas')].map(n => { const s=getComputedStyle(n),r=n.getBoundingClientRect(); return { width:n.width,height:n.height,rect:{x:r.x,y:r.y,width:r.width,height:r.height},position:s.position,opacity:s.opacity,zIndex:s.zIndex,visibility:s.visibility }; }),
+                      video: [...document.querySelectorAll('video')].map(n => ({ paused:n.paused,time:n.currentTime,ready:n.readyState })),
+                      animations: document.getAnimations().map(a => ({ state:a.playState,time:a.currentTime,name:a.animationName })),
+                      gsap: window.gsap ? { paused:gsap.globalTimeline.paused(),children:gsap.globalTimeline.getChildren(true,true,true).length } : null,
+                      scripts: [...document.scripts].map(n=>n.src).filter(Boolean)
+                    }) });
+                    const bitmap = await createImageBitmap(await (await fetch(data)).blob());
+                    const canvas = new OffscreenCanvas(480,400);canvas.getContext('2d').drawImage(bitmap,0,0,480,400);bitmap.close();
+                    const bytes = new Uint8Array(await (await canvas.convertToBlob({type:'image/webp',quality:.8})).arrayBuffer());
+                    let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+                    console.log('WINSHOT_PUBLIC_PAINT '+JSON.stringify({url,read,snapshot:snapshot[0]?.result,webp:btoa(binary)}));
+                  }
+                  return data;
+                };
+              }, { tabId: tabs[0].id, url });
+              const popupTarget=browser.waitForTarget(t=>t.type()==='page'&&t.url().endsWith('/src/popup.html'));
+              const editorTarget=browser.waitForTarget(t=>t.type()==='page'&&t.url().includes('/src/editor.html?id='),{timeout:180000});
+              editorTarget.catch(()=>{});
+              await extension.triggerAction(page);
+              const popup=await(await popupTarget).asPage();await popup.waitForSelector("body[data-ready='true']");
+              await popup.click("[data-mode='full-page']");
+              const editor=await(await editorTarget).asPage();await editor.waitForSelector('#state:not(:empty)');
+              console.log('WINSHOT_PUBLIC_RESULT '+JSON.stringify(await editor.evaluate(async()=>{const s=await import(chrome.runtime.getURL('src/store.js'));return s.getRecord(new URL(location.href).searchParams.get('id'));})));
+              await popup.close().catch(()=>{});await editor.close();await page.close();
+            }
+          } finally {await browser.close();fs.rmSync(profile,{recursive:true,force:true});}
+          JS
   windows-dpr:
     runs-on: windows-2022
     timeout-minutes: 15
