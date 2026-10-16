@@ -19,12 +19,15 @@ for (let attempt = 1; attempt <= Number(process.env.WINSHOT_DIAGNOSTIC_REPEATS |
       globalThis.pixelTrace = [];
       chrome.tabs.captureVisibleTab = async (...args) => {
         const result = await original.apply(chrome.tabs, args);
-        const [tab] = await chrome.tabs.query({ active: true, windowId: args[0] });
-        const [{ result: dom }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
-          const header = document.querySelector("header"), style = getComputedStyle(header), box = header.getBoundingClientRect();
-          return { x: scrollX, y: scrollY, dpr: devicePixelRatio, viewport: [innerWidth, innerHeight], header: { position: style.position, display: style.display, visibility: style.visibility, opacity: style.opacity, background: style.backgroundColor, rect: { x: box.x, y: box.y, width: box.width, height: box.height } } };
-        } });
-        globalThis.pixelTrace.push(dom);
+        try {
+          const [tab] = await chrome.tabs.query({ active: true, windowId: args[0] });
+          if (!tab) return result;
+          const [{ result: dom } = {}] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
+            const header = document.querySelector("header"), style = header && getComputedStyle(header), box = header && header.getBoundingClientRect();
+            return { x: scrollX, y: scrollY, dpr: devicePixelRatio, viewport: [innerWidth, innerHeight], header: header && { position: style.position, display: style.display, visibility: style.visibility, opacity: style.opacity, background: style.backgroundColor, rect: { x: box.x, y: box.y, width: box.width, height: box.height } } };
+          } });
+          if (dom) globalThis.pixelTrace.push(dom);
+        } catch {}
         return result;
       };
     });
@@ -40,7 +43,7 @@ for (let attempt = 1; attempt <= Number(process.env.WINSHOT_DIAGNOSTIC_REPEATS |
     const result = await editor.evaluate(async () => {
       const store = await import(chrome.runtime.getURL("src/store.js"));
       const id = new URL(location.href).searchParams.get("id"), record = await store.getRecord(id), tiles = await store.getTiles(id);
-      const colors = [], blobs = [];
+      const colors = [];
       for (const tile of tiles) {
         const bitmap = await createImageBitmap(tile.blob), ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext("2d", { willReadFrequently: true });
         ctx.drawImage(bitmap, 0, 0); const pixels = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
@@ -52,13 +55,20 @@ for (let attempt = 1; attempt <= Number(process.env.WINSHOT_DIAGNOSTIC_REPEATS |
         }
         colors.push({ index: tile.index, destY: tile.destYPx, width: bitmap.width, height: bitmap.height, header, footer,
           leftSamples: [0, 10, 50, 100, 150, 300].filter(y => y < bitmap.height).map(y => ({ y, rgb: [...ctx.getImageData(10, y, 1, 1).data] })) });
-        bitmap.close(); blobs.push({ index: tile.index, bytes: [...new Uint8Array(await tile.blob.arrayBuffer())] });
+        bitmap.close();
       }
-      return { state: record.state, report: record.report, colors, blobs };
+      return { state: record.state, report: record.report, colors };
     });
     const folder = path.join(root, String(attempt)); fs.mkdirSync(folder);
-    for (const blob of result.blobs) fs.writeFileSync(path.join(folder, `tile-${blob.index}.png`), Buffer.from(blob.bytes));
-    delete result.blobs; result.trace = await worker.evaluate(() => globalThis.pixelTrace);
+    for (const tile of result.colors) {
+      const base64 = await editor.evaluate(async (index) => {
+        const store = await import(chrome.runtime.getURL("src/store.js"));
+        const blob = (await store.getTiles(new URL(location.href).searchParams.get("id"))).find(item => item.index === index).blob;
+        return await new Promise((ok, err) => { const r = new FileReader(); r.onload = () => ok(String(r.result).slice(String(r.result).indexOf(",") + 1)); r.onerror = err; r.readAsDataURL(blob); });
+      }, tile.index);
+      fs.writeFileSync(path.join(folder, `tile-${tile.index}.png`), Buffer.from(base64, "base64"));
+    }
+    result.trace = await worker.evaluate(() => globalThis.pixelTrace);
     result.attempt = attempt; result.version = (await worker.evaluate(() => chrome.runtime.getManifest())).version;
     result.passed = result.state === "complete" && result.colors.filter(x => x.header > 10).length === 1 && result.colors.filter(x => x.footer > 10).length === 1;
     if (!result.passed) failed++;
