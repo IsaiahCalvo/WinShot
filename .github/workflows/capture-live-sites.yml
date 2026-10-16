@@ -90,7 +90,7 @@ jobs:
         shell: bash
         env:
           WINSHOT_LIVE_ARTIFACT_ROOT: ${{ runner.temp }}
-        # Verify the current animation bridge, nested chrome, and staged retry build.
+        # Keep the selected iframe handle across startup, including duplicate URLs.
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';

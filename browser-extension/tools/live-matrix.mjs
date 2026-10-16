@@ -57,7 +57,7 @@ try {
       const folder = path.join(output, String(siteIndex + 1), mode);
       fs.mkdirSync(folder, { recursive: true });
       const page = await browser.newPage();
-      let editor, ui, targetWait, result = { url, mode, folder };
+      let editor, ui, targetWait, frameElement, result = { url, mode, folder };
       const pageErrors = [], extensionErrors = [], sourceConsole = [], urlChanges = [];
       const workerErrorIndex = workerErrors.length;
       page.on("pageerror", error => pageErrors.push(error.message));
@@ -104,15 +104,20 @@ try {
           result.selectedElement = point;
         }
         if (mode === "frame") {
-          const frame = await page.evaluate(() => {
-            const candidates = [...document.querySelectorAll("iframe")].filter(node => node.clientWidth > 200 && node.clientHeight > 100 && (/^https?:/.test(node.src) || node.srcdoc) && !/doubleclick|adservice/.test(node.src));
-            const node = candidates[0];
-            if (!node) return null;
+          const candidate = await page.evaluateHandle(() => [...document.querySelectorAll("iframe")].find(node =>
+            node.clientWidth > 200 && node.clientHeight > 100 &&
+            (/^https?:/.test(node.src) || node.srcdoc) && !/doubleclick|adservice/.test(node.src)) || null);
+          frameElement = candidate.asElement();
+          if (!frameElement) {
+            await candidate.dispose();
+            result = { ...result, state: "not-applicable", reason: "No public content frame with a visible layout box" };
+            continue;
+          }
+          const frame = await frameElement.evaluate(node => {
             node.scrollIntoView({ block: "center", behavior: "instant" });
             const rect = node.getBoundingClientRect();
             return { src: node.src, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, x: scrollX, y: scrollY };
           });
-          if (!frame) { result = { ...result, state: "not-applicable", reason: "No public content frame with a visible layout box" }; continue; }
           await new Promise(resolve => setTimeout(resolve, 500));
           source.x = frame.x; source.y = frame.y;
           point = { x: frame.rect.x + 80, y: frame.rect.y + 80 };
@@ -131,11 +136,10 @@ try {
           await ui.click(`[data-picker='${mode}']`);
           await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 15_000 });
           if (mode === "frame") {
-            const handle = await page.evaluateHandle(src => [...document.querySelectorAll('iframe')].find(n => n.src === src), result.selectedFrame.src);
-            const selected = await handle.asElement()?.contentFrame();
+            // Keep the exact chosen DOM element: URLs are not frame identity.
+            const selected = await frameElement.contentFrame();
             if (!selected) throw new Error('The selected embedded document has not loaded.');
             await selected.waitForSelector("[data-winshot-picker='tip']", { timeout: 15_000 });
-            await handle.dispose();
           }
           if (mode === "region") {
             await page.mouse.move(120, 180);
@@ -184,6 +188,7 @@ try {
       }
       finally {
         targetWait?.abort();
+        await frameElement?.dispose().catch(() => {});
         extensionErrors.push(...workerErrors.slice(workerErrorIndex));
         if (extensionErrors.length && !result.error) result.error = `Extension errors: ${extensionErrors.join("; ")}`;
         result.pageErrors = [...new Set(pageErrors)]; result.extensionErrors = [...new Set(extensionErrors)];
