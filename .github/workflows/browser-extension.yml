@@ -22,7 +22,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Windows runs the 41-case rendering smoke plus the 115-case full suite.
+    # The verified run needed 23.7 minutes for tests before setup/artifact time.
+    timeout-minutes: 35
     env:
       WINSHOT_TEST_SOFTWARE_GL: ${{ matrix.os == 'windows-2022' && '1' || '0' }}
     steps:

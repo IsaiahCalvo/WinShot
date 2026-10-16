@@ -347,6 +347,7 @@ test("browser video studio keeps a first recording downloadable when its preview
       await studio.evaluate(() => {
         const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
         window.previewLoadFaults = 0;
+        window.originalPreviewSourceDescriptor = source;
         Object.defineProperty(HTMLMediaElement.prototype, "src", { ...source, set(value) {
           source.set.call(this, value);
           if (this.id === "preview" && String(value).startsWith("blob:")) {
@@ -377,6 +378,36 @@ test("browser video studio keeps a first recording downloadable when its preview
         return [...new Uint8Array(await crypto.subtle.digest("SHA-256", await saved.blob.arrayBuffer()))].map(byte => byte.toString(16).padStart(2, "0")).join("");
       });
       expect(crypto.createHash("sha256").update(fs.readFileSync(downloaded)).digest("hex")).toBe(savedHash);
+      await studio.evaluate(() => {
+        // The original preview decoder can work again. Canceling the next
+        // chooser must preserve the raw-only source without inventing metadata.
+        const source = window.originalPreviewSourceDescriptor;
+        const seek = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime");
+        window.rawRecoveryAudit = { loads: 0, invalidSeeks: 0, chooserDenials: 0 };
+        Object.defineProperty(HTMLMediaElement.prototype, "src", { ...source, set(value) {
+          if (this.id === "preview" && String(value).startsWith("blob:")) window.rawRecoveryAudit.loads++;
+          source.set.call(this, value);
+        } });
+        Object.defineProperty(HTMLMediaElement.prototype, "currentTime", { ...seek, set(value) {
+          if (!Number.isFinite(value)) window.rawRecoveryAudit.invalidSeeks++;
+          seek.set.call(this, value);
+        } });
+        navigator.mediaDevices.getDisplayMedia = async () => { window.rawRecoveryAudit.chooserDenials++; throw new DOMException("Second sharing chooser cancelled", "NotAllowedError"); };
+      });
+      studio.once("dialog", dialog => dialog.accept());
+      const cancelledAt = Date.now();
+      await studio.click("#record");
+      await studio.waitForFunction(() => document.body.dataset.state === "ready" && /Sharing cancelled/.test(document.querySelector("#status").textContent), { timeout: 1500 });
+      expect(Date.now() - cancelledAt).toBeLessThan(1500);
+      expect(await studio.evaluate(() => window.rawRecoveryAudit)).toEqual({ loads: 0, invalidSeeks: 0, chooserDenials: 1 });
+      expect(await studio.$eval("#export-video", node => node.disabled)).toBe(true);
+      expect(await studio.$eval("#start-time", node => node.disabled)).toBe(true);
+      expect(await studio.$eval("#video-title", node => node.disabled)).toBe(true);
+      expect(await studio.$eval("#save-source", node => node.disabled)).toBe(false);
+      fs.rmSync(downloaded);
+      await studio.click("#save-source");
+      const afterCancel = await waitDownload(downloadPath);
+      expect(crypto.createHash("sha256").update(fs.readFileSync(afterCancel)).digest("hex")).toBe(savedHash);
     }, { recording: true });
   } finally { await new Promise(resolve => sourceServer.close(resolve)); }
 });

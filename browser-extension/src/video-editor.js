@@ -115,7 +115,7 @@ async function recoverRecordingPreview(error, recoveryBlob) {
   let extra = "";
   const hadPrevious = Boolean(currentBlob);
   try {
-    if (currentBlob) await showVideo(current, currentBlob);
+    if (currentBlob && !current?.previewUnavailable) await showVideo(current, currentBlob);
     else { releasePreview(); preview.hidden = true; $("#empty-state").hidden = false; }
   } catch {
     // Restoration is best effort. Keep current/currentBlob even if the browser
