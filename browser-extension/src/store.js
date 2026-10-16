@@ -127,8 +127,9 @@ export async function clearCaptureTiles(captureId) {
 
 // Delete all records finished before `cutoffIso`, their tiles, and any orphaned tiles
 // whose parent record no longer exists. Returns the number of records removed.
-export async function pruneOlderThan(cutoffIso) {
+export async function pruneOlderThan(cutoffIso, activeCaptureIds = []) {
   const records = await listRecords();
+  const active = new Set(activeCaptureIds);
   const keep = new Set();
   let removed = 0;
   for (const record of records) {
@@ -146,7 +147,8 @@ export async function pruneOlderThan(cutoffIso) {
     const store = tx.objectStore(TILES);
     const keys = await requestResult(store.getAllKeys());
     for (const key of keys) {
-      if (!keep.has(key[0])) store.delete(key);
+      const retryOwner = String(key[0]).split("-retry-")[0];
+      if (!keep.has(key[0]) && !active.has(retryOwner)) store.delete(key);
     }
     await new Promise((resolve, reject) => {
       tx.oncomplete = resolve;
@@ -175,4 +177,37 @@ export async function deleteCapture(captureId) {
   } finally {
     db.close();
   }
+}
+
+/** Replace a partial stitch only after its recapture succeeds. One transaction
+ * keeps the old raster set intact if promotion fails or History deletes it. */
+export async function promoteCaptureTiles(captureId, stagedId) {
+  const db = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction([RECORDS, TILES], "readwrite");
+      const tiles = tx.objectStore(TILES);
+      let found = false;
+      tx.oncomplete = () => resolve(found);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+      const record = tx.objectStore(RECORDS).get(captureId);
+      record.onsuccess = () => {
+        if (!record.result) return;
+        found = true;
+        const keys = tiles.index("byCapture").getAllKeys(IDBKeyRange.only(captureId));
+        keys.onsuccess = () => {
+          for (const key of keys.result) tiles.delete(key);
+          const cursor = tiles.index("byCapture").openCursor(IDBKeyRange.only(stagedId));
+          cursor.onsuccess = () => {
+            const next = cursor.result;
+            if (!next) return;
+            tiles.put({ ...next.value, captureId });
+            next.delete();
+            next.continue();
+          };
+        };
+      };
+    });
+  } finally { db.close(); }
 }

@@ -17,7 +17,8 @@
   }
   function isLoop(animation) {
     for (let current = animation; current && current !== capture.gsap?.globalTimeline; current = current.parent) {
-      if (current.repeat?.() < 0) return true;
+      const repeat = current.repeat?.();
+      if (repeat < 0 || repeat === Infinity) return true;
     }
     return false;
   }
@@ -59,15 +60,25 @@
     const failures = [];
     if (saved.gsap) {
       try {
-        saved.gsap.globalTimeline.totalTime(saved.rootTime, true);
+        try { saved.gsap.globalTimeline.totalTime(saved.rootTime, true); }
+        catch { failures.push("GSAP timeline position"); }
         for (const [animation, original] of saved.animations) {
           if (original.created) continue;
-          animation.totalTime(original.time, true).paused(original.paused);
+          try { animation.totalTime(original.time, true).paused(original.paused); }
+          catch { failures.push("GSAP animation playback"); }
         }
-        for (const animation of saved.finished) if (saved.animations.get(animation)?.created) animation.totalProgress(1, true).pause();
-        saved.gsap.globalTimeline.paused(saved.rootPaused);
-        saved.gsap.ticker.wake();
-      } catch { failures.push("GSAP playback"); }
+        for (const animation of saved.finished) {
+          if (!saved.animations.get(animation)?.created) continue;
+          try { animation.totalProgress(1, true).pause(); }
+          catch { failures.push("GSAP entrance playback"); }
+        }
+      } finally {
+        try { saved.gsap.globalTimeline.paused(saved.rootPaused); }
+        catch { failures.push("GSAP timeline playback"); }
+        // Always release the page ticker, even if one invalidated tween throws.
+        try { saved.gsap.ticker.wake(); }
+        catch { failures.push("GSAP ticker playback"); }
+      }
     }
     for (const [node, original] of saved.media) {
       try {

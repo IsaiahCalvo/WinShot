@@ -493,3 +493,99 @@ test("transient screenshot readback retries once while permission errors fail im
     expect(run.errors).toEqual([]);
   } finally { await run.close(); }
 });
+
+
+for (const height of ["0px", "100vh"]) test(`nested fixed header and footer survive a ${height} wrapper independently`, async () => {
+  const run=await launch();
+  try {
+    await run.page.evaluate(height=>{
+      document.body.innerHTML=`<div id="wrapper" style="position:fixed;top:0;left:0;width:100%;height:${height};z-index:3"><div id="head" style="position:fixed;top:0;left:0;width:100%;height:60px;background:#ff00cc"></div><div id="normal" style="position:absolute;top:64px;left:0;width:100%;height:40px;background:#0000ff;visibility:visible"></div><div id="foot" style="position:fixed;bottom:0;left:0;width:100%;height:60px;background:#00c8df"></div></div><article style="height:3600px;background:#eee"></article>`;
+    },height);
+    const {editor,record}=await capture(run);
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    const counts=await editor.evaluate(async()=>{
+      const s=await import(chrome.runtime.getURL('src/store.js')),r=await s.getRecord(new URL(location.href).searchParams.get('id'));
+      const canvas=new OffscreenCanvas(r.report.dimensionsPx.width,r.report.dimensionsPx.height),c=canvas.getContext('2d');
+      for(const t of await s.getTiles(r.id)){const b=await createImageBitmap(t.blob);c.drawImage(b,t.destXPx,t.destYPx);b.close();}
+      const pixels=c.getImageData(1100,0,1,canvas.height).data,counts={head:0,foot:0,normal:0};
+      for(let i=0;i<pixels.length;i+=4){const key=[...pixels.slice(i,i+3)].join(',');if(key==='255,0,204')counts.head++;if(key==='0,200,223')counts.foot++;if(key==='0,0,255')counts.normal++;}
+      return counts;
+    });
+    expect(counts).toEqual({head:60,foot:60,normal:40});
+    expect(await run.page.evaluate(()=>['wrapper','head','foot','normal'].map(id=>document.getElementById(id).style.visibility))).toEqual(['','','','visible']);
+    expect(record.report.restoration).toBe('verified by read-back');
+  } finally {await run.close();}
+});
+
+test("GSAP Infinity repeats created during scrolling remain live after capture",async()=>{
+  const run=await launch();
+  try {
+    await run.page.goto('http://127.0.0.1:4173/gsap',{waitUntil:'networkidle0'});
+    await run.page.evaluate(()=>addEventListener('scroll',()=>{if(scrollY>500&&!window.pulse)window.pulse=gsap.to('#spinner',{opacity:.3,repeat:Infinity,yoyo:true,duration:.4});}));
+    const {record}=await capture(run);
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    await run.page.bringToFront();
+    expect(await run.page.evaluate(()=>({infinite:window.pulse.repeat()===Infinity,paused:window.pulse.paused(),root:gsap.globalTimeline.paused()}))).toEqual({infinite:true,paused:false,root:false});
+    const time=await run.page.evaluate(()=>window.pulse.totalTime());
+    await expect.poll(()=>run.page.evaluate(()=>window.pulse.totalTime())).toBeGreaterThan(time+.05);
+    expect(record.report.restoration).toBe('verified by read-back');
+  } finally {await run.close();}
+});
+
+test("GSAP invalidated tween restoration still wakes the ticker and restores other animations",async()=>{
+  const run=await launch();
+  try {
+    await run.page.goto('http://127.0.0.1:4173/gsap',{waitUntil:'networkidle0'});
+    await run.page.evaluate(()=>{
+      window.badTween=gsap.to({value:0},{value:10,duration:30});
+      const time=window.badTween.totalTime;
+      window.badTween.totalTime=function(...args){if(args.length&&window.throwDuringRestore)throw new Error('Invalidated test tween');return time.apply(this,args);};
+      addEventListener('scroll',()=>{if(scrollY>500)window.throwDuringRestore=true;});
+    });
+    const {record}=await capture(run);
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    expect(record.report.restoration).toContain('GSAP animation playback');
+    await run.page.bringToFront();
+    expect(await run.page.evaluate(()=>gsap.globalTimeline.paused())).toBe(false);
+    const time=await run.page.evaluate(()=>window.spinner.totalTime());
+    await expect.poll(()=>run.page.evaluate(()=>window.spinner.totalTime())).toBeGreaterThan(time+.05);
+  } finally {await run.close();}
+});
+
+for(const fault of ['readback','unstable']) test(`a ${fault} recapture keeps the original partial pixels and removes staging tiles`,async()=>{
+  const run=await launch();
+  try {
+    await run.page.evaluate(()=>{
+      document.body.innerHTML='<div id="ad" style="height:200px;background:#888"></div><div style="height:3600px;background:repeating-linear-gradient(#000 0 40px,#fff 40px 80px)"></div>';
+      addEventListener('scroll',()=>{if(scrollY>500)document.querySelector('#ad').style.height='0px';});
+    });
+    const worker=await(await run.browser.waitForTarget(t=>t.type()==='service_worker'&&t.url().endsWith('/src/background.js'))).worker();
+    await worker.evaluate(fault=>{
+      const send=chrome.tabs.sendMessage.bind(chrome.tabs),image=chrome.tabs.captureVisibleTab.bind(chrome.tabs);let prepares=0;
+      chrome.tabs.sendMessage=async(...args)=>{
+        const message=args[1];
+        if(message.type==='WINSHOT_PREPARE'&&++prepares===2){
+          const s=await import(chrome.runtime.getURL('src/store.js'));
+          globalThis.originalHashes=await Promise.all((await s.getTiles(message.sessionId)).map(async t=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await t.blob.arrayBuffer()))).join(',')));
+        }
+        const result=await send(...args);
+        if(prepares>1&&fault==='unstable'&&message.type==='WINSHOT_SCROLL')return{...result,stable:false,warnings:['Forced recapture readiness failure']};
+        return result;
+      };
+      chrome.tabs.captureVisibleTab=(...args)=>prepares>1&&fault==='readback'?Promise.reject(new Error('Missing host permission during recapture')):image(...args);
+    },fault);
+    const {editor,record}=await capture(run);
+    expect(record.state,JSON.stringify(record.report)).toBe('partial');
+    expect(record.report.layoutRetry.keptOriginal).toBe(true);
+    expect(record.report.warnings.join(' ')).toContain('original partial capture was kept');
+    const actual=await editor.evaluate(async()=>{
+      const s=await import(chrome.runtime.getURL('src/store.js')),tiles=await s.getTiles(new URL(location.href).searchParams.get('id'));
+      const hashes=await Promise.all(tiles.map(async t=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await t.blob.arrayBuffer()))).join(',')));
+      const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('winshot-captures');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+      const keys=await new Promise((resolve,reject)=>{const r=db.transaction('tiles').objectStore('tiles').getAllKeys();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});db.close();
+      return{hashes,staged:keys.filter(k=>String(k[0]).includes('-retry-')).length};
+    });
+    expect(actual.hashes).toEqual(await worker.evaluate(()=>globalThis.originalHashes));
+    expect(actual.staged).toBe(0);
+  } finally {await run.close();}
+});

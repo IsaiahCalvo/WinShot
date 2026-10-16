@@ -90,7 +90,7 @@ jobs:
         shell: bash
         env:
           WINSHOT_LIVE_ARTIFACT_ROOT: ${{ runner.temp }}
-        # Exercise canvas snapshots and loading frames on both Linux and Windows.
+        # Verify nested fixed chrome, animation cleanup, and staged layout retries.
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';

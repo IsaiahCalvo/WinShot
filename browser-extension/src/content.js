@@ -67,15 +67,16 @@
     return false;
   }
 
-  function floatingBounds(node) {
+  function floatingBounds(node, authored = false) {
     const style = getComputedStyle(node), own = node.getBoundingClientRect();
-    let bounds = style.visibility === "visible" && own.width > 0 && own.height > 0 ? own : null;
+    const visible = target => authored ? session.floatingVisibility.get(target)?.visible : getComputedStyle(target).visibility === "visible";
+    let bounds = visible(node) && own.width > 0 && own.height > 0 ? own : null;
     if (!bounds || style.overflowX === "visible" || style.overflowY === "visible") {
       const children = [...node.querySelectorAll("*")];
       if (node.shadowRoot) children.push(...node.shadowRoot.querySelectorAll("*"));
       for (const child of children) {
         const rect = child.getBoundingClientRect();
-        if (!rect.width || !rect.height || getComputedStyle(child).visibility !== "visible" || hasTransparentAncestor(child)) continue;
+        if (!rect.width || !rect.height || !visible(child) || hasTransparentAncestor(child)) continue;
         if (!bounds) bounds = rect;
         else {
           const left = Math.min(bounds.left, rect.left), top = Math.min(bounds.top, rect.top);
@@ -921,6 +922,32 @@
     trackFloatingNodes(nodes);
   }
 
+  function rememberFloatingTree(node) {
+    const nodes = [node];
+    for (let i = 0; i < nodes.length && session.floatingVisibility.size < 25000; i++) {
+      const current = nodes[i];
+      nodes.push(...current.children);
+      if (current.shadowRoot) nodes.push(...current.shadowRoot.children);
+      if (session.floatingVisibility.has(current)) continue;
+      // New descendants can arrive while their ancestor is capture-hidden.
+      // Read their page-authored visibility with our ancestor overrides removed.
+      const reverted = [];
+      for (let ancestor = current; ancestor; ancestor = composedParent(ancestor)) {
+        const original = session.changedStyles.get(ancestor)?.get("visibility");
+        if (!original) continue;
+        reverted.push({ node: ancestor, value: ancestor.style.getPropertyValue("visibility"), priority: ancestor.style.getPropertyPriority("visibility") });
+        if (original.value) ancestor.style.setProperty("visibility", original.value, original.priority);
+        else ancestor.style.removeProperty("visibility");
+      }
+      const visible = getComputedStyle(current).visibility === "visible";
+      for (const entry of reverted.reverse()) {
+        if (entry.value) entry.node.style.setProperty("visibility", entry.value, entry.priority);
+        else entry.node.style.removeProperty("visibility");
+      }
+      session.floatingVisibility.set(current, { visible });
+    }
+  }
+
   function trackFloatingNodes(nodes) {
     const cap = Math.min(nodes.length, 25000);
     for (let i = 0; i < cap; i++) {
@@ -930,7 +957,8 @@
       // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
       if (!node.isConnected) continue;
       if (session.fixedTarget && (node === session.targetElement || node.contains(session.targetElement))) continue;
-      const rect = floatingBounds(node);
+      if (position === "fixed") rememberFloatingTree(node);
+      const rect = floatingBounds(node, position === "fixed");
       if (!rect) continue;
       if (position === "sticky") {
         // Hiding a sticky element leaves a blank hole at its in-flow slot. Demoting it
@@ -981,6 +1009,7 @@
       roots: openRoots(),
       floating: [],
       floatingNodes: new Set(),
+      floatingVisibility: new Map(),
       pendingNodes: new Set(),
       changedAnimations: new Map(),
       captureAnimations: new Set(),
@@ -1033,22 +1062,20 @@
     if (!session) return;
     session.atStart = atStart;
     session.atEnd = atEnd;
-    for (const item of session.floating) {
-      if (getComputedStyle(item.node).position !== "fixed") {
-        rememberStyle(item.node, "visibility", item.visibility.value, item.visibility.priority);
-        rememberStyle(item.node, "opacity", item.opacity.value, item.opacity.priority);
-        continue;
-      }
-      // Fixed header appears once (first tile), fixed footer/chat bar once (last tile,
-      // which lands at the true page bottom). Viewport-covering overlays only in tile 1.
-      const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd) || (item.anchor === "overlay" && atStart);
-      // Showing a tile restores the page's own visibility rule. Forcing visible
-      // would expose hidden menus/dialogs that happen to have a layout box.
-      const visible = show && !session.surfaceSnapshots.has(item.node);
-      rememberStyle(item.node, "visibility", visible ? item.visibility.value : "hidden", visible ? item.visibility.priority : "important");
-      // Descendants can override inherited visibility:hidden (common in nav bars).
-      // Group opacity hides the entire rendered subtree without changing layout.
-      rememberStyle(item.node, "opacity", show ? item.opacity.value : "0", show ? item.opacity.priority : "important");
+    const showing = new Map();
+    for (const { node, anchor } of session.floating) {
+      if (getComputedStyle(node).position !== "fixed") continue;
+      showing.set(node, (anchor === "top" && atStart) || (anchor === "bottom" && atEnd) || (anchor === "overlay" && atStart));
+    }
+    // Visibility can be overridden for a separately anchored fixed descendant.
+    // Apply it to each recorded node so explicit visibility:visible children do
+    // not leak through hidden wrappers. Group opacity would hide nested footers.
+    for (const [node, original] of session.floatingVisibility) {
+      if (!node.isConnected) continue;
+      let owner = node;
+      while (owner && !showing.has(owner)) owner = composedParent(owner);
+      const visible = (!owner || showing.get(owner)) && original.visible && !session.surfaceSnapshots.has(node);
+      rememberStyle(node, "visibility", visible ? "visible" : "hidden", "important");
     }
   }
 

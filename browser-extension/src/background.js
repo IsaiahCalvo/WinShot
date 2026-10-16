@@ -7,7 +7,7 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
-import { clearCaptureTiles, deleteCapture, getTile, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
+import { clearCaptureTiles, deleteCapture, getRecord, getTile, promoteCaptureTiles, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
 import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
 const activeCaptures = new Map();     // keyed by tabId
@@ -378,7 +378,7 @@ async function storeVisibleCapture(session, controller) {
   session.state = SessionState.COMPLETE;
 }
 
-async function storeScrollingCapture(session, controller, retryAttempt = 0) {
+async function storeScrollingCapture(session, controller, retryAttempt = 0, tileCaptureId = session.id) {
   let prepared = false;
   let restored = false;
   const tileMetadata = [];
@@ -434,7 +434,7 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0) {
     session.report.dimensionsCss = { ...extent };
     session.report.target = captureMetrics.kind;
     session.state = SessionState.CAPTURING;
-    if (!(await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
+    if (!(retryAttempt ? await getRecord(session.id) : await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
 
     let safetyStopReason = null;
     if (extent.width > session.limits.maxWidthCss || extent.height > session.limits.maxHeightCss) {
@@ -550,7 +550,7 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0) {
         }
 
         const tile = {
-          captureId: session.id,
+          captureId: tileCaptureId,
           index,
           planKey: key,
           blob: cropped.blob,
@@ -584,7 +584,7 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0) {
         for (const neighbor of neighbors) {
           // IndexedDB owns the raster history. Keep placement metadata in memory
           // and decode only an overlapping neighbor, even on a 400-tile capture.
-          const raster = await getTile(session.id, neighbor.index);
+          const raster = await getTile(tileCaptureId, neighbor.index);
           if (!raster) throw new DOMException("This capture was deleted from history.", "AbortError");
           await preserveFloatingOverlap(raster, tile);
           const score = await seamScore(raster, tile);
@@ -605,7 +605,7 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0) {
         session.report.dimensionsCss = { ...extent };
         // A record the user deleted from History mid-run must stay deleted — never
         // resurrect it as a "complete" capture missing its earlier tiles.
-        if (!(await updateRecord({ ...session, tiles: tileMetadata }))) {
+        if (!(retryAttempt ? await getRecord(session.id) : await updateRecord({ ...session, tiles: tileMetadata }))) {
           throw new DOMException("This capture was deleted from history.", "AbortError");
         }
 
@@ -700,19 +700,39 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0) {
   if (!retryAttempt && canRetryLayout && session.mode === CaptureMode.FULL_PAGE &&
       session.report.restoration === "verified by read-back" && remainingTiles > tileMetadata.length && remaining > Math.max(5000, elapsed * 0.75)) {
     throwIfAborted(controller.signal);
-    const previousMinimum = session.report.seamConfidence.minimum;
-    await clearCaptureTiles(session.id);
-    session.tiles = []; session.semantics = { text: [], links: [] };
+    const previous = { report: session.report, state: session.state, semantics: session.semantics, tiles: session.tiles };
+    if (!(await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
+    const stagedId = session.id + "-retry-" + crypto.randomUUID();
+    const previousMinimum = previous.report.seamConfidence.minimum;
+    session.semantics = { text: [], links: [] };
     session.state = SessionState.PREPARING;
     session.report = { target: session.mode, mode: session.mode, dimensionsCss: null, dimensionsPx: null,
       tileCount: 0, seamConfidence: null, coverage: null, restoration: "pending", fallbackUsed: null,
       warnings: ["The page layout changed during capture. WinShot recaptured it once after stabilization."],
       layoutRetry: { attempt: 1, previousMinimum, previousTileCount: tileMetadata.length } };
+    const keepPrevious = reason => {
+      const restoration = session.report.restoration;
+      Object.assign(session, previous);
+      session.report.layoutRetry = { attempt: 1, previousMinimum, previousTileCount: tileMetadata.length, keptOriginal: true };
+      session.report.warnings.push(reason + " The original partial capture was kept.");
+      if (restoration !== "verified by read-back") session.report.restoration = "partial — recapture cleanup: " + restoration;
+    };
     const limits = session.limits;
     session.limits = { ...limits, maxDurationMs: remaining, maxTiles: remainingTiles };
     progress(session, "Page layout changed. Rechecking the capture once…");
-    try { await storeScrollingCapture(session, controller, 1); }
-    finally { session.limits = limits; }
+    try {
+      await storeScrollingCapture(session, controller, 1, stagedId);
+      throwIfAborted(controller.signal);
+      if (session.state === SessionState.COMPLETE) {
+        if (!(await promoteCaptureTiles(session.id, stagedId))) throw new DOMException("This capture was deleted from history.", "AbortError");
+      } else keepPrevious("The recapture did not produce a complete image.");
+    } catch (error) {
+      if (controller.signal.aborted || error.name === "AbortError") throw error;
+      keepPrevious("The recapture failed: " + friendlyError(error) + ".");
+    } finally {
+      session.limits = limits;
+      await clearCaptureTiles(stagedId).catch(() => { session.report.warnings.push("Temporary recapture tiles could not be removed; history retention will clean them up."); });
+    }
   }
 }
 
@@ -1024,7 +1044,7 @@ async function pruneHistory() {
   const settings = await loadSettings();
   if (!settings.historyRetentionDays) return;
   const cutoff = new Date(Date.now() - settings.historyRetentionDays * 864e5).toISOString();
-  await pruneOlderThan(cutoff);
+  await pruneOlderThan(cutoff, [...activeCaptures.values()].map(entry => entry.session.id));
 }
 
 async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null) {
