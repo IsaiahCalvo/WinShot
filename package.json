@@ -1,7 +1,7 @@
 {
   "name": "winshot-browser-capture",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "description": "Local-first WinShot browser capture extension and test harness",
   "scripts": {

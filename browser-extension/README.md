@@ -66,6 +66,9 @@ retain the page's own visibility rules. Pickers start in the top page immediatel
 and bound setup/cleanup of embedded frames, with per-picker identities protecting
 new selections from late messages belonging to an earlier selection. Region drags
 use a top-page input plane so they can cross embedded frames without losing mouseup.
+Shared tile bands retain already captured fixed-element pixels, so a tall sidebar
+or a header on a page only slightly taller than the viewport cannot be cut off by
+the next tile. Current-tile floating elements keep their normal paint priority.
 JavaScript
 canvas rendering and arbitrary scroll handlers cannot all be frozen; changing
 overlap pixels or effects that cannot be stabilized produce partial results.

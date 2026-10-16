@@ -71,6 +71,7 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/winshot-live-test
       - run: npm run build:extension
       - name: Capture public websites through the real popup
+        # Retain real-page evidence for fixed elements and shared tile bands too.
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';

@@ -269,6 +269,40 @@ async function seamScore(previous, current) {
   }
 }
 
+async function preserveFloatingOverlap(previous, current) {
+  const areas = (previous.floatingRectsPx || []).flatMap(rect => {
+    const left = Math.max(rect.left, current.destXPx, previous.destXPx);
+    const top = Math.max(rect.top, current.destYPx, previous.destYPx);
+    const right = Math.min(rect.right, current.destXPx + current.widthPx, previous.destXPx + previous.widthPx);
+    const bottom = Math.min(rect.bottom, current.destYPx + current.heightPx, previous.destYPx + previous.heightPx);
+    return right > left && bottom > top ? [{ left, top, right, bottom }] : [];
+  });
+  if (!areas.length) return;
+  const [before, after] = await Promise.all([createImageBitmap(previous.blob), createImageBitmap(current.blob)]);
+  try {
+    const canvas = new OffscreenCanvas(current.widthPx, current.heightPx);
+    const context = canvas.getContext("2d", { alpha: false });
+    context.drawImage(after, 0, 0);
+    // Later tiles normally paint over earlier ones. Preserve the already-captured
+    // fixed element's shared pixels, or a tall sidebar loses its bottom at a seam.
+    for (const rect of areas) {
+      const width = rect.right - rect.left, height = rect.bottom - rect.top;
+      context.drawImage(before, rect.left - previous.destXPx, rect.top - previous.destYPx, width, height,
+        rect.left - current.destXPx, rect.top - current.destYPx, width, height);
+    }
+    // A newly shown footer belongs to this tile and keeps normal paint priority
+    // if its own rectangle overlaps a retained piece of an earlier overlay.
+    for (const rect of current.floatingRectsPx) {
+      const x = rect.left - current.destXPx, y = rect.top - current.destYPx;
+      const width = rect.right - rect.left, height = rect.bottom - rect.top;
+      if (width > 0 && height > 0) context.drawImage(after, x, y, width, height, x, y, width, height);
+    }
+    current.blob = await canvas.convertToBlob({ type: "image/png" });
+    const keys = new Set(current.floatingRectsPx.map(rect => JSON.stringify(rect)));
+    for (const rect of areas) if (!keys.has(JSON.stringify(rect))) { current.floatingRectsPx.push(rect); keys.add(JSON.stringify(rect)); }
+  } finally { before.close(); after.close(); }
+}
+
 function progress(session, message) {
   chrome.runtime.sendMessage({
     type: "WINSHOT_PROGRESS",
@@ -490,6 +524,12 @@ async function storeScrollingCapture(session, controller) {
           reachedY: result.metrics.reachedY,
           seamScore: null
         };
+        tile.floatingRectsPx = (result.metrics.floatingRects || []).map(rect => ({
+          left: tile.destXPx + Math.max(0, Math.round(rect.left * cropped.scaleX)),
+          top: tile.destYPx + Math.max(0, Math.round(rect.top * cropped.scaleY)),
+          right: tile.destXPx + Math.min(tile.widthPx, Math.round((rect.left + rect.width) * cropped.scaleX)),
+          bottom: tile.destYPx + Math.min(tile.heightPx, Math.round((rect.top + rect.height) * cropped.scaleY))
+        }));
 
         // A 2D tile can have both a left and an upper seam — score EVERY overlapping
         // neighbor and keep the worst, so "minimum seam confidence" means what it says.
@@ -501,6 +541,7 @@ async function storeScrollingCapture(session, controller) {
           // and decode only an overlapping neighbor, even on a 400-tile capture.
           const raster = await getTile(session.id, neighbor.index);
           if (!raster) throw new DOMException("This capture was deleted from history.", "AbortError");
+          await preserveFloatingOverlap(raster, tile);
           const score = await seamScore(raster, tile);
           if (score === null) continue;
           tile.seamScore = tile.seamScore === null || tile.seamScore === undefined ? score : Math.min(tile.seamScore, score);

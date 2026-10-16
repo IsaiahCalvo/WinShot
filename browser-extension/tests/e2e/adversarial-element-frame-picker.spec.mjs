@@ -38,10 +38,10 @@ function monitorPage(page, errors) {
   page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 }
 
-async function launchExactExtension() {
+async function launchExactExtension(viewport = { width: 1200, height: 1000 }) {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await launchCaptureBrowser(profileRoot);
+  const browser = await launchCaptureBrowser(profileRoot, viewport);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -145,6 +145,45 @@ for (const mode of ["region", "element"]) test(`a stalled embedded frame cannot 
     await new Promise(resolve => setTimeout(resolve, Math.max(0, 6500 - (performance.now() - start))));
     for (const frame of page.frames()) expect(await frame.$$eval("[data-winshot-picker]", nodes => nodes.length)).toBe(0);
     expect(run.errors).toEqual([]);
+  } finally { await closeExactExtension(run); }
+});
+
+for (const dpr of [1, 2]) test(`a fixed sidebar survives frame-tile overlaps intact at DPR ${dpr}`, async () => {
+  const run = await launchExactExtension({ width: 1200, height: 1000, deviceScaleFactor: dpr });
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/iframes", { waitUntil: "networkidle0" });
+    await page.$eval("iframe", node => { node.style.cssText = "display:block;margin:100px;width:700px;height:350px;border:0;box-sizing:content-box"; node.scrollIntoView({ block: "center" }); });
+    const frame = page.frames().find(frame => frame.url() === "http://127.0.0.1:4173/frame" && frame.parentFrame() === page.mainFrame());
+    await frame.evaluate(() => {
+      document.body.innerHTML = '<style>body{margin:0;height:2800px;background:#1ab45c}aside{position:fixed;left:0;top:0;width:400px;height:340px;background:#ff00cc}</style><aside></aside>';
+    });
+    const before = await page.evaluate(() => scrollY);
+    const waiting = editorTarget(run);
+    await startPicker(run, page, "frame");
+    const box = await (await page.$("iframe")).boundingBox();
+    await page.mouse.click(box.x + 500, box.y + 150);
+    const { editor, record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    const bands = await editor.evaluate(async dpr => {
+      const tiles = await (await import(chrome.runtime.getURL("src/store.js"))).getTiles(new URL(location.href).searchParams.get("id"));
+      const context = new OffscreenCanvas(700 * dpr, 2800 * dpr).getContext("2d");
+      for (const tile of tiles.sort((a, b) => a.index - b.index)) {
+        const image = await createImageBitmap(tile.blob);
+        context.drawImage(image, tile.destXPx, tile.destYPx, tile.widthPx, tile.heightPx); image.close();
+      }
+      const column = context.getImageData(50 * dpr, 0, 1, 2800 * dpr).data;
+      const bands = [];
+      for (let y = 0; y < 2800 * dpr; y++) if (column[y * 4] === 255 && column[y * 4 + 1] === 0 && column[y * 4 + 2] === 204) {
+        const last = bands.at(-1);
+        if (last && last.end === y - 1) last.end = y; else bands.push({ start: y, end: y });
+      }
+      return bands;
+    }, dpr);
+    expect(bands).toEqual([{ start: 0, end: 340 * dpr - 1 }]);
+    expect(record.report.seamConfidence.minimum).toBeGreaterThan(0.99);
+    expect(await page.evaluate(() => scrollY)).toBe(before);
+    expect(await frame.evaluate(() => scrollY)).toBe(0);
   } finally { await closeExactExtension(run); }
 });
 

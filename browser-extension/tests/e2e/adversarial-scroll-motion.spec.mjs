@@ -47,7 +47,7 @@ async function runFixture(setup, assertions, data = null) {
           else magentaBands.push({ start: y, end: y });
         }
       }
-      return { green, magentaBands, width, height };
+      return { green, magentaBands, width, height, bottomPixel: [...context.getImageData(100, height - 20, 1, 1).data] };
     });
     expect(record.report.coverage.complete).toBe(true);
     expect(record.report.restoration).toBe("verified by read-back");
@@ -128,6 +128,17 @@ test("a fixed overlay that was hidden by the page stays hidden throughout captur
     expect(record.state).toBe("complete");
     expect(pixels.magentaBands).toEqual([]);
     expect(await page.$eval("#hidden", node => getComputedStyle(node).visibility)).toBe("hidden");
+  });
+});
+
+test("fixed header and footer remain whole when two tiles overlap almost entirely", async () => {
+  await runFixture(() => {
+    document.body.innerHTML = '<style>body{margin:0;height:1005px;background:white}header,footer{position:fixed;left:0;width:100%;height:80px}header{top:0;background:#ff00cc}footer{bottom:0;background:#00c8df}</style><header></header><footer></footer>';
+  }, async ({ pixels, record }) => {
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    expect(record.report.tileCount).toBe(2);
+    expect(pixels.magentaBands).toEqual([{ start: 0, end: 79 }]);
+    expect(pixels.bottomPixel).toEqual([0, 200, 223, 255]);
   });
 });
 

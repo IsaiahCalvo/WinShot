@@ -456,6 +456,14 @@
       reachedX,
       reachedY,
       mutationCount: session.mutationCount,
+      floatingRects: session.floating.flatMap(({ node }) => {
+        const style = getComputedStyle(node);
+        if (style.position !== "fixed" || style.visibility !== "visible" || Number(style.opacity) === 0) return [];
+        const rect = node.getBoundingClientRect();
+        const left = Math.max(rect.left, clip.left), top = Math.max(rect.top, clip.top);
+        const right = Math.min(rect.right, clip.left + clip.width), bottom = Math.min(rect.bottom, clip.top + clip.height);
+        return right > left && bottom > top ? [{ left: left - clip.left, top: top - clip.top, width: right - left, height: bottom - top }] : [];
+      }),
       documentToken: DOCUMENT_TOKEN,
       url: location.href,
       frame: frameContext()
