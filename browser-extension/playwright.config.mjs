@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const platformSmoke = /popup uses the desktop icon|dynamic, horizontal, frame, and pixel-surface|URL batch enforces the 20-URL cap|wall-clock adjustments|transient screenshot readback|repeating Web Animations resume|fixed sidebar survives|fixed header and footer remain whole|capture controls stay disabled until delayed settings/;
+const platformSmoke = /popup uses the desktop icon|dynamic, horizontal, frame, and pixel-surface|URL batch enforces the 20-URL cap|wall-clock adjustments|transient screenshot readback|repeating Web Animations resume|fixed sidebar survives|fixed header and footer remain whole|capture controls stay disabled until delayed settings|CSS view-timeline reveals|scroll-driven history-path URL updates|lazy embedded documents/;
 
 export default defineConfig({
   testDir: "./tests/e2e",

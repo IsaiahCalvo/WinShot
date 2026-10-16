@@ -22,7 +22,16 @@ async function runFixture(setup, assertions, data = null) {
     await popup.waitForSelector("body[data-ready='true']");
     const editorTarget = browser.waitForTarget(t => t.type() === "page" && t.url().includes("/src/editor.html?id="), { timeout: 90_000 });
     await popup.click("[data-mode='full-page']");
-    const editor = await (await editorTarget).asPage();
+    let editor;
+    try { editor = await (await editorTarget).asPage(); }
+    catch (error) {
+      const popupState = await popup.evaluate(() => ({
+        ready: document.body.dataset.ready, busy: document.body.dataset.busy,
+        status: document.querySelector("#status")?.textContent,
+        disabled: document.querySelector("[data-mode='full-page']")?.disabled
+      })).catch(() => ({ closed: popup.isClosed() }));
+      throw new Error(`${error.message}; popup state: ${JSON.stringify(popupState)}`);
+    }
     await editor.waitForSelector("#state:not(:empty)");
     const record = await editor.evaluate(async () => (await import(chrome.runtime.getURL("src/store.js"))).getRecord(new URL(location.href).searchParams.get("id")));
     expect(record.report.dimensionsPx, record.error).toBeTruthy();
