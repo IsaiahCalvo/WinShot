@@ -1,0 +1,36 @@
+name: capture-diagnostics
+on:
+  push:
+    paths: ['.github/workflows/capture-diagnostics.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-dpr:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      WINSHOT_TEST_SOFTWARE_GL: '1'
+      WINSHOT_DIAGNOSTIC_REPEATS: '10'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:extension
+      - name: Start fixtures
+        shell: pwsh
+        run: |
+          Start-Process node -ArgumentList 'browser-extension/tests/fixture-server.mjs'
+          for ($probe = 0; $probe -lt 20; $probe++) {
+            try { Invoke-WebRequest http://127.0.0.1:4173/; break }
+            catch { if ($probe -eq 19) { throw }; Start-Sleep -Milliseconds 250 }
+          }
+      - run: node browser-extension/tools/diagnose-dpr.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-dpr-pixels
+          path: output/dpr-diagnostics
