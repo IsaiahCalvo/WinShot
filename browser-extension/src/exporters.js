@@ -53,16 +53,14 @@ async function decodeIntersecting(tiles, left, top, width, height) {
   return await Promise.all(matching.map(async (tile) => ({ tile, bitmap: await createImageBitmap(tile.blob) })));
 }
 
-async function renderBandPixels(width, top, height, tiles, background = "#ffffff") {
+async function renderBandPixels(width, top, height, tiles) {
   const output = new Uint8ClampedArray(width * height * 4);
   const decoded = await decodeIntersecting(tiles, 0, top, width, height);
   try {
     for (let stripeLeft = 0; stripeLeft < width; stripeLeft += 8192) {
       const stripeWidth = Math.min(8192, width - stripeLeft);
       const canvas = new OffscreenCanvas(stripeWidth, height);
-      const context = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
-      context.fillStyle = background;
-      context.fillRect(0, 0, stripeWidth, height);
+      const context = canvas.getContext("2d", { alpha: true, willReadFrequently: true });
       for (const { tile, bitmap } of decoded) {
         context.drawImage(bitmap, tile.destXPx - stripeLeft, tile.destYPx - top, tile.widthPx, tile.heightPx);
       }
@@ -127,9 +125,11 @@ async function renderCanvas(record, tiles, type, quality = 0.9) {
     throw new Error("This format needs one browser canvas and is disabled for very large captures. Save PNG or PDF instead.");
   }
   const canvas = new OffscreenCanvas(width, height);
-  const context = canvas.getContext("2d", { alpha: false });
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, width, height);
+  const context = canvas.getContext("2d", { alpha: type === "image/webp" });
+  if(type !== "image/webp") {
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+  }
   for (const tile of tiles.sort((a, b) => a.index - b.index)) {
     const bitmap = await createImageBitmap(tile.blob);
     try {

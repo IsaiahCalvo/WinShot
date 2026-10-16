@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open in WinShot</title><link rel="icon" href="../icons/32.png"><link rel="stylesheet" href="library.css"></head>
+<body>
+  <header><a class="brand" href="library.html"><img src="../icons/32.png" width="26" height="26" alt=""><strong>WinShot</strong></a><nav aria-label="WinShot"><a href="history.html">Image history</a><a href="video-editor.html">Video studio</a></nav></header>
+  <main>
+    <p class="eyebrow">YOUR WORK, IN YOUR BROWSER</p><h1>Open. Edit. Make it yours.</h1>
+    <p class="intro">Bring in an image or reopen a WinShot project. Your files and edits stay on this device.</p>
+    <section id="drop-zone" aria-label="Open an image or project">
+      <div class="file-mark" aria-hidden="true">＋</div><h2>Drop an image or project here</h2>
+      <p>PNG, JPEG, WebP, GIF, BMP or .winshot.json · up to 100 MB<br>Animated images open at their first frame.</p>
+      <label class="button primary" for="open-file">Choose a file</label><input id="open-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.json" class="file-input">
+      <button id="paste-image">Paste image</button>
+      <p class="shortcut">You can also press Ctrl+V or ⌘V.</p>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+    <div class="next"><div><h2>Working with video?</h2><p>Record a screen or open a video, choose a trim, and save your clip.</p></div><a class="button" href="video-editor.html">Open video studio <span aria-hidden="true">→</span></a></div>
+    <p class="privacy">No account. No upload. No desktop app required.</p>
+  </main><script type="module" src="library.js"></script>
+</body></html>

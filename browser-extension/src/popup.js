@@ -9,7 +9,7 @@ let settings = await loadSettings().catch(error => {
 let busy = false;
 let statusRevision = 0;
 const popupWindowId = (await chrome.windows.getCurrent()).id;
-const startButtons = [...document.querySelectorAll("[data-mode], [data-picker], #repeat-last, #all-tabs, #all-tabs-pdf, #url-batch, #browser-window")];
+const startButtons = [...document.querySelectorAll("[data-mode], [data-picker], #repeat-last, #all-tabs, #all-tabs-pdf, #url-batch, #browser-window, #open-library, #open-video-studio")];
 
 function setBusy(value) {
   busy = value;
@@ -207,6 +207,16 @@ document.querySelector("#cancel").addEventListener("click", async () => {
 document.querySelector("#open-history").addEventListener("click", async (event) => {
   event.preventDefault();
   await chrome.tabs.create({ url: chrome.runtime.getURL("src/history.html") });
+  window.close();
+});
+
+document.querySelector("#open-library").addEventListener("click", async () => {
+  await chrome.tabs.create({ url: chrome.runtime.getURL("src/library.html") });
+  window.close();
+});
+
+document.querySelector("#open-video-studio").addEventListener("click", async () => {
+  await chrome.tabs.create({ url: chrome.runtime.getURL("src/video-editor.html") });
   window.close();
 });
 

@@ -1,62 +1,253 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>WinShot Capture</title>
-  <link rel="icon" href="../icons/32.png">
-  <link rel="stylesheet" href="editor.css">
-</head>
-<body>
-  <header>
-    <div class="brand"><img class="mark" src="../icons/32.png" alt="" width="24" height="24"><strong>WinShot Capture</strong></div>
-    <div class="actions">
-      <button id="save-png">Save PNG</button>
-      <button id="save-jpeg">Save JPEG</button>
-      <button id="save-webp">Save WebP</button>
-      <button id="save-pdf">Save PDF</button>
-      <button id="copy-clipboard">Copy</button>
-      <button id="print-capture">Print</button>
-      <a id="open-history" href="history.html">History</a>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>WinShot Capture</title>
+    <link rel="icon" href="../icons/32.png" />
+    <link rel="stylesheet" href="editor.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <img
+          class="mark"
+          src="../icons/32.png"
+          alt=""
+          width="24"
+          height="24"
+        /><strong>WinShot Editor</strong>
+      </div>
+      <div class="actions">
+        <button
+          id="save-project"
+          title="Save an editable project including the original image"
+        >
+          Save project
+        </button>
+        <button id="save-png">Save PNG</button>
+        <button id="save-jpeg">Save JPEG</button>
+        <button id="save-webp">Save WebP</button>
+        <button id="save-pdf">Save PDF</button>
+        <button id="copy-clipboard">Copy</button>
+        <button id="print-capture">Print</button>
+        <a id="open-library" href="library.html">Open file</a>
+        <a id="open-history" href="history.html">History</a>
+      </div>
+    </header>
+    <div class="editor-bar" aria-label="Image editing tools">
+      <div class="tool-group history-tools">
+        <button id="edit-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 10h9a6 6 0 0 1 0 12M4 10l5-5M4 10l5 5" />
+          </svg>
+        </button>
+        <button
+          id="edit-redo"
+          title="Redo (Ctrl+Shift+Z)"
+          aria-label="Redo"
+          disabled
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 10h-9a6 6 0 0 0 0 12m9-12-5-5m5 5-5 5" />
+          </svg>
+        </button>
+      </div>
+      <div
+        class="tool-group drawing-tools"
+        role="toolbar"
+        aria-label="Annotation tools"
+      >
+        <button
+          data-tool="select"
+          aria-pressed="true"
+          title="Select and move (V)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m5 3 15 10-7 1-3 7-5-18Z" /></svg
+          >Select
+        </button>
+        <button data-tool="crop" aria-pressed="false" title="Crop (C)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 3v15h15M3 6h15v15" /></svg
+          >Crop
+        </button>
+        <button data-tool="pen" aria-pressed="false" title="Pen (P)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m15 4 5 5M4 20l5-1L21 7l-4-4L5 15l-1 5Z" /></svg
+          >Pen
+        </button>
+        <button data-tool="arrow" aria-pressed="false" title="Arrow (A)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 20 20 4M9 4h11v11" /></svg
+          >Arrow
+        </button>
+        <button
+          data-tool="rectangle"
+          aria-pressed="false"
+          title="Rectangle (R)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4" y="5" width="16" height="14" rx="1" /></svg
+          >Rectangle
+        </button>
+        <button data-tool="ellipse" aria-pressed="false" title="Ellipse (E)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <ellipse cx="12" cy="12" rx="9" ry="7" /></svg
+          >Ellipse
+        </button>
+        <button data-tool="text" aria-pressed="false" title="Text (T)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 7V4h14v3M12 4v16m-4 0h8" /></svg
+          >Text
+        </button>
+        <button
+          data-tool="redact"
+          aria-pressed="false"
+          title="Cover private details (B)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="6" width="18" height="12" rx="1" />
+            <path d="M6 9h12M6 12h12M6 15h12" /></svg
+          >Redact
+        </button>
+      </div>
+      <div class="tool-group style-tools">
+        <label class="color-control" title="Annotation color"
+          ><span class="sr-only">Annotation color</span
+          ><input id="edit-color" type="color" value="#ff565f"
+        /></label>
+        <label
+          >Stroke
+          <input
+            id="edit-stroke"
+            aria-label="Stroke width"
+            type="number"
+            min="0.1"
+            max="200"
+            step="1"
+            value="4"
+        /></label>
+        <button
+          id="edit-delete"
+          title="Delete selected annotation"
+          aria-label="Delete selected annotation"
+          disabled
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" />
+          </svg>
+        </button>
+      </div>
     </div>
-  </header>
-  <main>
-    <aside>
-      <h1 id="title">Loading capture…</h1>
-      <div id="state" class="pill">Loading</div>
-      <dl id="report"></dl>
-      <section id="warnings" hidden><h2>Warnings</h2><ul></ul></section>
-      <details id="pdf-options">
-        <summary>PDF capture options</summary>
-        <label for="pdf-layout">Layout</label>
-        <select id="pdf-layout">
-          <option value="multipage">Multiple pages</option>
-          <option value="single">One continuous page</option>
-        </select>
-        <label for="pdf-page-size">Page size</label>
-        <select id="pdf-page-size">
-          <option value="auto">Match capture</option>
-          <option value="a4">A4</option>
-          <option value="letter">Letter</option>
-          <option value="legal">Legal</option>
-          <option value="custom">Custom</option>
-        </select>
-        <div class="custom-size">
-          <label for="pdf-width">Width (in)</label><input id="pdf-width" type="number" min="1" max="200" step="0.1">
-          <label for="pdf-height">Height (in)</label><input id="pdf-height" type="number" min="1" max="200" step="0.1">
+    <div class="editor-context">
+      <p id="edit-help">
+        Select an annotation to move it, change its style, or delete it.
+      </p>
+      <div id="text-controls" hidden>
+        <label for="edit-text">Text</label
+        ><textarea
+          id="edit-text"
+          rows="1"
+          maxlength="2000"
+          placeholder="Type your annotation"
+        >
+Text</textarea
+        ><label for="edit-font">Size</label
+        ><input
+          id="edit-font"
+          type="number"
+          min="1"
+          max="1000"
+          step="1"
+          value="32"
+        />
+      </div>
+      <div id="crop-controls" hidden>
+        <button id="crop-apply">Apply crop</button
+        ><button id="crop-cancel">Cancel</button>
+      </div>
+      <span id="edit-save-state" role="status">Saved locally</span>
+    </div>
+    <main>
+      <aside>
+        <h1 id="title">Loading capture…</h1>
+        <div id="state" class="pill">Loading</div>
+        <dl id="report"></dl>
+        <section id="warnings" hidden>
+          <h2>Warnings</h2>
+          <ul></ul>
+        </section>
+        <details id="pdf-options">
+          <summary>PDF capture options</summary>
+          <label for="pdf-layout">Layout</label>
+          <select id="pdf-layout">
+            <option value="multipage">Multiple pages</option>
+            <option value="single">One continuous page</option>
+          </select>
+          <label for="pdf-page-size">Page size</label>
+          <select id="pdf-page-size">
+            <option value="auto">Match capture</option>
+            <option value="a4">A4</option>
+            <option value="letter">Letter</option>
+            <option value="legal">Legal</option>
+            <option value="custom">Custom</option>
+          </select>
+          <div class="custom-size">
+            <label for="pdf-width">Width (in)</label
+            ><input id="pdf-width" type="number" min="1" max="200" step="0.1" />
+            <label for="pdf-height">Height (in)</label
+            ><input
+              id="pdf-height"
+              type="number"
+              min="1"
+              max="200"
+              step="0.1"
+            />
+          </div>
+          <label for="pdf-header">Header</label
+          ><input id="pdf-header" maxlength="500" placeholder="{title}" />
+          <label for="pdf-footer">Footer</label
+          ><input
+            id="pdf-footer"
+            maxlength="500"
+            placeholder="Page {page} of {pages}"
+          />
+          <label for="pdf-watermark">Watermark</label
+          ><input id="pdf-watermark" maxlength="500" />
+          <small
+            >Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small
+          >
+        </details>
+        <p id="redaction-project-note" class="editor-note" hidden>
+          Editable projects include your original image. Share an image or PDF
+          to keep redactions permanent.
+        </p>
+        <p id="edited-pdf-note" class="editor-note" hidden>
+          Edited PDFs contain the edited image. Original selectable page text
+          and links are removed.
+        </p>
+        <p class="privacy">
+          Your original and editable annotations stay in local history. Exports
+          contain your edits. Nothing is uploaded.
+        </p>
+      </aside>
+      <section class="stage" aria-label="Capture preview">
+        <div class="zoom-row">
+          <span id="edit-dimensions"></span><label for="editor-zoom">Zoom</label
+          ><select id="editor-zoom">
+            <option value="fit">Fit width</option>
+            <option value="0.25">25%</option>
+            <option value="0.5">50%</option>
+            <option value="1">100%</option>
+            <option value="1.5">150%</option>
+            <option value="2">200%</option>
+          </select>
         </div>
-        <label for="pdf-header">Header</label><input id="pdf-header" maxlength="500" placeholder="{title}">
-        <label for="pdf-footer">Footer</label><input id="pdf-footer" maxlength="500" placeholder="Page {page} of {pages}">
-        <label for="pdf-watermark">Watermark</label><input id="pdf-watermark" maxlength="500">
-        <small>Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small>
-      </details>
-      <p class="privacy">All rendering and exports happen locally in your browser.</p>
-    </aside>
-    <section class="stage" aria-label="Capture preview">
-      <div id="preview"></div>
-    </section>
-  </main>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="editor.js"></script>
-</body>
+        <div id="preview"></div>
+      </section>
+    </main>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="editor.js"></script>
+  </body>
 </html>

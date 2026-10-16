@@ -41,6 +41,27 @@ export async function putRecord(record) {
   }
 }
 
+// Imports become visible in History only when every raster is stored. A failed
+// quota write aborts the whole transaction, leaving no empty imported record.
+export async function putImportedCapture(record, tiles) {
+  const db = await openDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction([RECORDS, TILES], "readwrite");
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("Import was cancelled."));
+      try {
+        tx.objectStore(RECORDS).add(record);
+        for (const tile of tiles) tx.objectStore(TILES).add({ ...tile, captureId: record.id });
+      } catch (error) {
+        tx.abort();
+        reject(error);
+      }
+    });
+  } finally { db.close(); }
+}
+
 // Put an updated record only if it still exists — a record the user deleted from
 // History mid-capture must stay deleted. Returns false when the record is gone.
 export async function updateRecord(record) {

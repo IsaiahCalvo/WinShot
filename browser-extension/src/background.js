@@ -191,8 +191,11 @@ async function takeScreenshot(windowId, minIntervalMs, signal, session) {
     throwIfAborted(signal);
     if (session) await assertStillActive(session);
     try {
-      dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+      // The quota limits API invocations, not completed image readbacks. Keep
+      // calls serialized, but let successful readback time count toward the
+      // next interval instead of adding another full wait after every image.
       lastScreenshotAt = performance.now();
+      dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
       break;
     } catch (error) {
       lastScreenshotAt = performance.now();

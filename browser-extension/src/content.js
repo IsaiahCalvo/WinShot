@@ -60,11 +60,16 @@
     return root instanceof ShadowRoot ? root.host : null;
   }
 
-  function hasTransparentAncestor(node) {
+  function hasTransparentAncestor(node, cache = null) {
+    const visited = [];
+    let transparent = false;
     for (let current = node; current instanceof Element; current = composedParent(current)) {
-      if (Number(getComputedStyle(current).opacity) === 0) return true;
+      if (cache?.has(current)) { transparent = cache.get(current); break; }
+      if (cache) visited.push(current);
+      if (Number(getComputedStyle(current).opacity) === 0) { transparent = true; break; }
     }
-    return false;
+    for (const current of visited) cache.set(current, transparent);
+    return transparent;
   }
 
   function floatingBounds(node, authored = false) {
@@ -695,6 +700,9 @@
     const links = [];
     const seenText = new Set();
     const seenLinks = new Set();
+    // This function runs synchronously: authored opacity cannot change between
+    // these reads. Share ancestor results across text/links in this tile only.
+    const transparentAncestors = new Map();
 
     const intersect = (rect) => {
       const left = Math.max(rect.left, clip.left);
@@ -720,7 +728,7 @@
         const value = node.nodeValue?.replace(/\s+/g, " ").trim();
         if (!value || !(node.parentElement instanceof Element)) continue;
         const style = getComputedStyle(node.parentElement);
-        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(node.parentElement)) continue;
+        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(node.parentElement, transparentAncestors)) continue;
         const range = document.createRange();
         range.selectNodeContents(node);
         for (const rect of range.getClientRects()) {
@@ -737,7 +745,7 @@
       for (const anchor of root.querySelectorAll("a[href]")) {
         if (links.length >= 2000) break;
         const style = getComputedStyle(anchor);
-        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(anchor)) continue;
+        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(anchor, transparentAncestors)) continue;
         for (const rect of anchor.getClientRects()) {
           const mapped = intersect(rect);
           if (!mapped) continue;
@@ -1032,13 +1040,27 @@
     session.observer = new MutationObserver(mutations => {
       if (!session) return;
       session.mutationCount++;
+      const changedRoots = new Set();
       for (const mutation of mutations) {
         const candidates = mutation.type === "childList" ? [...mutation.addedNodes] : [mutation.target];
         for (const node of candidates) {
           if (!(node instanceof Element)) continue;
-          session.pendingNodes.add(node);
-          for (const child of node.querySelectorAll("*")) session.pendingNodes.add(child);
+          changedRoots.add(node);
         }
+      }
+      // Animation libraries can write a wrapper's style hundreds of times in one
+      // task. Expand each affected subtree once, rather than walking thousands of
+      // descendants for every mutation before the pending-node Set deduplicates
+      // them. Stay within parentElement boundaries: a host's querySelectorAll does
+      // not visit its shadow tree, so that tree still needs its own expansion.
+      for (const node of changedRoots) {
+        let covered = false;
+        for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+          if (changedRoots.has(parent)) { covered = true; break; }
+        }
+        if (covered) continue;
+        session.pendingNodes.add(node);
+        for (const child of node.querySelectorAll("*")) session.pendingNodes.add(child);
       }
     });
     for (const root of session.roots) {
@@ -1070,10 +1092,17 @@
     // Visibility can be overridden for a separately anchored fixed descendant.
     // Apply it to each recorded node so explicit visibility:visible children do
     // not leak through hidden wrappers. Group opacity would hide nested footers.
+    const owners = new Map();
     for (const [node, original] of session.floatingVisibility) {
       if (!node.isConnected) continue;
       let owner = node;
-      while (owner && !showing.has(owner)) owner = composedParent(owner);
+      const ancestors = [];
+      while (owner && !showing.has(owner) && !owners.has(owner)) {
+        ancestors.push(owner);
+        owner = composedParent(owner);
+      }
+      if (owner && !showing.has(owner)) owner = owners.get(owner);
+      for (const ancestor of ancestors) owners.set(ancestor, owner);
       const visible = (!owner || showing.get(owner)) && original.visible && !session.surfaceSnapshots.has(node);
       rememberStyle(node, "visibility", visible ? "visible" : "hidden", "important");
     }

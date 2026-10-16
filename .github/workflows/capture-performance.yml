@@ -1,0 +1,77 @@
+name: capture-performance
+
+on:
+  pull_request:
+    paths:
+      - 'browser-extension/src/content.js'
+      - 'browser-extension/src/background.js'
+      - 'browser-extension/tools/benchmark-capture.mjs'
+      - 'browser-extension/tools/compare-capture-benchmarks.mjs'
+      - '.github/workflows/capture-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matched-capture-cohorts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      WINSHOT_TEST_SOFTWARE_GL: ${{ matrix.os == 'windows-2022' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Allow sandboxed test Chrome user namespaces on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          capture_chrome_path="$(node --input-type=module -e 'import puppeteer from "puppeteer"; console.log(await puppeteer.executablePath());')"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-capture-perf "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-capture-perf > /dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/winshot-capture-perf
+      - run: npm run build:extension
+      - name: Prepare identical builds differing only in capture runtime
+        id: prepare
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const baseline='3e50145d782db99637a5d23d463950fc84005d40';
+          for(const label of ['baseline','candidate'])fs.cpSync('browser-extension/dist/winshot-capture',`output/performance-${label}`,{recursive:true});
+          const files=['src/content.js','src/background.js'];
+          for(const file of files)fs.writeFileSync(`output/performance-baseline/${file}`,execFileSync('git',['show',`${baseline}:browser-extension/${file}`]));
+          fs.writeFileSync('output/performance-baseline-source.json',JSON.stringify({baselineCommit:baseline,replacedFiles:files,allOtherFiles:'identical current build'},null,2));
+          JS
+      - name: Baseline ten complete capture attempts
+        continue-on-error: true
+        run: node browser-extension/tools/benchmark-capture.mjs --extension output/performance-baseline --label baseline-complex --repeats 10 --profile --output output/capture-benchmark
+      - name: Candidate ten complete capture attempts
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: node browser-extension/tools/benchmark-capture.mjs --extension output/performance-candidate --label candidate-complex --repeats 10 --profile --output output/capture-benchmark
+      - name: Compare timings, exact pixels and restoration
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: node browser-extension/tools/compare-capture-benchmarks.mjs --baseline output/capture-benchmark/baseline-complex --candidate output/capture-benchmark/candidate-complex --output output/capture-benchmark/comparison.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-performance-${{ matrix.os }}
+          path: |
+            output/capture-benchmark
+            output/performance-baseline-source.json
+          if-no-files-found: warn

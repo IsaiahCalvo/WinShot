@@ -3,7 +3,19 @@
 WinShot Capture is a local-first Manifest V3 extension. It captures real browser pixels,
 stores large captures as tiles, validates coverage and overlap confidence, and exports
 PNG, JPEG, WebP, or PDF without a cloud service. WinShot desktop integration is optional;
-the standalone editor/export page works without the Windows app.
+the browser image editor and video studio work without the Windows app.
+
+Captures open a Chrome tab with drawing, arrows, shapes, text, opaque redaction,
+crop, undo/redo and local autosave. **Open file** imports images/clipboard images
+or editable `.winshot.json` projects; **Save project** preserves the original and
+editable annotations. Every image export uses the current edits. Edited PDFs omit
+the original text/link layer so covered or cropped source content is not exposed.
+
+**Record & edit video** opens a separate tab with Chrome's screen/window/tab
+sharing chooser, local video import, playback, trim, source download and WebM
+clip export. Export runs at playback speed; no native handoff is involved.
+See [browser editing](docs/browser-editing.md) for formats, limits and sharing
+editable projects safely.
 
 ## Build and test
 
@@ -114,8 +126,8 @@ open-source capture implementations reviewed during this work.
 
 The package requires site access plus `activeTab`, `scripting`, `downloads`, `storage`, and
 `webNavigation`. Site access is needed for reliable all-tab batches and permitted cross-origin
-frame capture; WinShot does not use debugger access or send page data to a service. `tabs` and
-`nativeMessaging` remain optional.
+frame capture; WinShot does not use debugger access or send page data to a service.
+`nativeMessaging` is optional; `tabs` is required for capture/history workflows.
 
 ## Merged product surface (2026-08-07)
 

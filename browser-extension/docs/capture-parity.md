@@ -35,5 +35,6 @@ See [fireshot-capture-matrix.md](fireshot-capture-matrix.md) for the feature-by-
 - GIF/BMP, clipboard, email, printing, cloud upload, and store publishing are output/distribution features rather than capture-engine features.
 - Very large JPEG/WebP exports fall back to PNG/PDF because browsers cannot reliably allocate one giant canvas.
 - DRM/protected browser surfaces can be blank by browser policy. Restricted internal pages receive an explicit fallback instead of a false success.
-- Native editor handoff, store signing/IDs, installer registration, and installed-store-browser smoke remain release/integration work. Automated tests never use personal browser profiles.
-- A dependable extension-to-desktop connection should use Chrome Native Messaging so WinShot can acknowledge success, failure, progress, and cancellation. The current custom URL is only a convenience launch path.
+- Image editing and video recording/trimming use extension-owned Chrome tabs. They do not require a native editor handoff. See [browser-editing.md](browser-editing.md).
+- Store signing/IDs, installer registration, and installed-store-browser smoke remain release/integration work. Automated tests never use personal browser profiles.
+- Optional desktop capture integration would benefit from Chrome Native Messaging so WinShot can acknowledge success, failure, progress, and cancellation. The current custom URL is a convenience launch path for desktop-only capture, not a prerequisite for browser editing.

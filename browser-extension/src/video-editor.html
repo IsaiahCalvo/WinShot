@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinShot — Video studio</title>
+  <link rel="icon" href="../icons/32.png">
+  <link rel="stylesheet" href="video-editor.css">
+</head>
+<body data-state="loading">
+  <header>
+    <a class="brand" href="history.html"><img src="../icons/32.png" width="28" height="28" alt=""><span><strong>WinShot</strong><small>Video studio</small></span></a>
+    <nav aria-label="Video actions">
+      <button id="record" class="primary" disabled><span class="record-dot" aria-hidden="true"></span> Record screen</button>
+      <button id="stop-record" class="danger" hidden>Stop recording</button>
+      <button id="import-video" disabled>Import video</button>
+      <button id="save-source" disabled>Save original</button>
+      <button id="export-video" class="primary" disabled>Export clip</button>
+      <button id="cancel-export" class="danger" hidden>Cancel export</button>
+    </nav>
+  </header>
+  <main>
+    <aside>
+      <div class="section-label">Your video</div>
+      <label for="video-title">Title</label><input id="video-title" maxlength="160" placeholder="Untitled recording" disabled>
+      <p id="video-meta" class="muted">Choose a screen or open a video to begin.</p>
+      <div class="section-label">Record</div>
+      <label class="check"><input id="capture-audio" type="checkbox" checked> Include shared audio</label>
+      <p class="hint">Chrome asks which tab, window, or screen to share. Available audio depends on your choice and operating system.</p>
+      <div class="section-label">Export</div>
+      <label for="resolution">Resolution</label><select id="resolution" disabled><option value="original">Original size</option><option value="1080">Up to 1080p</option><option value="720">Up to 720p</option></select>
+      <div class="two-col"><div><label for="quality">Quality</label><select id="quality" disabled><option value="compact">Smaller file</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></div><div><label for="fps">Frame rate</label><select id="fps" disabled><option value="24">24 fps</option><option value="30" selected>30 fps</option><option value="60">60 fps</option></select></div></div>
+      <label class="check"><input id="mute-export" type="checkbox" disabled> Mute exported audio</label>
+      <label class="check"><input id="mono-export" type="checkbox" disabled> Mono audio</label>
+      <label for="volume">Export volume <output id="volume-value">100%</output></label><input id="volume" type="range" min="0" max="200" value="100" step="5" disabled>
+      <p class="hint">WebM export runs at playback speed. Keep this tab visible. Trim boundaries are approximate; the original stays untouched. Audio boost above 100% and mono apply on export.</p>
+      <button id="save-local" hidden>Retry saving to history</button>
+      <div class="section-heading"><div class="section-label">Saved videos</div><button id="refresh-history" title="Refresh saved videos" aria-label="Refresh saved videos">↻</button></div>
+      <div id="video-history" class="history"><p class="hint">Loading…</p></div>
+      <a class="history-link" href="history.html">Screenshot history ↗</a>
+      <p class="privacy">Everything stays in this Chrome profile. Nothing is uploaded. Export important recordings: removing the extension also removes its history. Recordings stop at 30 minutes or 1 GB.</p>
+    </aside>
+    <section class="workspace" aria-label="Video workspace">
+      <div class="preview-shell">
+        <div id="empty-state"><div class="empty-icon" aria-hidden="true">▶</div><h1>Your next take starts here.</h1><p>Record a tab, window, or screen.<br>Or open a video and make it yours.</p><button id="empty-import" disabled>Open a video</button><small>WebM and video formats your Chrome can play</small></div>
+        <video id="preview" controls playsinline hidden aria-label="Video preview"></video>
+        <div id="recording-indicator" hidden><span class="record-dot" aria-hidden="true"></span><span id="recording-time">Recording · 0:00</span></div>
+      </div>
+      <section id="timeline" class="timeline" aria-label="Clip trim" hidden>
+        <div class="timeline-heading"><strong>Trim your clip</strong><span id="selection-duration" class="muted"></span><button id="reset-trim">Reset</button><button id="play-selection">Preview clip</button></div>
+        <div class="trim-bar" aria-hidden="true"><span id="trim-selected"></span><span id="playhead"></span></div>
+        <label for="trim-start">Start <output id="start-label">0:00</output></label><input id="trim-start" type="range" min="0" max="1" step="0.05" value="0">
+        <label for="trim-end">End <output id="end-label">0:00</output></label><input id="trim-end" type="range" min="0" max="1" step="0.05" value="1">
+        <div class="two-col"><div><label for="start-time">Start in seconds</label><input id="start-time" type="number" min="0" step="0.05" value="0"></div><div><label for="end-time">End in seconds</label><input id="end-time" type="number" min="0.1" step="0.05" value="1"></div></div>
+      </section>
+      <footer><p id="status" role="status" aria-live="polite">Loading WinShot…</p><progress id="export-progress" max="1" value="0" hidden aria-label="Export progress"></progress></footer>
+    </section>
+  </main>
+  <input id="video-file" type="file" accept="video/*,.webm,.mp4,.mov,.m4v" hidden>
+  <script type="module" src="video-editor.js"></script>
+</body>
+</html>
