@@ -31,7 +31,7 @@ try {
       const popupTarget = browser.waitForTarget((target) => target.type() === "page" && target.url().endsWith("/src/popup.html"));
       await extension.triggerAction(page);
       const popup = await (await popupTarget).asPage();
-      await popup.waitForSelector("[data-mode='full-page']");
+      await popup.waitForSelector("body[data-ready='true']");
       await popup.evaluate(() => {
         document.querySelector("#capture-height").value = "50000";
         document.querySelector("#capture-timeout").value = "2";

@@ -24,7 +24,7 @@ async function popup(extension, page) {
   await extension.triggerAction(page);
   const ui = await (await target).asPage();
   ui.on("pageerror", error => workerErrors.push(`popup: ${error.message}`));
-  await ui.waitForSelector("[data-mode='full-page']");
+  await ui.waitForSelector("body[data-ready='true']");
   await ui.evaluate(() => {
     document.querySelector("#capture-height").value = "80000";
     document.querySelector("#capture-timeout").value = "2";

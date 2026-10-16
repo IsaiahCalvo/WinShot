@@ -7,19 +7,19 @@
   <link rel="icon" href="../icons/32.png">
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
+<body data-ready="false" aria-busy="true">
   <header>
     <img class="mark" src="../icons/32.png" alt="" width="32" height="32">
     <div><strong>WinShot</strong><small>Browser capture</small></div>
   </header>
-  <main>
-    <button id="repeat-last"><span>Repeat last capture</span><kbd>Ctrl Shift S</kbd><small id="repeat-label"></small></button>
-    <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift 1</kbd></button>
-    <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift 3</kbd></button>
-    <button id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
-    <button data-picker="region"><span>Drag a selection</span><kbd>Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
-    <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
-    <button data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
+  <main inert>
+    <button disabled id="repeat-last"><span>Repeat last capture</span><kbd>Ctrl Shift S</kbd><small id="repeat-label"></small></button>
+    <button disabled data-mode="full-page"><span>Entire page</span><kbd>Alt Shift 1</kbd></button>
+    <button disabled data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift 3</kbd></button>
+    <button disabled id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
+    <button disabled data-picker="region"><span>Drag a selection</span><kbd>Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
+    <button disabled data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
+    <button disabled data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
     <details>
       <summary>Capture settings</summary>
       <label for="capture-delay">Delay before capture</label>
@@ -58,16 +58,16 @@
       <option value="full-page">Entire page</option>
       <option value="visible">Visible viewport</option>
     </select>
-    <button id="all-tabs"><span>Capture all web tabs</span><small>Maximum 20 tabs</small></button>
-    <button id="all-tabs-pdf"><span>All tabs to one PDF</span><small>Captures and downloads one searchable PDF</small></button>
+    <button disabled id="all-tabs"><span>Capture all web tabs</span><small>Maximum 20 tabs</small></button>
+    <button disabled id="all-tabs-pdf"><span>All tabs to one PDF</span><small>Captures and downloads one searchable PDF</small></button>
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
-    <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
+    <button disabled id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
     <a id="open-history" href="#">Capture history…</a>
   </main>
   <footer>
-    <p id="status" role="status">Captures stay on this device.</p>
-    <button id="cancel" title="Stop capture and restore the page (Ctrl+Shift+S)">Stop</button>
+    <p id="status" role="status">Loading WinShot…</p>
+    <button disabled id="cancel" title="Stop capture and restore the page (Ctrl+Shift+S)">Stop</button>
   </footer>
   <script type="module" src="popup.js"></script>
 </body>

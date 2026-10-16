@@ -74,7 +74,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -83,6 +83,7 @@ async function openPopup(run, fixturePage) {
 async function openExtensionPage(run, file = "src/popup.html") {
   const page = await run.browser.newPage();
   await page.goto(`chrome-extension://${run.extension.id}/${file}`, { waitUntil: "domcontentloaded" });
+  if (file === "src/popup.html") await page.waitForSelector("body[data-ready='true']");
   return page;
 }
 
@@ -164,6 +165,35 @@ async function seedRecords(page, overridesList) {
     }
   }, overridesList);
 }
+
+test("capture controls stay disabled until delayed settings and handlers are ready", async () => {
+  const run = await launchExactExtension();
+  try {
+    const source = await run.browser.newPage();
+    await source.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    const popup = await run.browser.newPage();
+    await popup.evaluateOnNewDocument(() => {
+      const get = chrome.storage.local.get.bind(chrome.storage.local);
+      chrome.storage.local.get = async (...args) => { await new Promise(resolve => setTimeout(resolve, 1800)); return get(...args); };
+    });
+    const loading = popup.goto(`chrome-extension://${run.extension.id}/src/popup.html`, { waitUntil: "domcontentloaded" });
+    loading.catch(() => {});
+    await popup.waitForSelector("[data-mode='visible']");
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(true);
+    expect(await popup.$eval("#cancel", node => node.disabled)).toBe(true);
+    await popup.waitForSelector("body[data-ready='true']", { timeout: 5000 });
+    await loading;
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(false);
+    expect(await popup.$eval("main", node => node.inert)).toBe(false);
+    await source.bringToFront();
+    const waiting = editorTarget(run);
+    // Use the same initialized handler with the source still the active tab.
+    await popup.$eval("[data-mode='visible']", node => node.click());
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state).toBe("complete");
+    expect(record.sourceUrl).toBe("http://127.0.0.1:4173/body");
+  } finally { await closeExactExtension(run); }
+});
 
 test("direct-storage garbage settings are clamped on load and the popup repeat row follows lastMode", async () => {
   const run = await launchExactExtension();

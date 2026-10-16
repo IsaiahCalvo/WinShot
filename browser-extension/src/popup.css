@@ -8,6 +8,7 @@ header strong { font-size: 15px; }
 header small, button small { color: #aab2c0; }
 .mark { width: 32px; height: 32px; flex-shrink:0; }
 main { display: grid; flex:1; align-content:start; gap: 7px; padding: 10px; overflow-y:auto; min-height:0; scrollbar-width:thin; scrollbar-color:#3b4656 transparent; }
+main[inert] { opacity:.65; }
 button { min-height: 48px; border: 1px solid #ffffff1c; border-radius: 8px; background: #1a1e25; color: inherit; padding: 8px 10px; display: grid; grid-template-columns: 1fr auto; text-align: left; align-items: center; cursor: pointer; }
 button { transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
 button:hover, button:focus-visible { border-color: #268eff; background: #202a37; outline: none; }

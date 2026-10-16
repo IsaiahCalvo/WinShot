@@ -34,7 +34,7 @@ async function popup(run) {
   const target = run.browser.waitForTarget((t) => t.type() === "page" && t.url().endsWith("/src/popup.html"));
   await run.extension.triggerAction(run.page);
   const page = await (await target).asPage();
-  await page.waitForSelector("[data-mode='full-page']");
+  await page.waitForSelector("body[data-ready='true']");
   return page;
 }
 

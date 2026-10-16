@@ -19,7 +19,7 @@ async function runFixture(setup, assertions, data = null) {
     await page.bringToFront();
     await extension.triggerAction(page);
     const popup = await (await popTarget).asPage();
-    await popup.waitForSelector("[data-mode='full-page']");
+    await popup.waitForSelector("body[data-ready='true']");
     const editorTarget = browser.waitForTarget(t => t.type() === "page" && t.url().includes("/src/editor.html?id="), { timeout: 90_000 });
     await popup.click("[data-mode='full-page']");
     const editor = await (await editorTarget).asPage();

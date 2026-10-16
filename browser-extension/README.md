@@ -81,6 +81,9 @@ read just the first tile. Chrome limits screenshots to two calls per second, so
 the capture interval deliberately stays above 500 ms.
 Concurrent captures in separate windows share one screenshot queue so they cannot
 exceed that browser-wide quota.
+Popup controls remain disabled with a loading indicator until settings, handlers
+and initial capture status are ready. Tests wait for that same visible readiness
+state; a slow storage read cannot silently discard the first capture click.
 Capture timing uses a monotonic clock, and temporary Chrome quota/readback failures
 get one bounded retry. URL batches subscribe before checking load completion and
 recheck tabs after activation so reloading or discarded pages are not captured early.

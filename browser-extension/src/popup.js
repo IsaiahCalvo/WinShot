@@ -1,13 +1,19 @@
 import { loadSettings, normalizeSettings, saveSettings } from "./settings.js";
 
 const status = document.querySelector("#status");
-let settings = await loadSettings();
+let settings = await loadSettings().catch(error => {
+  status.className = "error";
+  status.textContent = "Capture settings could not load. Reload WinShot and try again.";
+  throw error;
+});
 let busy = false;
+let statusRevision = 0;
 const startButtons = [...document.querySelectorAll("[data-mode], [data-picker], #repeat-last, #all-tabs, #all-tabs-pdf, #url-batch, #browser-window")];
 
 function setBusy(value) {
   busy = value;
   document.body.dataset.busy = String(value);
+  document.body.setAttribute("aria-busy", String(value));
   for (const button of startButtons) button.disabled = value;
 }
 
@@ -205,17 +211,28 @@ document.querySelector("#open-history").addEventListener("click", async (event) 
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "WINSHOT_CAPTURE_STATUS") {
+    statusRevision++;
     setBusy(message.busy);
     if (message.message) status.textContent = message.message;
     return;
   }
   if (message.type !== "WINSHOT_PROGRESS") return;
+  statusRevision++;
   setBusy(message.state === "preparing" || message.state === "capturing");
   status.textContent = message.message;
 });
 
-chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" }).then((result) => {
-  if (!result?.busy) return;
-  setBusy(true);
-  status.textContent = result.message;
-}).catch(() => {});
+const initialRevision = statusRevision;
+chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" }).then(result => {
+  if (statusRevision !== initialRevision) return;
+  setBusy(Boolean(result?.busy));
+  status.textContent = result?.message || "Captures stay on this device.";
+}).catch(() => {
+  if (statusRevision !== initialRevision) return;
+  setBusy(false);
+  status.textContent = "Captures stay on this device.";
+}).finally(() => {
+  document.querySelector("main").inert = false;
+  document.querySelector("#cancel").disabled = false;
+  document.body.dataset.ready = "true";
+});
