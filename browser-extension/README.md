@@ -51,7 +51,8 @@ frames are recorded explicitly, not counted as successful captures.
 Capture waits for visible images to load and decode within each tile's bounded
 settle deadline. Unfinished images or changing layout produce a partial result,
 with a warning, rather than a false complete claim. Capture styling and sticky
-handling reach open shadow roots. Axis-aligned scaled scrolling panels use visual
+handling reach open shadow roots, including roots attached to existing hosts while
+scrolling. Their new visible images must load too. Axis-aligned scaled scrolling panels use visual
 coordinates consistently; scroll position and original CSS are restored afterward.
 On fixed-height app layouts, Entire page detects a large central scrolling panel
 and captures its hidden content. The result states which area was captured; use
@@ -59,13 +60,16 @@ Select an element when a different panel is wanted.
 
 Finite CSS/Web Animations entrance effects finish before capture so scroll-revealed
 content is visible. Repeating effects pause, and scroll/view-timeline effects use
-a temporary final-keyframe snapshot. Original animation state is restored afterward.
+a temporary final-keyframe snapshot. Original animation state is restored afterward;
+entrance effects created during capture remain finished rather than replaying.
 Positioning is rechecked when nodes/classes/styles change, so headers that become
 fixed and late-inserted floating footers do not repeat across tiles. Hidden overlays
 retain the page's own visibility rules. Pickers start in the top page immediately
 and bound setup/cleanup of embedded frames, with per-picker identities protecting
 new selections from late messages belonging to an earlier selection. Region drags
 use a top-page input plane so they can cross embedded frames without losing mouseup.
+Embedded documents that finish navigating while a picker is open receive the picker
+in their new document; cancelled picker identities cannot revive old overlays.
 Shared tile bands retain already captured fixed-element pixels, so a tall sidebar
 or a header on a page only slightly taller than the viewport cannot be cut off by
 the next tile. Current-tile floating elements keep their normal paint priority.
@@ -81,6 +85,10 @@ read just the first tile. Chrome limits screenshots to two calls per second, so
 the capture interval deliberately stays above 500 ms.
 Concurrent captures in separate windows share one screenshot queue so they cannot
 exceed that browser-wide quota.
+Progress and countdown controls are scoped to their browser window, while batch
+progress remains global. Captures open their editor in the source window. Stop
+keeps the same cancellation signal through countdown and asynchronous storage
+startup, and countdowns allow same-document History API URL changes.
 Popup controls remain disabled with a loading indicator until settings, handlers
 and initial capture status are ready. Tests wait for that same visible readiness
 state; a slow storage read cannot silently discard the first capture click.

@@ -155,6 +155,37 @@ test("scroll-triggered images finish decoding before their tile is captured", as
   } finally { await run.close(); }
 });
 
+for (const pending of [false, true]) {
+  test(`shadow trees created while scrolling ${pending ? "report unfinished images as partial" : "wait for visible image pixels"}`, async () => {
+    const run = await launch();
+    try {
+      await run.page.setRequestInterception(true);
+      run.page.on("request", async request => {
+        if (!request.url().includes("late-shadow-image.svg")) return request.continue();
+        if (pending) return;
+        await new Promise(resolve => setTimeout(resolve, 950));
+        await request.respond({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="240"><path fill="#ff00cc" d="M0 0h600v240H0z"/></svg>' });
+      });
+      await run.page.evaluate(() => {
+        document.body.innerHTML = '<div style="height:1200px"></div><lazy-card style="display:block;height:240px"></lazy-card><div style="height:1800px"></div>';
+        const host = document.querySelector("lazy-card");
+        new IntersectionObserver((entries, observer) => {
+          if (!entries.some(entry => entry.isIntersecting)) return;
+          // Attaching a shadow root to an existing host emits no light-DOM mutation.
+          host.attachShadow({ mode: "open" }).innerHTML = '<img src="/late-shadow-image.svg" width="600" height="240">';
+          observer.disconnect();
+        }).observe(host);
+      });
+      const { editor, record } = await capture(run);
+      expect(record.state, JSON.stringify(record.report)).toBe(pending ? "partial" : "complete");
+      if (!pending) expect(await magentaTiles(editor)).toHaveLength(1);
+      expect(record.report.restoration).toBe("verified by read-back");
+      expect(await run.page.evaluate(() => document.querySelector("lazy-card").shadowRoot.querySelectorAll("[data-winshot-capture]").length)).toBe(0);
+      expect(run.errors).toEqual([]);
+    } finally { await run.close(); }
+  });
+}
+
 test("Stop cancels a delayed capture before it starts", async () => {
   const run = await launch();
   try {

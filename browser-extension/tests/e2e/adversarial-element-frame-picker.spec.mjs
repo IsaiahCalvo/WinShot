@@ -382,6 +382,32 @@ test("same-origin srcdoc frame is fully captured through the frame picker", asyn
   }
 });
 
+test("a frame that finishes navigating after picker startup becomes selectable", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/srcdoc-frame", { waitUntil: "networkidle0" });
+    await startPicker(run, page, "frame");
+    await page.evaluate(() => {
+      const frame = document.createElement("iframe");
+      frame.id = "late-frame";
+      frame.style.cssText = "display:block;width:700px;height:320px;border:0";
+      frame.src = "/frame";
+      document.body.prepend(frame);
+    });
+    const frame = await (await page.waitForSelector("#late-frame")).contentFrame();
+    await frame.waitForSelector("[data-winshot-picker='tip']", { timeout: 10_000 });
+    const waiting = editorTarget(run);
+    const box = await (await page.$("#late-frame")).boundingBox();
+    await page.mouse.click(box.x + 100, box.y + 100);
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, record.error).toBe("complete");
+    expect(record.frameUrl).toBe("http://127.0.0.1:4173/frame");
+    expect(record.report.tileCount).toBeGreaterThan(1);
+    expect(record.report.restoration).toBe("verified by read-back");
+  } finally { await closeExactExtension(run); }
+});
+
 test("an element removed the instant it is selected fails gracefully and cleans up", async () => {
   const run = await launchExactExtension();
   try {

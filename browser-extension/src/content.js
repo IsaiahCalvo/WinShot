@@ -10,6 +10,7 @@
   let pickerCleanup = null;
   let activePickerId = null;
   let pendingPickerState = null;
+  const cancelledPickerIds = new Set();
   const announcedFrames = new Map();
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -111,6 +112,9 @@
     for (const animation of current.captureAnimations) animation.cancel();
     for (const [animation, original] of current.changedAnimations) {
       try {
+        // These effects were created by scroll reveals during capture. Keeping
+        // their completed frame avoids replaying the entrance after restoration.
+        if (original.created && animation.playState === "finished") continue;
         animation.playbackRate = original.playbackRate;
         animation.currentTime = original.currentTime;
         let resume = original.playState === "running";
@@ -518,6 +522,8 @@
   }
 
   function refreshCaptureEffects() {
+    session.animationIssues.clear();
+    refreshOpenRoots();
     const nodes = [...session.pendingNodes];
     session.pendingNodes.clear();
     trackFloatingNodes(nodes);
@@ -545,6 +551,17 @@
           animation.finish();
         } else animation.pause();
       } catch { session.animationIssues.add("An animation could not be stabilized."); }
+    }
+  }
+
+  function refreshOpenRoots() {
+    for (const root of openRoots()) {
+      if (session.roots.includes(root)) continue;
+      session.roots.push(root);
+      for (const animation of pageAnimations()) rememberAnimation(animation, true);
+      installFreezeStyle(root, session.id);
+      session.observer?.observe(root, { childList: true, subtree: true, attributes: true });
+      for (const node of root.querySelectorAll("*")) session.pendingNodes.add(node);
     }
   }
 
@@ -761,10 +778,9 @@
     throw new Error(`Unsupported capture mode: ${request.mode}`);
   }
 
-  function freezePage(classification, request) {
-    for (const root of session.roots) {
+  function installFreezeStyle(root, sessionId) {
       const freezeStyle = document.createElement("style");
-      freezeStyle.dataset.winshotCapture = request.sessionId;
+      freezeStyle.dataset.winshotCapture = sessionId;
       freezeStyle.textContent = `
       html { scroll-behavior: auto !important; scroll-snap-type: none !important; overflow-anchor: none !important; }
       *, *::before, *::after {
@@ -778,7 +794,10 @@
     `;
       (root === document ? document.head || document.documentElement : root).append(freezeStyle);
       session.freezeStyles.push(freezeStyle);
-    }
+  }
+
+  function freezePage(classification, request) {
+    for (const root of session.roots) installFreezeStyle(root, request.sessionId);
 
     if (classification.owner instanceof Element) {
       rememberStyle(classification.owner, "scroll-behavior", "auto");
@@ -936,6 +955,7 @@
   }
 
   async function beginPicker(mode, frameInfo = null, pickerId = null) {
+    if (pickerId && cancelledPickerIds.has(pickerId)) return { started: false, cancelled: true };
     pickerCleanup?.();
     activePickerId = pickerId;
     restore("picker-started");
@@ -968,6 +988,9 @@
   }
 
   function cancelPicker(pickerId = null) {
+    if (pickerId) cancelledPickerIds.add(pickerId);
+    // Bound tombstones for a long-lived page; capture IDs are never reused.
+    if (cancelledPickerIds.size > 256) cancelledPickerIds.delete(cancelledPickerIds.values().next().value);
     if (pickerId && pickerId !== activePickerId) return { cancelled: false };
     pickerCleanup?.();
     activePickerId = null;

@@ -8,6 +8,7 @@ let settings = await loadSettings().catch(error => {
 });
 let busy = false;
 let statusRevision = 0;
+const popupWindowId = (await chrome.windows.getCurrent()).id;
 const startButtons = [...document.querySelectorAll("[data-mode], [data-picker], #repeat-last, #all-tabs, #all-tabs-pdf, #url-batch, #browser-window")];
 
 function setBusy(value) {
@@ -210,6 +211,8 @@ document.querySelector("#open-history").addEventListener("click", async (event) 
 });
 
 chrome.runtime.onMessage.addListener((message) => {
+  if ((message.type === "WINSHOT_CAPTURE_STATUS" || message.type === "WINSHOT_PROGRESS") &&
+      message.windowId !== popupWindowId && !message.global) return;
   if (message.type === "WINSHOT_CAPTURE_STATUS") {
     statusRevision++;
     setBusy(message.busy);
@@ -218,7 +221,7 @@ chrome.runtime.onMessage.addListener((message) => {
   }
   if (message.type !== "WINSHOT_PROGRESS") return;
   statusRevision++;
-  setBusy(message.state === "preparing" || message.state === "capturing");
+  setBusy(message.busy ?? (message.state === "preparing" || message.state === "capturing"));
   status.textContent = message.message;
 });
 

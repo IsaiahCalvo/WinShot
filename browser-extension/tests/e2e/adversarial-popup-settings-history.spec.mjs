@@ -114,6 +114,122 @@ function storedLastMode(run) {
   return run.worker.evaluate(async (key) => (await chrome.storage.local.get(key))[key]?.lastMode, SETTINGS_KEY);
 }
 
+test("Stop remains effective while a countdown hands off to delayed storage startup", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    await page.bringToFront();
+    await run.worker.evaluate(() => {
+      const original = chrome.storage.local.set;
+      chrome.storage.local.set = async data => {
+        if (data["winshot:capture-settings"]?.fileNameCounter > 1) {
+          globalThis.counterWaiting = true;
+          await new Promise(resolve => { globalThis.releaseCounter = resolve; });
+        }
+        return original.call(chrome.storage.local, data);
+      };
+      globalThis.startupResult = globalThis.__winshotTest.handleCommand("capture-visible");
+    });
+    await expect.poll(() => run.worker.evaluate(() => Boolean(globalThis.counterWaiting))).toBe(true);
+    expect(await run.worker.evaluate(() => globalThis.__winshotTest.cancelActiveCapture())).toEqual({ cancelled: true });
+    const result = await run.worker.evaluate(async () => { globalThis.releaseCounter(); return globalThis.startupResult; });
+    expect(result.state).toBe("cancelled");
+    expect(run.browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
+  } finally { await closeExactExtension(run); }
+});
+
+test("countdowns allow same-document History updates and capture the current URL", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    const popup = await openPopup(run, page);
+    await popup.$eval("details", node => { node.open = true; });
+    await popup.select("#capture-delay", "3000");
+    const waiting = editorTarget(run);
+    await popup.click("[data-mode='visible']");
+    await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    await page.evaluate(() => history.replaceState(null, "", "/body?countdown=ready#section"));
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, record.error).toBe("complete");
+    expect(record.sourceUrl).toContain("?countdown=ready#section");
+  } finally { await closeExactExtension(run); }
+});
+
+test("a cancelled picker identity cannot start late or replace a newer overlay", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    await page.bringToFront();
+    await run.worker.evaluate(() => globalThis.__winshotTest.startPicker("region"));
+    await page.keyboard.press("Escape");
+    const results = await run.worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const send = message => chrome.tabs.sendMessage(tab.id, message, { frameId: 0 });
+      await send({ type: "WINSHOT_CANCEL_PICKER", pickerId: "cancelled-before-start" });
+      const fresh = await send({ type: "WINSHOT_START_PICKER", mode: "region", pickerId: "fresh-picker" });
+      const late = await send({ type: "WINSHOT_START_PICKER", mode: "element", pickerId: "cancelled-before-start" });
+      return { fresh, late };
+    });
+    expect(results.fresh.started).toBe(true);
+    expect(results.late).toEqual({ started: false, cancelled: true });
+    expect(await page.$eval("[data-winshot-picker='tip']", node => node.textContent)).toContain("Drag");
+    await page.keyboard.press("Escape");
+    expect(await page.$$('[data-winshot-picker]')).toHaveLength(0);
+  } finally { await closeExactExtension(run); }
+});
+
+test("cross-window progress cannot disable idle controls or finish another window's countdown", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    const otherId = await run.worker.evaluate(async () => {
+      const other = await chrome.windows.create({ url: "http://127.0.0.1:4173/body", focused: false });
+      return other.id;
+    });
+    const popup = await openPopup(run, page);
+    await run.worker.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_PROGRESS", windowId, state: "capturing", message: "Other window" }), otherId);
+    expect(await popup.$eval("body", node => node.dataset.busy)).toBe("false");
+    await popup.$eval("details", node => { node.open = true; });
+    await popup.select("#capture-delay", "3000");
+    await popup.click("[data-mode='visible']");
+    await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    await run.worker.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_PROGRESS", windowId, state: "complete", message: "Other complete" }), otherId);
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(true);
+    await popup.click("#cancel");
+    await expect.poll(() => popup.$eval("body", node => node.dataset.busy)).toBe("false");
+  } finally { await closeExactExtension(run); }
+});
+
+test("last-used hotkey starts in an idle window while another window is counting down", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    const popup = await openPopup(run, page);
+    await popup.$eval("details", node => { node.open = true; });
+    await popup.select("#capture-delay", "5000");
+    await popup.click("[data-mode='visible']");
+    await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    const second = await run.worker.evaluate(async () => {
+      const other = await chrome.windows.create({ url: "http://127.0.0.1:4173/body", focused: true });
+      await chrome.storage.local.set({ "winshot:capture-settings": { lastMode: "visible", delayMs: 0 } });
+      return other.tabs[0].id;
+    });
+    const secondPage = await (await run.browser.waitForTarget(target => target.type() === "page" && target.url().endsWith("/body") && target !== page.target())).asPage();
+    await secondPage.waitForFunction(() => document.readyState === "complete");
+    const waiting = editorTarget(run);
+    await run.worker.evaluate(() => globalThis.__winshotTest.handleCommand("last-used-action"));
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, record.error).toBe("complete");
+    expect(record.tabId).toBe(second);
+    await run.worker.evaluate(() => globalThis.__winshotTest.cancelActiveCapture({ global: true }));
+  } finally { await closeExactExtension(run); }
+});
+
 // A minimal but complete record shape matching contract.js createSession output,
 // so history.js and editor.js render it exactly as they would a real capture.
 // Serialized as plain overrides and expanded inside the extension page (its CSP
