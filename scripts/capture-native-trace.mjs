@@ -371,6 +371,10 @@ try {
     }catch(error){result.traceValidationError=String(error);}
   }
   result.totalIncludingTraceAnalysisMs=performance.now()-startedAt;save();
+  // Bounded JSON also goes to logs so analysis survives artifact-transfer outages.
+  process.stdout.write("WINSHOT_NATIVE_RESULT "+JSON.stringify(result)+"\n");
+  const timelineFile=path.join(output,"native-timeline-summary.json");
+  if(fs.existsSync(timelineFile))process.stdout.write("WINSHOT_NATIVE_TIMELINE "+JSON.stringify(JSON.parse(fs.readFileSync(timelineFile,"utf8")))+"\n");
   if(!result.completed||!result.traceValidation?.gzipAndJsonParsed)process.exitCode=1;
   fs.rmSync(profile,{recursive:true,force:true,maxRetries:3,retryDelay:100});
   process.stdout.write(JSON.stringify({completed:result.completed,error:result.error,editorOpenedMs:result.editorOpenedMs,decodedEditorReadyMs:result.decodedEditorReadyMs,restoration:result.record?.report?.restoration,tracePath:result.tracePath,traceBytes:result.traceBytes,traceError:result.traceError,totalMs:result.totalMs})+"\n");
