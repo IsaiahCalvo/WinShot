@@ -18,11 +18,11 @@
       const nonce = crypto.randomUUID();
       const done = result => { clearTimeout(timer); removeEventListener("message", receive); resolve(result); };
       const receive = event => {
-        if (event.source === window && event.data?.source === "winshot-effects-response-v2" && event.data.nonce === nonce) done(event.data.result);
+        if (event.source === window && event.data?.source === "winshot-effects-response-v3" && event.data.nonce === nonce) done(event.data.result);
       };
       const timer = setTimeout(() => done({ error: "The page animation bridge did not respond." }), 700);
       addEventListener("message", receive);
-      postMessage({ source: "winshot-effects-request-v2", action, id, nonce }, "*");
+      postMessage({ source: "winshot-effects-request-v3", action, id, nonce }, "*");
     });
   }
 

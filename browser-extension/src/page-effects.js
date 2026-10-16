@@ -1,6 +1,6 @@
 (() => {
   const key = Symbol.for("winshot.page-effects");
-  const version = 2;
+  const version = 3;
   if (window[key]?.version === version) return;
   window[key]?.dispose?.();
   let capture = null;
@@ -9,12 +9,13 @@
     for (let i = 0; i < all.length; i++) for (const node of all[i].querySelectorAll("*")) if (node.shadowRoot) all.push(node.shadowRoot);
     return all;
   };
-  function rememberMedia(node) {
+  function rememberMedia(node, freeze = true) {
     if (!capture.media.has(node)) capture.media.set(node, {
       paused: node.paused, time: node.currentTime, rate: node.playbackRate,
       source: node.currentSrc, stream: node.srcObject
     });
-    node.pause();
+    // Capture's own pause must not overwrite the page's latest playback request.
+    if (freeze && !node.paused) capture.pause.call(node);
   }
   function isLoop(animation) {
     for (let current = animation; current && current !== capture.gsap?.globalTimeline; current = current.parent) {
@@ -61,6 +62,9 @@
     try {
       if (HTMLMediaElement.prototype.play === saved.playProxy) HTMLMediaElement.prototype.play = saved.play;
     } catch { failures.push("media playback function"); }
+    try {
+      if (HTMLMediaElement.prototype.pause === saved.pauseProxy) HTMLMediaElement.prototype.pause = saved.pause;
+    } catch { failures.push("media pause function"); }
     if (saved.gsap) {
       try {
         try { saved.gsap.globalTimeline.totalTime(saved.rootTime, true); }
@@ -88,7 +92,9 @@
         node.playbackRate = original.rate;
         if (node.readyState > 0 && Number.isFinite(original.time) && Number.isFinite(node.duration) &&
             node.currentSrc === original.source && node.srcObject === original.stream && Math.abs(node.currentTime - original.time) > .001) node.currentTime = original.time;
-        if (!original.paused || saved.requestedPlay.has(node)) Promise.resolve(saved.play.call(node)).catch(() => {});
+        const play = saved.requestedPlayback.get(node) ?? !original.paused;
+        if (play) Promise.resolve(saved.play.call(node)).catch(() => {});
+        else if (!node.paused) saved.pause.call(node);
       } catch (error) { failures.push(`media playback (${error.message})`); }
     }
     return { restored: !failures.length, failures };
@@ -98,7 +104,8 @@
     const gsap = window.gsap?.globalTimeline?.getChildren && window.gsap?.ticker?.sleep ? window.gsap : null;
     capture = { id, gsap, initial: new Set(gsap?.globalTimeline.getChildren(true, true, true) || []),
       rootTime: gsap?.globalTimeline.totalTime(), rootPaused: gsap?.globalTimeline.paused(),
-      animations: new Map(), finished: new Set(), media: new Map(), requestedPlay: new Set(), play: HTMLMediaElement.prototype.play,
+      animations: new Map(), finished: new Set(), media: new Map(), requestedPlayback: new Map(),
+      play: HTMLMediaElement.prototype.play, pause: HTMLMediaElement.prototype.pause,
       touched: performance.now(), watchdog: 0 };
     // Snapshot before finishing entrance effects or pausing the page's ticker.
     for (const animation of capture.initial) capture.animations.set(animation, {
@@ -107,11 +114,18 @@
     capture.playProxy = function () {
       if (!capture) return savedPlay.call(this);
       rememberMedia(this);
-      capture.requestedPlay.add(this);
+      capture.requestedPlayback.set(this, true);
       return Promise.resolve();
     };
-    const savedPlay = capture.play;
+    capture.pauseProxy = function () {
+      if (!capture) return savedPause.call(this);
+      rememberMedia(this, false);
+      capture.requestedPlayback.set(this, false);
+      return savedPause.call(this);
+    };
+    const savedPlay = capture.play, savedPause = capture.pause;
     if (Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play")?.writable) HTMLMediaElement.prototype.play = capture.playProxy;
+    if (Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "pause")?.writable) HTMLMediaElement.prototype.pause = capture.pauseProxy;
     capture.watchdog = setInterval(() => {
       if (capture && performance.now() - capture.touched > 9000) restore(capture.id);
     }, 1000);
@@ -120,7 +134,7 @@
   }
   const receive = event => {
     const message = event.data;
-    if (event.source !== window || message?.source !== "winshot-effects-request-v2" || typeof message.nonce !== "string") return;
+    if (event.source !== window || message?.source !== "winshot-effects-request-v3" || typeof message.nonce !== "string") return;
     let result;
     try {
       if (message.action === "begin") result = begin(message.id);
@@ -128,7 +142,7 @@
       else if (message.action === "update" && capture?.id === message.id) { update(); result = { handled: true }; }
       else result = { handled: false };
     } catch (error) { result = { error: String(error.message) }; }
-    postMessage({ source: "winshot-effects-response-v2", nonce: message.nonce, result }, "*");
+    postMessage({ source: "winshot-effects-response-v3", nonce: message.nonce, result }, "*");
   };
   addEventListener("message", receive);
   window[key] = { version, dispose() {

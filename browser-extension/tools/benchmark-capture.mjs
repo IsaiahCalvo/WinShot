@@ -75,8 +75,9 @@ try {
     const row={label:values.label,scenario:values.url?'public':values.scenario,url,attempt:index+1,version};
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     try{
+      if(values.url)await page.setCacheEnabled(false);
       const response=await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
-      if(!response?.ok())throw new Error(`Source HTTP ${response?.status()}`);
+      if(!response?.ok()&&response?.status()!==304)throw new Error(`Source HTTP ${response?.status()}`);
       if(/^(just a moment|access denied|attention required|verify you are human)/i.test(await page.title()))throw new Error('Source access challenge; benchmark did not proceed');
       await page.evaluate(()=>Promise.race([document.fonts.ready,new Promise(resolve=>setTimeout(resolve,3000))]));
       await new Promise(resolve=>setTimeout(resolve,values.url?1200:400));
@@ -94,7 +95,29 @@ try {
       const editorWait=browser.waitForTarget(target=>!prior.has(target)&&target.type()==='page'&&target.url().includes('/src/editor.html?id='),{timeout:180000,signal:controller.signal});
       editorWait.catch(()=>{});
       const started=performance.now();
-      try{await popup.click("[data-mode='full-page']");editor=await (await editorWait).asPage();await editor.waitForSelector('#state:not(:empty)');row.elapsedMs=performance.now()-started;}
+      try{
+        await popup.click("[data-mode='full-page']");editor=await (await editorWait).asPage();
+        row.editorOpenedMs=performance.now()-started;
+        await editor.waitForFunction(()=>{
+          const state=document.querySelector('#state')?.textContent.trim()||'';
+          if(state.toLowerCase()==='failed')return true;
+          const images=[...document.querySelectorAll('#preview img')];
+          const overlay=document.querySelector('#preview .annotation-overlay');
+          const box=overlay?.getBoundingClientRect();
+          const editorLayoutReady=!document.querySelector('[data-tool]')||Boolean(box?.width>0&&box?.height>0);
+          return state&&!/^loading\b/i.test(state)&&images.length>0&&images.every(image=>image.complete&&image.naturalWidth>0)&&editorLayoutReady;
+        },{timeout:Math.max(1,Math.min(60000,180000-(performance.now()-started)))});
+        if((await editor.$eval('#state',node=>node.textContent.trim())).toLowerCase()==='failed')throw new Error('Editor failed to load the capture');
+        row.previewLoadedMs=performance.now()-started;
+        let decodeTimer;
+        try{
+          await Promise.race([
+            editor.evaluate(()=>Promise.all([...document.querySelectorAll('#preview img')].map(image=>image.decode()))),
+            new Promise((_,reject)=>{decodeTimer=setTimeout(()=>reject(new Error('Editor image decode deadline exceeded')),Math.max(1,Math.min(60000,180000-(performance.now()-started))));})
+          ]);
+        }finally{clearTimeout(decodeTimer);}
+        row.elapsedMs=performance.now()-started;
+      }
       finally{controller.abort();}
       if(client){const {profile}=await client.send('Profiler.stop');fs.writeFileSync(path.join(output,`${values.label}-${index+1}.cpuprofile`),JSON.stringify(profile));await client.detach();client=null;}
       row.trace=await worker.evaluate(()=>globalThis.benchmarkTrace);
@@ -137,13 +160,13 @@ try {
       const screenshotCalls=row.trace.filter(entry=>entry.api==='captureVisibleTab');
       const scrollCalls=row.trace.filter(entry=>entry.type==='WINSHOT_SCROLL');
       const gaps=screenshotCalls.slice(1).map((entry,index)=>entry.start-screenshotCalls[index].start);
-      row.stages={readbacks:screenshotCalls.length,readbackMs:screenshotCalls.reduce((sum,entry)=>sum+entry.durationMs,0),minReadbackCallGapMs:gaps.length?Math.min(...gaps):null,quotaErrors:screenshotCalls.filter(entry=>/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|quota/i.test(entry.error||'')).length,scrollCalls:scrollCalls.length,scrollMs:scrollCalls.reduce((sum,entry)=>sum+entry.durationMs,0),scrollP95Ms:percentile(scrollCalls.map(entry=>entry.durationMs),.95)};
+      row.stages={readbacks:screenshotCalls.length,readbackMs:screenshotCalls.reduce((sum,entry)=>sum+entry.durationMs,0),minReadbackCallGapMs:gaps.length?Math.min(...gaps):null,quotaErrors:screenshotCalls.filter(entry=>/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|quota/i.test(entry.error||'')).length,scrollCalls:scrollCalls.length,scrollMs:scrollCalls.reduce((sum,entry)=>sum+entry.durationMs,0),scrollP95Ms:percentile(scrollCalls.map(entry=>entry.durationMs),.95),restoreMs:row.trace.filter(entry=>entry.type==='WINSHOT_RESTORE').reduce((sum,entry)=>sum+entry.durationMs,0)};
       if(row.stages.quotaErrors)row.correct=false;
     }catch(error){row.error=String(error);row.correct=false;}
     finally{if(client)await client.detach().catch(()=>{});row.pageErrors=errors;rows.push(row);fs.writeFileSync(path.join(output,`${values.label}-runs.json`),JSON.stringify(rows,null,2));console.log(JSON.stringify({attempt:row.attempt,elapsedMs:row.elapsedMs,correct:row.correct,state:row.state,stages:row.stages,error:row.error}));await popup?.close().catch(()=>{});await editor?.close().catch(()=>{});await page.close().catch(()=>{});}
   }
   const times=rows.filter(row=>row.correct).map(row=>row.elapsedMs);
-  const summary={label:values.label,scenario:values.url?'public':values.scenario,url,version,extensionPath:extensionRoot,extensionSha256,browser:await browser.version(),platform:process.platform,viewport:{width:1200,height:1000},samples:rows.length,passed:times.length,failed:rows.length-times.length,p50Ms:percentile(times,.5),p95Ms:percentile(times,.95),minMs:times.length?Math.min(...times):null,maxMs:times.length?Math.max(...times):null,percentileMethod:'nearest rank, passing samples only; failures are separately counted; small-sample p95 is descriptive, not a population guarantee',fixtureSha256:crypto.createHash('sha256').update(html).digest('hex'),capturedAt:new Date().toISOString(),graphics:{softwareGL:process.env.WINSHOT_TEST_SOFTWARE_GL||'0',softwareCompositing:process.env.WINSHOT_TEST_SOFTWARE_COMPOSITING||'default'}};
+  const summary={label:values.label,scenario:values.url?'public':values.scenario,url,version,extensionPath:extensionRoot,extensionSha256,measurement:'Popup click to non-Loading editor state, positive-sized annotation overlay when present, and all preview img.decode() promises resolved; editorOpenedMs and previewLoadedMs separately record earlier stages',networkCachePolicy:values.url?'Browser HTTP cache disabled before each navigation':'Fixture served with Cache-Control:no-store',profileFirstAttempt:values.profile,browser:await browser.version(),platform:process.platform,viewport:{width:1200,height:1000},samples:rows.length,passed:times.length,failed:rows.length-times.length,p50Ms:percentile(times,.5),p95Ms:percentile(times,.95),minMs:times.length?Math.min(...times):null,maxMs:times.length?Math.max(...times):null,percentileMethod:'nearest rank, passing samples only; failures are separately counted; small-sample p95 is descriptive, not a population guarantee',fixtureSha256:crypto.createHash('sha256').update(html).digest('hex'),capturedAt:new Date().toISOString(),graphics:{softwareGL:process.env.WINSHOT_TEST_SOFTWARE_GL||'0',softwareCompositing:process.env.WINSHOT_TEST_SOFTWARE_COMPOSITING||'default'}};
   fs.writeFileSync(path.join(output,`${values.label}-summary.json`),JSON.stringify(summary,null,2));console.log(JSON.stringify(summary));
   if(summary.failed)process.exitCode=1;
 }finally{await browser?.close();server.close();fs.rmSync(profileRoot,{recursive:true,force:true,maxRetries:5,retryDelay:100});}

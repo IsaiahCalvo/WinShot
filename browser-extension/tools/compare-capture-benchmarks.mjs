@@ -9,7 +9,7 @@ if (!values.baseline || !values.candidate) throw new Error("Provide --baseline a
 function read(prefix) {return {summary:JSON.parse(fs.readFileSync(`${prefix}-summary.json`)),runs:JSON.parse(fs.readFileSync(`${prefix}-runs.json`))};}
 const baseline=read(values.baseline),candidate=read(values.candidate);
 const percentile=(numbers,p)=>{const sorted=[...numbers].sort((a,b)=>a-b);return sorted[Math.max(0,Math.ceil(sorted.length*p)-1)]??null;};
-const comparisons=['browser','platform','scenario','fixtureSha256','viewport','graphics'].map(key=>({key,equal:JSON.stringify(baseline.summary[key])===JSON.stringify(candidate.summary[key])}));
+const comparisons=['browser','platform','scenario','fixtureSha256','viewport','graphics','measurement','networkCachePolicy','profileFirstAttempt'].map(key=>({key,equal:JSON.stringify(baseline.summary[key])===JSON.stringify(candidate.summary[key])}));
 if(baseline.summary.scenario==='public'){
   const shapes=cohort=>[...new Set(cohort.runs.map(run=>JSON.stringify({dimensions:run.report?.dimensionsPx,tiles:run.report?.tileCount})))].sort();
   comparisons.push({key:'public captured dimensions and tile count',equal:JSON.stringify(shapes(baseline))===JSON.stringify(shapes(candidate))},{key:'public URL',equal:baseline.summary.url===candidate.summary.url});

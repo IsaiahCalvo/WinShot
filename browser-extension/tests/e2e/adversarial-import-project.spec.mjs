@@ -112,7 +112,7 @@ test("editable partial projects reopen with their original coverage and warning"
     const failedSave=await page.evaluate(async()=>{
       const s=await import("./store.js"),r=await s.getRecord(new URL(location.href).searchParams.get("id")),tiles=await s.getTiles(r.id);
       const {saveProject}=await import("./project-file.js");
-      r.state="failed";r.error="The final capture readback failed.";r.report.dimensionsPx.height=360;
+      r.state="failed";r.error="The final capture readback failed.";r.report.dimensionsPx.height=360;r.editorDocument.crop.height=360;
       return JSON.parse(await(await saveProject(r,tiles)).text());
     });
     expect(failedSave.state).toBe("partial");expect(failedSave.warnings).toContain("The final capture readback failed.");

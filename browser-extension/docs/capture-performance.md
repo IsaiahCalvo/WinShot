@@ -53,6 +53,9 @@ content-script messages (including each scroll/settle), and script injection.
 These wrappers add trace entries but do not substitute pixels, clocks, delays or
 responses. `--profile` collects a Chrome CPU profile for the first attempt only;
 the sampling overhead applies to that attempt in both comparison cohorts.
+The current timer ends only after the editor leaves its loading state and all
+preview images have decoded. `editorOpenedMs` separately records when its tab
+opens. Public-page HTTP caching is disabled consistently for every attempt.
 `*-summary.json` contains browser/version, viewport, graphics test flags, fixture
 and extension bundle hashes, successes/failures, and nearest-rank p50/p95.
 
@@ -74,7 +77,11 @@ The uncontended local comparison used Linux Chrome 156.0.8078.4, a physical
 No editor changes were included. The controlled fixture and browser were identical
 between cohorts.
 
-| Cohort | Complete / attempts | Median end to end | Observed p95 | Median scroll/settle total |
+The historical table below used editor-tab appearance as its endpoint. It does
+not measure full preview decoding and must not be compared with the stricter
+current timer.
+
+| Cohort | Complete / attempts | Median to editor tab | Observed p95 | Median scroll/settle total |
 | --- | ---: | ---: | ---: | ---: |
 | Baseline | 10/10 | 4.451 s | 4.667 s | 1.767 s |
 | Candidate | 10/10 | 3.977 s | 4.042 s | 0.955 s |
@@ -106,11 +113,16 @@ than used as a hard performance guarantee.
 
 The `matched-capture-cohorts` job in the `browser-extension` GitHub workflow repeats ten attempts for each cohort on
 Windows and Linux on extension pull requests, and the workflow can also be
-started manually. Its two current-UI builds differ only in `src/content.js` and
-`src/background.js`, with the baseline files pinned to commit
+started manually. Its two current-UI builds differ only in `src/content.js`,
+`src/background.js` and `src/page-effects.js`, with the baseline files pinned to commit
 `3e50145d782db99637a5d23d463950fc84005d40`.
 Windows uses the same software-rendering test flags for both cohorts; Linux uses
 default flags. Each job publishes timings, exact PNG-hash comparison, restoration,
 traces and CPU profiles. It fails for incorrect pixels or incompatible cohorts;
 it records timing regressions without hiding or imposing a noisy runner-wide
 speed threshold. This workflow does not change production browser graphics.
+
+The animation bridge also preserves the page's latest video play/pause request.
+Capture-internal pauses do not count as page requests. A page that plays a video
+as it enters view and pauses it after it leaves view therefore stays paused
+after capture, rather than restarting every video visited during scrolling.

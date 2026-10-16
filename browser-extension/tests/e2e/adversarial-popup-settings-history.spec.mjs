@@ -183,25 +183,101 @@ test("a cancelled picker identity cannot start late or replace a newer overlay",
 
 test("cross-window progress cannot disable idle controls or finish another window's countdown", async () => {
   const run = await launchExactExtension();
+  const trace = { events: [] };
+  let popup;
   try {
     const page = await run.browser.newPage();
     await page.goto("http://127.0.0.1:4173/body");
+    // Identify the source before the second window opens the same fixture URL.
+    const source = await run.worker.evaluate(async () => {
+      const tabs = await chrome.tabs.query({});
+      const tab = tabs.find(candidate => candidate.url === "http://127.0.0.1:4173/body");
+      if (!tab) throw new Error("The source fixture tab was not found.");
+      globalThis.popupCancellationTrace = [];
+      chrome.runtime.onMessage.addListener((message, sender) => {
+        if (!["WINSHOT_START_CAPTURE", "WINSHOT_CANCEL_CAPTURE", "WINSHOT_GET_CAPTURE_STATUS"].includes(message.type)) return;
+        const entry = { type: message.type, at: Date.now(), senderUrl: sender.url };
+        globalThis.popupCancellationTrace.push(entry);
+        chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(active => {
+          entry.activeTabs = active.map(({ id, windowId, url }) => ({ id, windowId, url }));
+        }).catch(error => { entry.error = error.message; });
+      });
+      chrome.tabs.onCreated.addListener(tab => {
+        globalThis.popupCancellationTrace.push({ type: "tab-created", at: Date.now(), tabId: tab.id, windowId: tab.windowId, url: tab.pendingUrl || tab.url });
+      });
+      return { tabId: tab.id, windowId: tab.windowId };
+    });
+    trace.source = source;
     const otherId = await run.worker.evaluate(async () => {
       const other = await chrome.windows.create({ url: "http://127.0.0.1:4173/body", focused: false });
       return other.id;
     });
-    const popup = await openPopup(run, page);
+    trace.otherWindowId = otherId;
+    popup = await openPopup(run, page);
+    popup.on("close", () => trace.events.push({ type: "popup-closed", at: Date.now() }));
+    const originWindowId = await popup.evaluate(async () => {
+      const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+      globalThis.popupMessageTrace = [];
+      // Observe the real native request and reply; never replace its result.
+      chrome.runtime.sendMessage = (...args) => {
+        const entry = { type: args[0]?.type, at: Date.now() };
+        globalThis.popupMessageTrace.push(entry);
+        const pending = original(...args);
+        return pending.then(reply => {
+          entry.reply = reply;
+          entry.finishedAt = Date.now();
+          if (entry.type === "WINSHOT_CANCEL_CAPTURE") globalThis.stopReply = reply;
+          return reply;
+        }, error => { entry.error = error.message; throw error; });
+      };
+      return (await chrome.windows.getCurrent()).id;
+    });
+    trace.originWindowId = originWindowId;
+    expect(originWindowId).toBe(source.windowId);
+    expect(otherId).not.toBe(source.windowId);
     await run.worker.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_PROGRESS", windowId, state: "capturing", message: "Other window" }), otherId);
     expect(await popup.$eval("body", node => node.dataset.busy)).toBe("false");
     await popup.$eval("details", node => { node.open = true; });
-    await popup.select("#capture-delay", "3000");
+    // This test checks cancellation, not countdown accuracy. Leave enough time
+    // for physical-window focus and CDP round trips on a loaded Windows runner.
+    await popup.select("#capture-delay", "30000");
     await popup.click("[data-mode='visible']");
     await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    let pendingStatus;
+    await expect.poll(async () => {
+      pendingStatus = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" }));
+      return pendingStatus;
+    }).toMatchObject({ busy: true, message: expect.stringContaining("Waiting to capture") });
+    const beforeStop = {
+      activeTabs: await run.worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true })).map(({ id, windowId }) => ({ id, windowId }))),
+      status: pendingStatus
+    };
+    trace.beforeStop = beforeStop;
+    expect(beforeStop.activeTabs).toEqual([{ id: source.tabId, windowId: source.windowId }]);
+    expect(beforeStop.status).toMatchObject({ busy: true });
+    expect(beforeStop.status.message).toContain("Waiting to capture");
     await run.worker.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_PROGRESS", windowId, state: "complete", message: "Other complete" }), otherId);
     expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(true);
     await popup.click("#cancel");
+    await popup.waitForFunction(() => Boolean(globalThis.stopReply));
+    expect(await popup.evaluate(() => globalThis.stopReply)).toEqual({ cancelled: true });
     await expect.poll(() => popup.$eval("body", node => node.dataset.busy)).toBe("false");
-  } finally { await closeExactExtension(run); }
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(false);
+    await expect.poll(() => popup.evaluate(async () => (await chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" })).busy)).toBe(false);
+    expect(run.browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
+    // Read storage through the still-open popup so the assertion does not itself
+    // create a tab and close the native action popup.
+    expect(await popup.evaluate(async () => (await (await import("./store.js")).listRecords()).length)).toBe(0);
+  } finally {
+    trace.events.push({ type: "finished", at: Date.now(), popupClosed: popup?.isClosed() });
+    trace.worker = await run.worker.evaluate(() => globalThis.popupCancellationTrace).catch(error => ({ error: error.message }));
+    if (popup && !popup.isClosed()) trace.popup = await popup.evaluate(() => globalThis.popupMessageTrace).catch(error => ({ error: error.message }));
+    const tracePath = test.info().outputPath("cross-window-cancellation-trace.json");
+    fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+    fs.writeFileSync(tracePath, JSON.stringify(trace, null, 2));
+    await test.info().attach("cross-window-cancellation-trace", { path: tracePath, contentType: "application/json" });
+    await closeExactExtension(run);
+  }
 });
 
 test("last-used hotkey starts in an idle window while another window is counting down", async () => {

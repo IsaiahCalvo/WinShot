@@ -49,6 +49,59 @@ test('videos pause during capture, restore playback, and respect a user-paused v
   });
 });
 
+test('a later page pause overrides an earlier video play request during scrolling capture',async()=>{
+  await runCapture(async page=>page.evaluate(async()=>{
+    document.body.innerHTML='<div style="height:3500px;background:linear-gradient(white,#ccc)"><video id="stopped" muted loop width="180" height="100"></video><video id="last-play" muted loop width="180" height="100"></video></div>';
+    const canvas=document.createElement('canvas');canvas.width=180;canvas.height=100;
+    const context=canvas.getContext('2d'),stream=canvas.captureStream(30),recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'}),parts=[];
+    recorder.ondataavailable=event=>parts.push(event.data);const stopped=new Promise(resolve=>recorder.onstop=resolve);recorder.start();
+    for(let index=0;index<30;index++){context.fillStyle=index%2?'#04c870':'#0088ff';context.fillRect(0,0,180,100);await new Promise(resolve=>setTimeout(resolve,35));}
+    recorder.stop();await stopped;stream.getTracks().forEach(track=>track.stop());
+    const source=URL.createObjectURL(new Blob(parts,{type:'video/webm'}));
+    for(const video of document.querySelectorAll('video')){video.src=source;video.muted=true;await video.play();video.pause();video.currentTime=.2;}
+    window.originalPlay=HTMLMediaElement.prototype.play;window.originalPause=HTMLMediaElement.prototype.pause;
+    window.playbackRequests=[];let requested=false,paused=false;
+    addEventListener('scroll',()=>{
+      if(scrollY>500&&!requested){requested=true;document.querySelector('#stopped').play();document.querySelector('#last-play').play();window.playbackRequests.push('play');}
+      if(scrollY>1500&&!paused){paused=true;document.querySelector('#stopped').pause();window.playbackRequests.push('pause');}
+    });
+  }),async({page,record})=>{
+    await page.bringToFront();
+    const after=await page.evaluate(()=>({
+      stopped:{paused:document.querySelector('#stopped').paused,time:document.querySelector('#stopped').currentTime},
+      playOnlyPaused:document.querySelector('#last-play').paused,
+      playRestored:HTMLMediaElement.prototype.play===window.originalPlay,
+      pauseRestored:HTMLMediaElement.prototype.pause===window.originalPause,
+      requests:window.playbackRequests,
+      captureStyles:document.querySelectorAll('style[data-winshot-capture]').length
+    }));
+    expect(after.requests).toEqual(['play','pause']);
+    expect(after.stopped.paused,'the page explicitly paused this video after requesting play').toBe(true);
+    expect(after.stopped.time).toBeCloseTo(.2,2);
+    expect(after.playOnlyPaused,'capture-internal pauses must not erase a play-only request').toBe(false);
+    expect(after.playRestored).toBe(true);expect(after.pauseRestored).toBe(true);
+    expect(after.captureStyles).toBe(0);
+    expect(record.report.restoration).toBe('verified by read-back');
+  });
+});
+
+test('an installed version 2 media bridge is replaced before an upgraded capture',async()=>{
+  await runCapture(async page=>page.evaluate(()=>{
+    window.disposedMediaBridgeV2=false;window.obsoleteMediaRequests=0;
+    const receive=event=>{
+      if(event.source===window&&event.data?.source==='winshot-effects-request-v2'){
+        window.obsoleteMediaRequests++;
+        postMessage({source:'winshot-effects-response-v2',nonce:event.data.nonce,result:{error:'Obsolete media bridge'}},'*');
+      }
+    };
+    addEventListener('message',receive);
+    window[Symbol.for('winshot.page-effects')]={version:2,dispose(){window.disposedMediaBridgeV2=true;removeEventListener('message',receive);}};
+  }),async({page,record})=>{
+    expect(await page.evaluate(()=>({disposed:window.disposedMediaBridgeV2,obsoleteRequests:window.obsoleteMediaRequests,version:window[Symbol.for('winshot.page-effects')].version}))).toEqual({disposed:true,obsoleteRequests:0,version:3});
+    expect(record.report.restoration).toBe('verified by read-back');
+  });
+});
+
 test('clipboard and print contain the assembled full capture without editor controls',async()=>{
   await runCapture(null,async({browser,id,editor,record})=>{
     await editor.bringToFront();await editor.click('#copy-clipboard');

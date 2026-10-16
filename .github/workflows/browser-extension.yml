@@ -94,7 +94,7 @@ jobs:
           import { execFileSync } from 'node:child_process';
           const baseline='3e50145d782db99637a5d23d463950fc84005d40';
           for(const label of ['baseline','candidate'])fs.cpSync('browser-extension/dist/winshot-capture',`output/performance-${label}`,{recursive:true});
-          const files=['src/content.js','src/background.js'];
+          const files=['src/content.js','src/background.js','src/page-effects.js'];
           for(const file of files)fs.writeFileSync(`output/performance-baseline/${file}`,execFileSync('git',['show',`${baseline}:browser-extension/${file}`]));
           fs.writeFileSync('output/performance-baseline-source.json',JSON.stringify({baselineCommit:baseline,replacedFiles:files,allOtherFiles:'identical current build'},null,2));
           JS
