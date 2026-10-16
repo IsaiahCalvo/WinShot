@@ -143,11 +143,12 @@ async function startNativeTrace(trigger) {
   process.stdout.write(JSON.stringify({traceStarted:true,trigger,categories:includedCategories})+"\n");
 }
 async function stopTrace(reason) {
-  if (traceStartPromise) await limit(traceStartPromise,5000,"Pending native trace start").catch(error=>{result.traceStartError=String(error);});
-  if (!root || !traceActive || traceStopped) return;
+  if (traceStopped) return;
   traceStopped=true;
   result.traceStopReason=reason;
-  const stopDeadline=Math.min(performance.now()+TRACE_FLUSH_MS,deadline-5000);
+  if (traceStartPromise) await limit(traceStartPromise,5000,"Pending native trace start").catch(error=>{result.traceStartError=String(error);});
+  if (!root || !traceActive) return;
+  const stopDeadline=result.interrupted?performance.now()+TRACE_FLUSH_MS:Math.min(performance.now()+TRACE_FLUSH_MS,deadline-5000);
   const done = new Promise(resolve=>root.once("Tracing.tracingComplete", resolve));
   try {
     await limit(root.send("Tracing.end"),3000,"Tracing.end");
@@ -184,7 +185,12 @@ hardDeadline=setTimeout(()=>{
 },179000);
 emergency=setTimeout(async()=>{
   result.interrupted=true; result.interruptionReason="175 s safety shutdown";
-  captureController?.abort();save();await closeOwned();
+  captureController?.abort();
+  if (traceStopped || closing) return;
+  clearTimeout(hardDeadline);
+  await stopTrace("175 s safety shutdown");
+  save();
+  if (result.traceStopReason==="175 s safety shutdown") await closeOwned();
 },175000);
 try {
   const proxy=process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
@@ -338,6 +344,7 @@ try {
   result.error=String(error); result.completed=false;
   result.classification ||= result.captureAttempted?"capture-diagnostic-failed-or-timed-out":"setup-or-network-unavailable-before-capture";
 } finally {
+  clearTimeout(emergency);
   captureController?.abort();
   await saveWorker();
   await stopTrace(result.completed?"decoded editor ready":"diagnostic failed or timed out");
@@ -349,7 +356,6 @@ try {
   result.totalMs=performance.now()-startedAt;
   save();
   await closeOwned();
-  clearTimeout(emergency);
   clearTimeout(hardDeadline);
   if(result.tracePath&&!result.traceStreamTruncated){
     try{
