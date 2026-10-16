@@ -140,10 +140,14 @@ test("repeating Web Animations resume after capture while user-paused effects st
     paused.id = "paused"; paused.pause(); paused.currentTime = 400;
   }, async ({ record, page }) => {
     expect(record.state).toBe("complete");
+    // The editor becomes the active tab after capture. Chrome may suspend a
+    // background document's animation timeline even when playState is running.
+    await page.bringToFront();
     const before = await page.evaluate(() => document.getAnimations().map(a => ({ id: a.id, state: a.playState, time: a.currentTime })));
     expect(before.find(a => a.id === "running").state).toBe("running");
     expect(before.find(a => a.id === "paused")).toMatchObject({ state: "paused", time: 400 });
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await page.waitForFunction(time => document.getAnimations().find(a => a.id === "running").currentTime > time + 50,
+      { timeout: 3000 }, before.find(a => a.id === "running").time);
     const after = await page.evaluate(() => document.getAnimations().map(a => ({ id: a.id, state: a.playState, time: a.currentTime })));
     expect(after.find(a => a.id === "running").time).toBeGreaterThan(before.find(a => a.id === "running").time + 50);
     expect(after.find(a => a.id === "paused")).toMatchObject({ state: "paused", time: 400 });

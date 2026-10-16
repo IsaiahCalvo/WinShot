@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const platformSmoke = /popup uses the desktop icon|dynamic, horizontal, frame, and pixel-surface|URL batch enforces the 20-URL cap|wall-clock adjustments|transient screenshot readback/;
+const platformSmoke = /popup uses the desktop icon|dynamic, horizontal, frame, and pixel-surface|URL batch enforces the 20-URL cap|wall-clock adjustments|transient screenshot readback|repeating Web Animations resume/;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -19,7 +19,7 @@ export default defineConfig({
   projects: [
     {
       name: "extension-smoke",
-      testMatch: /(?:adversarial-reliability|adversarial-batch|puppeteer-extension)\.spec\.mjs/,
+      testMatch: /(?:adversarial-reliability|adversarial-scroll-motion|adversarial-batch|puppeteer-extension)\.spec\.mjs/,
       grep: platformSmoke,
       use: { browserName: "chromium" }
     },
