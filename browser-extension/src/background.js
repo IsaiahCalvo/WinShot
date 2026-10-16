@@ -430,7 +430,8 @@ async function storeScrollingCapture(session, controller) {
         if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) throw new Error("The page navigated during capture.");
         if (!result.stable) {
           allTilesStable = false;
-          session.report.warnings.push(`Tile ${index + 1} still had changing layout or loading images at the capture deadline.`);
+          session.report.warnings.push(`Tile ${index + 1} still had changing layout, loading images, or an unstabilized animation at the capture deadline.`);
+          for (const warning of result.warnings || []) if (!session.report.warnings.includes(warning)) session.report.warnings.push(warning);
         }
         for (const entry of result.semantics?.text || []) {
           const key = `${entry.text}|${entry.x.toFixed(1)}|${entry.y.toFixed(1)}`;

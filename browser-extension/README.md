@@ -37,6 +37,15 @@ go to a printed temporary folder. Failed or partial captures return a nonzero ex
 code. This is bounded to two minutes, 50,000 CSS pixels and 100 tiles per page;
 it uses a fresh profile with no account sessions and honors the environment's proxy.
 
+`npm run test:live:matrix -- <URLs>` tests the real popup's visible, full-page,
+dragged-region and exact-element modes on every public URL, saves PNGs and UI
+screenshots, parses full-page PDF exports, and checks restoration. Set
+`WINSHOT_LIVE_MODES=frame` for pages with a visible public iframe, or
+`WINSHOT_LIVE_BATCHES=1` to additionally test all-tabs and URL-list captures in
+both visible/full-page mode and an all-tabs PDF using the first three URLs.
+The matrix reports partial/failed captures as failures; blocked sites and missing
+frames are recorded explicitly, not counted as successful captures.
+
 ## Capture reliability and responsiveness
 
 Capture waits for visible images to load and decode within each tile's bounded
@@ -47,6 +56,14 @@ coordinates consistently; scroll position and original CSS are restored afterwar
 On fixed-height app layouts, Entire page detects a large central scrolling panel
 and captures its hidden content. The result states which area was captured; use
 Select an element when a different panel is wanted.
+
+Finite CSS/Web Animations entrance effects finish before capture so scroll-revealed
+content is visible. Repeating effects pause, and scroll/view-timeline effects use
+a temporary final-keyframe snapshot. Original animation state is restored afterward.
+Positioning is rechecked when nodes/classes/styles change, so headers that become
+fixed and late-inserted floating footers do not repeat across tiles. JavaScript
+canvas rendering and arbitrary scroll handlers cannot all be frozen; changing
+overlap pixels or effects that cannot be stabilized produce partial results.
 
 Stop remains visible in the popup, cancels delays as well as active captures, and
 new capture controls show a busy state immediately. Button feedback and the capture

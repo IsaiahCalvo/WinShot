@@ -59,6 +59,7 @@
 
   function rememberStyle(element, property, value, priority = "important") {
     if (!session) return;
+    if (element.style.getPropertyValue(property) === value && element.style.getPropertyPriority(property) === priority) return;
     let entry = session.changedStyles.get(element);
     if (!entry) {
       entry = new Map();
@@ -103,6 +104,23 @@
     for (const style of current.freezeStyles) {
       style.remove();
       if (style.isConnected) failures.push("freeze-style");
+    }
+
+    for (const animation of current.captureAnimations) animation.cancel();
+    for (const [animation, original] of current.changedAnimations) {
+      try {
+        animation.playbackRate = original.playbackRate;
+        animation.currentTime = original.currentTime;
+        let resume = original.playState === "running";
+        if (original.created && animation instanceof CSSAnimation) {
+          const style = getComputedStyle(animation.effect.target);
+          const index = style.animationName.split(",").map(name => name.trim()).indexOf(animation.animationName);
+          const states = style.animationPlayState.split(",").map(state => state.trim());
+          resume = states[Math.max(0, index) % states.length] === "running";
+        }
+        if (resume) animation.play();
+        else if (original.playState === "paused") animation.pause();
+      } catch { failures.push("animation"); }
     }
 
     if (current.owner instanceof Element && current.owner !== scrollingElement()) {
@@ -447,6 +465,7 @@
     let repeats = 0;
     while (performance.now() - start < timeoutMs) {
       await nextPaint();
+      refreshCaptureEffects();
       const metrics = currentMetrics();
       const pendingImages = visibleImages(metrics).some((image) => !image.complete);
       const signature = JSON.stringify([
@@ -457,7 +476,7 @@
       ]);
       if (signature === previous) repeats++;
       else repeats = 0;
-      if (repeats >= 1 && !pendingImages) {
+      if (repeats >= 1 && !pendingImages && !session.animationIssues.size) {
         // Image dimensions can be stable while their pixels are still loading.
         // Decode only images in this tile; offscreen lazy images must not block it.
         const remaining = Math.max(0, timeoutMs - (performance.now() - start));
@@ -470,7 +489,52 @@
       previous = signature;
       await sleep(60);
     }
-    return { stable: false, metrics: currentMetrics() };
+    return { stable: false, metrics: currentMetrics(), warnings: [...session.animationIssues] };
+  }
+
+  function pageAnimations() {
+    return [...new Set(session.roots.flatMap(root => root === document
+      ? document.getAnimations()
+      : [...root.querySelectorAll("*")].flatMap(node => node.getAnimations())))];
+  }
+
+  function rememberAnimation(animation, created) {
+    if (!session.changedAnimations.has(animation)) session.changedAnimations.set(animation, {
+      currentTime: animation.currentTime, playState: animation.playState,
+      playbackRate: animation.playbackRate, created
+    });
+    return session.changedAnimations.get(animation);
+  }
+
+  function refreshCaptureEffects() {
+    const nodes = [...session.pendingNodes];
+    session.pendingNodes.clear();
+    trackFloatingNodes(nodes);
+    setFloatingVisibility(session.atStart, session.atEnd);
+    for (const animation of pageAnimations()) {
+      if (session.captureAnimations.has(animation) || animation.playState === "finished" || animation.playState === "idle") continue;
+      const original = rememberAnimation(animation, true);
+      // Respect animations that the page/user had already paused before capture.
+      if (!original.created && original.playState === "paused") continue;
+      try {
+        if (animation.timeline && !(animation.timeline instanceof DocumentTimeline)) {
+          // A progress-based scroll/view timeline cannot be finished(). Pin its
+          // final keyframe with a temporary document-timeline effect instead.
+          if (!session.pinnedAnimations.has(animation)) {
+            const frame = { ...animation.effect.getKeyframes().at(-1) };
+            delete frame.offset; delete frame.computedOffset; delete frame.easing; delete frame.composite;
+            const pin = animation.effect.target.animate([frame, frame], { duration: 1, fill: "both", pseudoElement: animation.effect.pseudoElement });
+            pin.pause(); pin.currentTime = 1;
+            session.captureAnimations.add(pin);
+            session.pinnedAnimations.add(animation);
+          }
+        } else if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) {
+          // Pausing an entrance animation at opacity:0 silently loses content.
+          // Complete finite effects; pause repeating effects at their current frame.
+          animation.finish();
+        } else animation.pause();
+      } catch { session.animationIssues.add("An animation could not be stabilized."); }
+    }
   }
 
   function visibleImages(metrics) {
@@ -712,13 +776,18 @@
     }
 
     const nodes = session.roots.flatMap((root) => [...root.querySelectorAll(root === document ? "body *" : "*")]);
+    trackFloatingNodes(nodes);
+  }
+
+  function trackFloatingNodes(nodes) {
     const cap = Math.min(nodes.length, 25000);
     for (let i = 0; i < cap; i++) {
       const node = nodes[i];
       const position = getComputedStyle(node).position;
       if (position !== "fixed" && position !== "sticky") continue;
       // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
-      if (classification.fixedTarget && (node === classification.targetElement || node.contains(classification.targetElement))) continue;
+      if (!node.isConnected) continue;
+      if (session.fixedTarget && (node === session.targetElement || node.contains(session.targetElement))) continue;
       const rect = node.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       if (position === "sticky") {
@@ -730,7 +799,10 @@
       }
       const tall = rect.height > innerHeight * 0.5;
       const anchor = tall ? "overlay" : rect.top + rect.height / 2 < innerHeight / 2 ? "top" : "bottom";
-      session.floating.push({ node, anchor });
+      if (!session.floatingNodes.has(node)) {
+        session.floating.push({ node, anchor });
+        session.floatingNodes.add(node);
+      }
     }
   }
 
@@ -762,14 +834,34 @@
       freezeStyles: [],
       roots: openRoots(),
       floating: [],
+      floatingNodes: new Set(),
+      pendingNodes: new Set(),
+      changedAnimations: new Map(),
+      captureAnimations: new Set(),
+      pinnedAnimations: new Set(),
+      animationIssues: new Set(),
+      atStart: true,
+      atEnd: false,
       mutationCount: 0,
       lastHeartbeat: Date.now(),
       watchdog: 0,
       observer: null
     };
 
+    for (const animation of pageAnimations()) rememberAnimation(animation, false);
     freezePage(classification, request);
-    session.observer = new MutationObserver(() => { if (session) session.mutationCount++; });
+    session.observer = new MutationObserver(mutations => {
+      if (!session) return;
+      session.mutationCount++;
+      for (const mutation of mutations) {
+        const candidates = mutation.type === "childList" ? [...mutation.addedNodes] : [mutation.target];
+        for (const node of candidates) {
+          if (!(node instanceof Element)) continue;
+          session.pendingNodes.add(node);
+          for (const child of node.querySelectorAll("*")) session.pendingNodes.add(child);
+        }
+      }
+    });
     for (const root of session.roots) {
       session.observer.observe(root === document ? document.documentElement : root, { childList: true, subtree: true, attributes: true });
     }
@@ -789,7 +881,14 @@
 
   function setFloatingVisibility(atStart, atEnd) {
     if (!session) return;
+    session.atStart = atStart;
+    session.atEnd = atEnd;
     for (const item of session.floating) {
+      if (getComputedStyle(item.node).position !== "fixed") {
+        const original = session.changedStyles.get(item.node)?.get("visibility");
+        if (original) rememberStyle(item.node, "visibility", original.value, original.priority);
+        continue;
+      }
       // Fixed header appears once (first tile), fixed footer/chat bar once (last tile,
       // which lands at the true page bottom). Viewport-covering overlays only in tile 1.
       const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd) || (item.anchor === "overlay" && atStart);
