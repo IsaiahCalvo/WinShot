@@ -90,7 +90,7 @@ jobs:
         shell: bash
         env:
           WINSHOT_LIVE_ARTIFACT_ROOT: ${{ runner.temp }}
-        # Keep the selected iframe handle across startup, including duplicate URLs.
+        # Use CPU composition with SwiftShader on isolated Windows test browsers.
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';
