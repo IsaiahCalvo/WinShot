@@ -862,7 +862,9 @@ async function waitCaptureDelay(tab, delayMs) {
     }
     throwIfAborted(controller.signal);
     const current = await chrome.tabs.get(tab.id);
-    if (!current?.id || current.url !== tab.url) throw new Error("The page changed during the capture delay.");
+    // History API and fragment updates change tab.url without navigating. Real
+    // navigations already abort this delay via onBeforeNavigate.
+    if (!current?.id) throw new Error("The page changed during the capture delay.");
   } finally {
     pendingCaptures.delete(tab.id);
     updateBadge();
