@@ -16,6 +16,7 @@ export async function launchCaptureBrowser(userDataDir, viewport = { width: 1200
       ...(process.env.WINSHOT_TEST_SOFTWARE_GL === "1"
         ? ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
         : []),
+      ...(process.env.WINSHOT_TEST_SOFTWARE_COMPOSITING === "1" ? ["--disable-gpu-compositing"] : []),
       ...args
     ]
   });

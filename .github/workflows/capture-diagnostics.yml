@@ -6,6 +6,40 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-lenis-compositor:
+    strategy:
+      fail-fast: false
+      matrix:
+        software-compositor: ['0', '1']
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      WINSHOT_TEST_SOFTWARE_GL: '1'
+      WINSHOT_TEST_SOFTWARE_COMPOSITING: ${{ matrix.software-compositor }}
+      WINSHOT_LIVE_MODES: full-page
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:extension
+      - name: Prove software WebGL paints real pixels
+        run: npx playwright test -c browser-extension/playwright.config.mjs --project=extension-smoke --grep "WebGL canvas" --reporter=list --output=output/compositor-webgl
+      - name: Measure the real Lenis capture
+        shell: bash
+        env:
+          WINSHOT_LIVE_ARTIFACT_ROOT: ${{ runner.temp }}
+        run: node browser-extension/tools/live-matrix.mjs https://lenis.dev/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-lenis-compositor-${{ matrix.software-compositor }}
+          path: |
+            ${{ runner.temp }}/winshot-live-matrix-*
+            output/compositor-webgl
+          if-no-files-found: warn
   review-regressions:
     strategy:
       fail-fast: false

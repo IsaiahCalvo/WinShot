@@ -184,6 +184,15 @@ try {
         result.error = error.message;
         result.frameDocumentsAtFailure = page.frames().filter(frame => frame !== page.mainFrame()).map(frame => ({ url: frame.url(), name: frame.name() }));
         result.popupStatus = await ui?.$eval("#status", node => node.textContent).catch(() => null);
+        result.lastStoredCapture = await Promise.race([
+          ui?.evaluate(async () => {
+            const store = await import(chrome.runtime.getURL('src/store.js'));
+            const record = (await store.listRecords()).sort((a,b) => b.startedAt.localeCompare(a.startedAt))[0];
+            if (!record) return null;
+            return { state:record.state, report:record.report, limits:record.limits, sourceUrl:record.sourceUrl, startedAt:record.startedAt, finishedAt:record.finishedAt, error:record.error };
+          }).catch(() => null),
+          new Promise(resolve => setTimeout(() => resolve(null), 3000))
+        ]);
         await page.screenshot({ path: path.join(folder, "failure.png") }).catch(() => {});
       }
       finally {
