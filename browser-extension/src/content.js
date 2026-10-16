@@ -953,7 +953,16 @@
     for (let i = 0; i < cap; i++) {
       const node = nodes[i];
       const position = getComputedStyle(node).position;
-      if (position !== "fixed" && position !== "sticky") continue;
+      if (position !== "fixed" && position !== "sticky") {
+        // Mutation-added children of an already-tracked wrapper are not fixed,
+        // so they would never enter floatingVisibility. An explicit
+        // visibility:visible descendant would then paint through later tiles.
+        if (!node.isConnected || session.floatingVisibility.has(node)) continue;
+        let owner = composedParent(node);
+        while (owner && !session.floatingNodes.has(owner)) owner = composedParent(owner);
+        if (owner) rememberFloatingTree(node);
+        continue;
+      }
       // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
       if (!node.isConnected) continue;
       if (session.fixedTarget && (node === session.targetElement || node.contains(session.targetElement))) continue;

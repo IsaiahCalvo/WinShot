@@ -727,7 +727,10 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0, tile
         if (!(await promoteCaptureTiles(session.id, stagedId))) throw new DOMException("This capture was deleted from history.", "AbortError");
       } else keepPrevious("The recapture did not produce a complete image.");
     } catch (error) {
-      if (controller.signal.aborted || error.name === "AbortError") throw error;
+      if (controller.signal.aborted || error.name === "AbortError") {
+        keepPrevious("The recapture was cancelled.");
+        throw error;
+      }
       keepPrevious("The recapture failed: " + friendlyError(error) + ".");
     } finally {
       session.limits = limits;
