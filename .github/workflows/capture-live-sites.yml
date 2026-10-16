@@ -1,0 +1,100 @@
+name: capture-live-sites
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/capture-live-sites.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  public-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: four-modes
+            modes: visible,full-page,region,element
+            batches: '0'
+            urls: >-
+              https://example.com
+              https://en.wikipedia.org/wiki/Screenshot
+              https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/position
+              https://github.com/microsoft/playwright
+              https://react.dev/learn
+              https://tailwindcss.com/docs/installation/using-vite
+              https://scroll-driven-animations.style/
+              https://infinite-scroll.com/
+              https://web.dev/learn/css/animations
+              https://gsap.com/docs/v3/Plugins/ScrollTrigger/
+          - name: motion-and-scrollers
+            modes: full-page
+            batches: '0'
+            urls: >-
+              https://gsap.com/
+              https://lenis.darkroom.engineering/
+              https://infinite-scroll.com/demo/full-page/
+              https://infinite-scroll.com/demo/element/
+          - name: frames
+            modes: frame
+            batches: '0'
+            urls: >-
+              https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe
+              https://www.w3schools.com/html/html_iframe.asp
+              https://web.dev/learn/css/animations
+          - name: batches
+            modes: visible
+            batches: '1'
+            urls: >-
+              https://example.com
+              https://en.wikipedia.org/wiki/Screenshot
+              https://react.dev/learn
+    env:
+      WINSHOT_LIVE_MODES: ${{ matrix.modes }}
+      WINSHOT_LIVE_BATCHES: ${{ matrix.batches }}
+      WINSHOT_LIVE_URLS: ${{ matrix.urls }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Allow sandboxed test Chrome user namespaces
+        shell: bash
+        run: |
+          capture_chrome_path="$(node --input-type=module -e 'import puppeteer from "puppeteer"; console.log(await puppeteer.executablePath());')"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-live-test "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-live-test > /dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/winshot-live-test
+      - run: npm run build:extension
+      - name: Capture public websites through the real popup
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          const urls = process.env.WINSHOT_LIVE_URLS.trim().split(/\s+/);
+          const result = spawnSync(process.execPath, ['browser-extension/tools/live-matrix.mjs', ...urls], { stdio: 'inherit' });
+          process.exit(result.status ?? 1);
+          JS
+      - name: Verify batches captured the intended pages
+        if: matrix.batches == '1'
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const root = fs.readdirSync('/tmp').find(name => name.startsWith('winshot-live-matrix-'));
+          const results = JSON.parse(fs.readFileSync(`/tmp/${root}/results.json`, 'utf8'));
+          const titles = new Map(results.filter(r => r.source && !r.error).map(r => [new URL(r.url).href, r.source.title]));
+          for (const batch of results.filter(r => r.batch)) {
+            for (const item of batch.results || []) {
+              if (!titles.has(new URL(item.url).href) || item.title !== titles.get(new URL(item.url).href)) throw new Error(`Unexpected batch page: ${JSON.stringify(item)}`);
+            }
+          }
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-capture-${{ matrix.name }}
+          path: /tmp/winshot-live-matrix-*
+          if-no-files-found: warn
