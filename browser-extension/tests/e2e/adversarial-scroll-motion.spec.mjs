@@ -23,8 +23,10 @@ async function runFixture(setup, assertions, data = null) {
     const editorTarget = browser.waitForTarget(t => t.type() === "page" && t.url().includes("/src/editor.html?id="), { timeout: 90_000 });
     await popup.click("[data-mode='full-page']");
     const editor = await (await editorTarget).asPage();
-    await editor.waitForSelector("#preview img");
+    await editor.waitForSelector("#state:not(:empty)");
     const record = await editor.evaluate(async () => (await import(chrome.runtime.getURL("src/store.js"))).getRecord(new URL(location.href).searchParams.get("id")));
+    expect(record.report.dimensionsPx, record.error).toBeTruthy();
+    await editor.waitForSelector("#preview img");
     const pixels = await editor.evaluate(async () => {
       const tiles = await (await import(chrome.runtime.getURL("src/store.js"))).getTiles(new URL(location.href).searchParams.get("id"));
       const width = Math.max(...tiles.map(t => t.destXPx + t.widthPx));
@@ -146,4 +148,32 @@ test("repeating Web Animations resume after capture while user-paused effects st
     expect(after.find(a => a.id === "running").time).toBeGreaterThan(before.find(a => a.id === "running").time + 50);
     expect(after.find(a => a.id === "paused")).toMatchObject({ state: "paused", time: 400 });
   });
+});
+
+for (const change of ["fragment", "history-path"]) {
+  test(`scroll-driven ${change} URL updates do not masquerade as a document navigation`, async () => {
+    await runFixture(change => {
+      document.body.innerHTML = '<style>body{margin:0;height:4800px;background:white}</style>';
+      addEventListener("scroll", () => {
+        const page = Math.floor(scrollY / 700);
+        const url = change === "fragment" ? `#section-${page}` : `/article/page-${page}`;
+        history.replaceState({ page }, "", url);
+      });
+    }, async ({ record }) => {
+      expect(record.state, JSON.stringify(record.report)).toBe("complete");
+      expect(record.report.tileCount).toBeGreaterThan(4);
+      expect(record.report.warnings.join(" ")).toMatch(/URL.*document identity/i);
+    }, change);
+  });
+}
+
+test("lazy embedded documents may load during an outer-page capture without aborting it", async () => {
+  await runFixture(() => {
+    document.body.innerHTML = '<style>body{margin:0;height:4800px;background:white}iframe{position:absolute;top:1400px;left:500px;width:500px;height:250px}</style>';
+    addEventListener("scroll", () => {
+      if (scrollY > 600 && !document.querySelector("iframe")) {
+        const frame = document.createElement("iframe"); frame.src = "/frame"; document.body.append(frame);
+      }
+    });
+  }, async ({ record }) => { expect(record.state, JSON.stringify(record.report)).toBe("complete"); });
 });

@@ -56,11 +56,15 @@ try {
       fs.mkdirSync(folder, { recursive: true });
       const page = await browser.newPage();
       let editor, ui, result = { url, mode, folder };
-      const pageErrors = [], extensionErrors = [], sourceConsole = [];
+      const pageErrors = [], extensionErrors = [], sourceConsole = [], urlChanges = [];
       const workerErrorIndex = workerErrors.length;
       page.on("pageerror", error => pageErrors.push(error.message));
       page.on("console", message => { if (["error", "warn"].includes(message.type()) && sourceConsole.length < 50) sourceConsole.push({ level: message.type(), message: message.text() }); });
       try {
+        const navigationClient = await page.createCDPSession();
+        await navigationClient.send("Page.enable");
+        navigationClient.on("Page.navigatedWithinDocument", event => urlChanges.push({ url: event.url, type: event.navigationType, frameId: event.frameId }));
+        navigationClient.on("Page.frameNavigated", ({ frame }) => { if (!frame.parentId) urlChanges.push({ url: frame.url, type: "document", frameId: frame.id }); });
         await page.setCacheEnabled(false);
         const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
         if (!response?.ok() && response?.status() !== 304) throw new Error(`HTTP ${response?.status() || "no response"}`);
@@ -87,7 +91,7 @@ try {
             const choices = [];
             for (let y = 180; y < innerHeight - 150; y += 100) for (let x = 160; x < innerWidth - 150; x += 140) {
               const node = document.elementFromPoint(x, y);
-              if (!node || node.closest("nav,header,footer,button,dialog") || ["BODY", "HTML", "IFRAME", "FRAME", "OBJECT", "EMBED"].includes(node.tagName)) continue;
+              if (!node || node.closest("nav,footer,button,dialog") || ["BODY", "HTML", "IFRAME", "FRAME", "OBJECT", "EMBED"].includes(node.tagName)) continue;
               const rect = node.getBoundingClientRect();
               if (rect.width > 100 && rect.height > 28 && rect.height < 20000) choices.push({ x, y, tag: node.tagName, width: rect.width, height: rect.height });
             }
@@ -171,6 +175,7 @@ try {
         if (extensionErrors.length && !result.error) result.error = `Extension errors: ${extensionErrors.join("; ")}`;
         result.pageErrors = [...new Set(pageErrors)]; result.extensionErrors = [...new Set(extensionErrors)];
         result.sourceConsole = sourceConsole;
+        result.urlChanges = urlChanges; result.finalUrl = page.url();
         results.push(result); console.log(JSON.stringify(result));
         await ui?.close().catch(() => {}); await editor?.close().catch(() => {}); await page.close().catch(() => {});
         fs.writeFileSync(path.join(output, "results.json"), JSON.stringify(results, null, 2));

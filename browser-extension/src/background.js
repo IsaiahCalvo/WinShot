@@ -146,9 +146,6 @@ async function assertStillActive(session) {
   if (tab?.id !== session.tabId) {
     throw new Error("The active tab changed during capture. WinShot stopped to avoid capturing pixels from the wrong page.");
   }
-  if (tab.url && session.sourceUrl && tab.url !== session.sourceUrl) {
-    throw new Error("The page navigated during capture. WinShot stopped and restored the old page state where possible.");
-  }
 }
 
 function throwIfAborted(signal) {
@@ -202,6 +199,7 @@ async function takeScreenshot(windowId, minIntervalMs, signal, session) {
   }
   // Verify the intended tab was still active when the pixels were taken — a tab
   // switch in the throttle gap would silently stitch another site's pixels.
+  throwIfAborted(signal);
   if (session) await assertStillActive(session);
   return await (await fetch(dataUrl)).blob();
 }
@@ -367,6 +365,7 @@ async function storeScrollingCapture(session, controller) {
     }, session.frameId);
     prepared = true;
     let captureMetrics = prep.metrics;
+    const documentToken = prep.metrics.documentToken;
     if (session.frameId) {
       frameHost = await locateFrameChain(session);
       frameHostPrepared = frameHost.preparedFrameIds;
@@ -438,7 +437,11 @@ async function storeScrollingCapture(session, controller) {
           viewport: viewportSize,
           settleTimeoutMs: session.limits.settleTimeoutMs
         }, session.frameId);
-        if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) throw new Error("The page navigated during capture.");
+        if (result.metrics.documentToken !== documentToken) throw new Error("The document changed during capture.");
+        if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) {
+          const warning = "The page updated its URL during scrolling; document identity was verified for every tile.";
+          if (!session.report.warnings.includes(warning)) session.report.warnings.push(warning);
+        }
         if (!result.stable) {
           allTilesStable = false;
           session.report.warnings.push(`Tile ${index + 1} still had changing layout, loading images, or an unstabilized animation at the capture deadline.`);
@@ -694,11 +697,32 @@ async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
   throwIfAborted(signal);
   return await new Promise((resolve, reject) => {
     let settled = false;
-    const ready = (tab) => tab.status === "complete" && supportedBatchUrl(tab.url) && !tab.discarded && !tab.pendingUrl;
+    const usable = tab => supportedBatchUrl(tab.url) && !tab.discarded && !tab.pendingUrl;
+    let probing = false;
+    let inspectAgain = false;
+    const inspect = async tab => {
+      if (settled || !usable(tab)) return;
+      if (tab.status === "complete") return finish(null, tab);
+      if (probing) { inspectAgain = true; return; }
+      probing = true;
+      try {
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [0] }, injectImmediately: true,
+          func: () => ({ ready: document.readyState !== "loading" && Boolean(document.body), url: location.href })
+        });
+        const latest = await chrome.tabs.get(tabId);
+        if (result?.result?.ready && usable(latest) && result.result.url === latest.url) finish(null, latest);
+      } catch { /* A provisional navigation can temporarily reject scripting. */ }
+      finally {
+        probing = false;
+        if (inspectAgain && !settled) { inspectAgain = false; chrome.tabs.get(tabId).then(inspect, finish); }
+      }
+    };
     const timeout = setTimeout(() => finish(new Error("The page did not finish loading within 30 seconds.")), timeoutMs);
     const onUpdated = (updatedId, info, tab) => {
-      if (updatedId === tabId && ready(tab)) finish(null, tab);
+      if (updatedId === tabId) inspect(tab);
     };
+    const onDomReady = details => { if (details.tabId === tabId && details.frameId === 0) chrome.tabs.get(tabId).then(inspect, finish); };
     const onRemoved = (removedId) => { if (removedId === tabId) finish(new Error("The tab was closed before loading finished.")); };
     const onAbort = () => finish(new DOMException("Batch capture cancelled.", "AbortError"));
     const finish = (error, tab) => {
@@ -707,15 +731,17 @@ async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
       clearTimeout(timeout);
       chrome.tabs.onUpdated.removeListener(onUpdated);
       chrome.tabs.onRemoved.removeListener(onRemoved);
+      chrome.webNavigation.onDOMContentLoaded.removeListener(onDomReady);
       signal.removeEventListener("abort", onAbort);
       if (error) reject(error); else resolve(tab);
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.webNavigation.onDOMContentLoaded.addListener(onDomReady);
     signal.addEventListener("abort", onAbort, { once: true });
     // Subscribe before reading: completion can otherwise fall into the gap
     // between tabs.get and addListener, leaving an already loaded tab waiting.
-    chrome.tabs.get(tabId).then((tab) => { if (ready(tab)) finish(null, tab); }, finish);
+    chrome.tabs.get(tabId).then(inspect, finish);
   });
 }
 
@@ -1075,10 +1101,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes["winshot:capture-settings"]) refreshContextMenu().catch(() => {});
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.url || changeInfo.status === "loading") pendingCaptures.get(tabId)?.controller.abort();
+chrome.webNavigation.onBeforeNavigate.addListener(({ tabId, frameId }) => {
+  // tabs.onUpdated also reports History API changes and loading child frames.
+  // Only a real navigation of the captured document (or its top page) aborts.
+  if (frameId === 0) pendingCaptures.get(tabId)?.controller.abort();
   const active = activeCaptures.get(tabId);
-  if (!active || (!changeInfo.url && changeInfo.status !== "loading")) return;
+  if (!active || (frameId !== 0 && frameId !== active.session.frameId)) return;
   active.failureReason = "The page navigated during capture. WinShot stopped without claiming a complete image.";
   active.controller.abort();
 });

@@ -140,6 +140,35 @@ async function activeTabUrl(run) {
 
 // ---------------------------------------------------------------------------
 
+test("a parsed page with an unfinished hidden resource remains usable in an all-tabs batch", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.setRequestInterception(true);
+    page.on("request", request => {
+      if (request.url().endsWith("/unfinished.png")) return;
+      if (request.url().endsWith("/pending-resource")) return request.respond({ contentType: "text/html", body: '<!doctype html><title>READY DOCUMENT</title><h1>READY DOCUMENT</h1><img style="display:none" src="/unfinished.png">' });
+      return request.continue();
+    });
+    await page.goto(`${FIX}/pending-resource`, { waitUntil: "domcontentloaded" });
+    expect(await page.evaluate(() => document.readyState)).toBe("interactive");
+    const target = batchTarget(run);
+    const popup = await openPopup(run, page);
+    await popup.select("#batch-mode", "visible");
+    const start = performance.now();
+    await popup.click("#all-tabs");
+    const summary = await (await target).asPage();
+    await summary.waitForSelector(".item.complete", { timeout: 10_000 });
+    expect(performance.now() - start).toBeLessThan(10_000);
+    const batch = await summary.evaluate(async () => {
+      const key = `batch:${new URL(location.href).searchParams.get("id")}`;
+      return (await chrome.storage.local.get(key))[key];
+    });
+    expect(batch.results).toHaveLength(1);
+    expect(batch.results[0]).toMatchObject({ title: "READY DOCUMENT", state: "complete" });
+  } finally { await closeExactExtension(run); }
+});
+
 test("all-tabs batch skips restricted tabs with honest reasons and renders an accurate results page", async () => {
   const run = await launchExactExtension();
   try {

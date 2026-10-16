@@ -81,6 +81,11 @@ exceed that browser-wide quota.
 Capture timing uses a monotonic clock, and temporary Chrome quota/readback failures
 get one bounded retry. URL batches subscribe before checking load completion and
 recheck tabs after activation so reloading or discarded pages are not captured early.
+Batch readiness accepts a parsed top document while offscreen embeds are still
+loading; visible images still use the capture engine's bounded readiness checks.
+Same-document History API/fragment changes are allowed and reported. Every tile
+verifies a per-document identity; real navigation of the top or selected frame
+still aborts, while unrelated child-frame loads do not.
 
 The build extracts all toolbar/package icons directly from the Windows app's
 `src/WinShot/Assets/winshot.ico`; popup/editor branding and page icons use the same

@@ -3,6 +3,7 @@
   globalThis.__winshotCaptureScriptInstalled = true;
 
   const WATCHDOG_MS = 9000;
+  const DOCUMENT_TOKEN = [...crypto.getRandomValues(new Uint32Array(4))].join("-");
   const PICKER_Z = "2147483647";
   let session = null;
   let frameHostSession = null;
@@ -455,6 +456,7 @@
       reachedX,
       reachedY,
       mutationCount: session.mutationCount,
+      documentToken: DOCUMENT_TOKEN,
       url: location.href,
       frame: frameContext()
     };

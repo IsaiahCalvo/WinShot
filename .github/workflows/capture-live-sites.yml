@@ -37,7 +37,7 @@ jobs:
               https://gsap.com/
               https://lenis.darkroom.engineering/
               https://infinite-scroll.com/demo/full-page/
-              https://infinite-scroll.com/demo/element/
+              https://infinite-scroll.com/options.html#elementscroll
           - name: frames
             modes: frame
             batches: '0'
