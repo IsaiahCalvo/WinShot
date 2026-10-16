@@ -68,6 +68,8 @@ async function showVideo(record, blob) {
   // Prepare the complete media surface off-screen. A metadata/seek failure must
   // not replace the only in-memory source or leave the visible controls broken.
   const nextRecord = { ...record, persisted: record.persisted !== false };
+  if (!Number.isFinite(nextRecord.duration) || nextRecord.duration < .1)
+    throw new Error("A playable video track of at least 0.1 seconds could not be read from this file.");
   nextRecord.trimStart = Math.max(0, Math.min(nextRecord.duration - .1, nextRecord.trimStart || 0));
   nextRecord.trimEnd = Math.max(nextRecord.trimStart + .1, Math.min(nextRecord.duration, nextRecord.trimEnd || nextRecord.duration));
   const staged = preview.cloneNode(false), nextUrl = URL.createObjectURL(blob);
@@ -114,8 +116,11 @@ async function showVideo(record, blob) {
 async function recoverRecordingPreview(error, recoveryBlob) {
   let extra = "";
   const hadPrevious = Boolean(currentBlob);
+  const inspected = error.inspectedRecord;
   try {
-    if (currentBlob) await showVideo(current, currentBlob);
+    // Do not reopen bytes we already failed to preview. A duration-less stub
+    // would seek to NaN; even a measured one can stall Save original on seeked.
+    if (currentBlob && !current?.previewUnavailable) await showVideo(current, currentBlob);
     else { releasePreview(); preview.hidden = true; $("#empty-state").hidden = false; }
   } catch {
     // Restoration is best effort. Keep current/currentBlob even if the browser
@@ -127,6 +132,8 @@ async function recoverRecordingPreview(error, recoveryBlob) {
       // A recording can be downloadable even if Chrome cannot reopen it. Keep
       // its raw bytes without claiming it is a playable editable history item.
       current = { id: crypto.randomUUID(), title: `Recording recovery ${new Date().toLocaleString()}`, originalName: "recording.webm", persisted: false, previewUnavailable: true };
+      if (Number.isFinite(inspected?.duration) && inspected.width && inspected.height)
+        Object.assign(current, { duration: inspected.duration, width: inspected.width, height: inspected.height });
       currentBlob = recoveryBlob;
       $("#video-title").value = current.title;
       $("#video-meta").textContent = `Preview unavailable · ${(recoveryBlob.size / 1024 / 1024).toFixed(1)} MB`;
@@ -188,7 +195,8 @@ async function keepVideo(blob, { title, knownDuration, source = "import", origin
   let failed = false;
   try { record = await saveVideo(blob, record); }
   catch { record.persisted = false; failed = true; }
-  await showVideo(record, blob);
+  try { await showVideo(record, blob); }
+  catch (error) { throw Object.assign(error, { inspectedRecord: record }); }
   message(failed ? "Video opened, but history storage is full or unavailable. Save the original before closing this tab, or free space and retry." : "Video saved locally. Preview it, trim a range, then export.", failed);
 }
 $("#import-video").addEventListener("click", () => $("#video-file").click());
