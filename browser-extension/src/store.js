@@ -113,6 +113,18 @@ export async function getTile(captureId, index) {
   }
 }
 
+export async function clearCaptureTiles(captureId) {
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(TILES, "readwrite"), store = tx.objectStore(TILES);
+    const keys = await requestResult(store.index("byCapture").getAllKeys(IDBKeyRange.only(captureId)));
+    for (const key of keys) store.delete(key);
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+
 // Delete all records finished before `cutoffIso`, their tiles, and any orphaned tiles
 // whose parent record no longer exists. Returns the number of records removed.
 export async function pruneOlderThan(cutoffIso) {

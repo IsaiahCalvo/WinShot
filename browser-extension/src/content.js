@@ -13,6 +13,19 @@
   const cancelledPickerIds = new Set();
   const announcedFrames = new Map();
 
+  function pageEffects(action, id) {
+    return new Promise(resolve => {
+      const nonce = crypto.randomUUID();
+      const done = result => { clearTimeout(timer); removeEventListener("message", receive); resolve(result); };
+      const receive = event => {
+        if (event.source === window && event.data?.source === "winshot-effects-response" && event.data.nonce === nonce) done(event.data.result);
+      };
+      const timer = setTimeout(() => done({ error: "The page animation bridge did not respond." }), 700);
+      addEventListener("message", receive);
+      postMessage({ source: "winshot-effects-request", action, id, nonce }, "*");
+    });
+  }
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const nextPaint = () => new Promise((resolve) => {
     let frame;
@@ -41,6 +54,33 @@
     if (node?.parentElement) return node.parentElement;
     const root = node?.getRootNode?.();
     return root instanceof ShadowRoot ? root.host : null;
+  }
+
+  function hasTransparentAncestor(node) {
+    for (let current = node; current instanceof Element; current = composedParent(current)) {
+      if (Number(getComputedStyle(current).opacity) === 0) return true;
+    }
+    return false;
+  }
+
+  function floatingBounds(node) {
+    const style = getComputedStyle(node), own = node.getBoundingClientRect();
+    let bounds = style.visibility === "visible" && own.width > 0 && own.height > 0 ? own : null;
+    if (!bounds || style.overflowX === "visible" || style.overflowY === "visible") {
+      const children = [...node.querySelectorAll("*")];
+      if (node.shadowRoot) children.push(...node.shadowRoot.querySelectorAll("*"));
+      for (const child of children) {
+        const rect = child.getBoundingClientRect();
+        if (!rect.width || !rect.height || getComputedStyle(child).visibility !== "visible" || hasTransparentAncestor(child)) continue;
+        if (!bounds) bounds = rect;
+        else {
+          const left = Math.min(bounds.left, rect.left), top = Math.min(bounds.top, rect.top);
+          const right = Math.max(bounds.right, rect.right), bottom = Math.max(bounds.bottom, rect.bottom);
+          bounds = { left, top, right, bottom, width: right - left, height: bottom - top };
+        }
+      }
+    }
+    return bounds;
   }
 
   function openRoots() {
@@ -85,7 +125,7 @@
     return ranges;
   }
 
-  function restore(reason = "requested") {
+  async function restore(reason = "requested") {
     if (!session) return { restored: true, reason, failures: [] };
     const current = session;
     session = null;
@@ -157,6 +197,8 @@
       if (current.targetAttributeBefore === null) current.targetElement.removeAttribute("data-winshot-target");
       else current.targetElement.setAttribute("data-winshot-target", current.targetAttributeBefore);
     }
+    const effects = await pageEffects("restore", current.id);
+    if (effects.error || effects.restored === false) failures.push("page-animation-state");
     return { restored: failures.length === 0, reason, failures };
   }
 
@@ -462,8 +504,9 @@
       mutationCount: session.mutationCount,
       floatingRects: session.floating.flatMap(({ node }) => {
         const style = getComputedStyle(node);
-        if (style.position !== "fixed" || style.visibility !== "visible" || Number(style.opacity) === 0) return [];
-        const rect = node.getBoundingClientRect();
+        if (style.position !== "fixed" || hasTransparentAncestor(node)) return [];
+        const rect = floatingBounds(node);
+        if (!rect) return [];
         const left = Math.max(rect.left, clip.left), top = Math.max(rect.top, clip.top);
         const right = Math.min(rect.right, clip.left + clip.width), bottom = Math.min(rect.bottom, clip.top + clip.height);
         return right > left && bottom > top ? [{ left: left - clip.left, top: top - clip.top, width: right - left, height: bottom - top }] : [];
@@ -480,6 +523,7 @@
     let repeats = 0;
     while (performance.now() - start < timeoutMs) {
       await nextPaint();
+      await pageEffects("update", session.id);
       refreshCaptureEffects();
       const metrics = currentMetrics();
       const pendingImages = visibleImages(metrics).some((image) => !image.complete);
@@ -570,7 +614,7 @@
     return session.roots.flatMap((root) => [...root.querySelectorAll("img[src], img[srcset]")]).filter((image) => {
       const rect = image.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && rect.right > left && rect.bottom > top &&
-        rect.left < left + width && rect.top < top + height && getComputedStyle(image).visibility !== "hidden";
+        rect.left < left + width && rect.top < top + height && getComputedStyle(image).visibility !== "hidden" && !hasTransparentAncestor(image);
     });
   }
 
@@ -607,7 +651,7 @@
         const value = node.nodeValue?.replace(/\s+/g, " ").trim();
         if (!value || !(node.parentElement instanceof Element)) continue;
         const style = getComputedStyle(node.parentElement);
-        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(node.parentElement)) continue;
         const range = document.createRange();
         range.selectNodeContents(node);
         for (const rect of range.getClientRects()) {
@@ -624,7 +668,7 @@
       for (const anchor of root.querySelectorAll("a[href]")) {
         if (links.length >= 2000) break;
         const style = getComputedStyle(anchor);
-        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(anchor)) continue;
         for (const rect of anchor.getClientRects()) {
           const mapped = intersect(rect);
           if (!mapped) continue;
@@ -818,8 +862,8 @@
       // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
       if (!node.isConnected) continue;
       if (session.fixedTarget && (node === session.targetElement || node.contains(session.targetElement))) continue;
-      const rect = node.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
+      const rect = floatingBounds(node);
+      if (!rect) continue;
       if (position === "sticky") {
         // Hiding a sticky element leaves a blank hole at its in-flow slot. Demoting it
         // to static paints it exactly once, where the layout puts it, in whichever tile
@@ -830,7 +874,9 @@
       const tall = rect.height > innerHeight * 0.5;
       const anchor = tall ? "overlay" : rect.top + rect.height / 2 < innerHeight / 2 ? "top" : "bottom";
       if (!session.floatingNodes.has(node)) {
-        session.floating.push({ node, anchor, visibility: {
+        session.floating.push({ node, anchor, opacity: {
+          value: node.style.getPropertyValue("opacity"), priority: node.style.getPropertyPriority("opacity")
+        }, visibility: {
           value: node.style.getPropertyValue("visibility"), priority: node.style.getPropertyPriority("visibility")
         } });
         session.floatingNodes.add(node);
@@ -842,7 +888,7 @@
     // A stale picker overlay must never be captured into the pixels or keep
     // swallowing page events after the capture.
     pickerCleanup?.();
-    restore("superseded");
+    await restore("superseded");
     const classification = classifyTarget(request);
     const owner = classification.owner;
     const pickerState = pendingPickerState;
@@ -881,6 +927,8 @@
     };
 
     for (const animation of pageAnimations()) rememberAnimation(animation, false);
+    const effects = await pageEffects("begin", session.id);
+    if (effects.error) session.animationIssues.add(effects.error);
     freezePage(classification, request);
     session.observer = new MutationObserver(mutations => {
       if (!session) return;
@@ -918,6 +966,7 @@
     for (const item of session.floating) {
       if (getComputedStyle(item.node).position !== "fixed") {
         rememberStyle(item.node, "visibility", item.visibility.value, item.visibility.priority);
+        rememberStyle(item.node, "opacity", item.opacity.value, item.opacity.priority);
         continue;
       }
       // Fixed header appears once (first tile), fixed footer/chat bar once (last tile,
@@ -926,6 +975,9 @@
       // Showing a tile restores the page's own visibility rule. Forcing visible
       // would expose hidden menus/dialogs that happen to have a layout box.
       rememberStyle(item.node, "visibility", show ? item.visibility.value : "hidden", show ? item.visibility.priority : "important");
+      // Descendants can override inherited visibility:hidden (common in nav bars).
+      // Group opacity hides the entire rendered subtree without changing layout.
+      rememberStyle(item.node, "opacity", show ? item.opacity.value : "0", show ? item.opacity.priority : "important");
     }
   }
 
@@ -958,7 +1010,7 @@
     if (pickerId && cancelledPickerIds.has(pickerId)) return { started: false, cancelled: true };
     pickerCleanup?.();
     activePickerId = pickerId;
-    restore("picker-started");
+    await restore("picker-started");
     savePickerState();
     if (mode === "region") startRegionPicker();
     else startElementPicker(mode, frameInfo);

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { readFileSync } from "node:fs";
 
 const host = "127.0.0.1";
 
@@ -16,6 +17,15 @@ function rows(count, prefix = "ROW") {
 
 function fixture(name, crossPort) {
   switch (name) {
+    case "gsap":
+      return shell("gsap-motion", '<script src="/test-gsap.js"></script><div id="menu">HIDDEN MENU</div><div id="spinner"></div><div id="user-paused"></div>' + Array.from({length:6},()=>'<section class="gsap-section"><div class="gsap-reveal">REVEALED CONTENT</div></section>').join(''), `
+        window.menu=gsap.timeline({paused:true}).fromTo('#menu',{autoAlpha:0},{autoAlpha:1,duration:1});
+        window.spinner=gsap.to('#spinner',{rotation:360,repeat:-1,duration:.8,ease:'none'});
+        window.userPaused=gsap.to('#user-paused',{x:100,duration:2,paused:true}).time(.4);
+        new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting&&!e.target.dataset.seen){e.target.dataset.seen='1';gsap.fromTo(e.target,{autoAlpha:0,y:20},{autoAlpha:1,y:0,duration:1});}}).observe(document.querySelector('.gsap-reveal'));
+        const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting&&!e.target.dataset.seen){e.target.dataset.seen='1';gsap.fromTo(e.target,{autoAlpha:0,y:20},{autoAlpha:1,y:0,duration:1});}});
+        document.querySelectorAll('.gsap-reveal').forEach(n=>observer.observe(n));
+      `, '.gsap-section{height:800px;padding:200px 100px}.gsap-reveal{width:320px;height:160px;background:rgb(26,180,92);opacity:0}#menu{position:fixed;inset:0;visibility:hidden;background:#ff00cc;z-index:20}#spinner{position:fixed;right:100px;top:100px;width:30px;height:30px;background:#1687ff}#user-paused{position:fixed;right:50px;top:100px;width:20px;height:20px;background:#333}');
     case "body":
       return shell("body-scroll", `<h1>SEARCHABLE WINSHOT DOCUMENT</h1><p>検索可能 مرحبا</p><a href="https://example.com/winshot-link">WORKING PDF LINK</a><input id="state" value="focus-restoration"><div id="rows">${rows(28)}</div>`, "");
     case "horizontal":
@@ -110,6 +120,11 @@ function fixture(name, crossPort) {
 function start(port, crossPort) {
   return http.createServer((request, response) => {
     const name = new URL(request.url, `http://${host}:${port}`).pathname.slice(1) || "index";
+    if (name === "test-gsap.js") {
+      response.writeHead(200, { "content-type": "application/javascript" });
+      response.end(readFileSync(new URL("./vendor/gsap.min.js", import.meta.url)));
+      return;
+    }
     const body = fixture(name, crossPort);
     response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     response.end(body);

@@ -7,7 +7,7 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
-import { deleteCapture, getTile, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
+import { clearCaptureTiles, deleteCapture, getTile, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
 import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
 const activeCaptures = new Map();     // keyed by tabId
@@ -60,6 +60,10 @@ async function sendToTab(tabId, message, frameId = 0) {
 }
 
 async function injectCaptureScript(tabId, frameId = 0) {
+  await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [frameId] }, world: "MAIN", injectImmediately: true,
+    files: ["src/page-effects.js"]
+  });
   return await chrome.scripting.executeScript({
     target: { tabId, frameIds: [frameId] },
     injectImmediately: true,
@@ -374,7 +378,7 @@ async function storeVisibleCapture(session, controller) {
   session.state = SessionState.COMPLETE;
 }
 
-async function storeScrollingCapture(session, controller) {
+async function storeScrollingCapture(session, controller, retryAttempt = 0) {
   let prepared = false;
   let restored = false;
   const tileMetadata = [];
@@ -392,6 +396,8 @@ async function storeScrollingCapture(session, controller) {
   let extent;
   let viewportSize;
   let allTilesStable = true;
+  let canRetryLayout = false;
+  let layoutShrank = false;
 
   try {
     await injectCaptureScript(session.tabId, session.frameId);
@@ -506,6 +512,13 @@ async function storeScrollingCapture(session, controller) {
           session.report.warnings.push("The initial viewport pixels did not settle across browser readbacks; the result is marked partial.");
         }
         if (result.metrics.documentToken !== documentToken) throw new Error("The document changed during capture.");
+        if (index === 0 && ["document", "self-scroller"].includes(result.metrics.kind)) {
+          // Images and ad placeholders can collapse while the first paint settles.
+          // No stored pixels precede this tile, so use the now-current extent.
+          extent.width = Math.min(result.metrics.width, session.limits.maxWidthCss);
+          extent.height = Math.min(result.metrics.height, session.limits.maxHeightCss);
+        }
+        if (index > 0 && (result.metrics.width < extent.width - 8 || result.metrics.height < extent.height - 8)) layoutShrank = true;
         if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) {
           const warning = "The page updated its URL during scrolling; document identity was verified for every tile.";
           if (!session.report.warnings.includes(warning)) session.report.warnings.push(warning);
@@ -658,9 +671,11 @@ async function storeScrollingCapture(session, controller) {
     session.semantics = { text: semanticText, links: semanticLinks };
     if (minimum < 0.7) session.report.warnings.push("One or more overlaps changed substantially; the result is marked partial rather than silently accepted.");
     if (!coverage.complete) session.report.warnings.push(...coverage.gaps);
-    session.state = coverage.complete && minimum >= 0.7 && allTilesStable && !safetyStopReason
+    if (layoutShrank) session.report.warnings.push("The page became smaller while scrolling; the captured coordinate layout changed.");
+    session.state = coverage.complete && minimum >= 0.7 && allTilesStable && !safetyStopReason && !layoutShrank
       ? SessionState.COMPLETE
       : SessionState.PARTIAL;
+    canRetryLayout = (minimum < 0.7 || layoutShrank) && allTilesStable && !safetyStopReason;
   } finally {
     if (prepared) {
       let failures = null;
@@ -678,6 +693,26 @@ async function storeScrollingCapture(session, controller) {
           : "watchdog requested; page disconnected before acknowledgement";
     }
     if (frameHostPrepared.length) await restoreFrameChain(session, frameHostPrepared);
+  }
+  const elapsed = performance.now() - startTime;
+  const remaining = session.limits.maxDurationMs - elapsed;
+  const remainingTiles = session.limits.maxTiles - tileMetadata.length;
+  if (!retryAttempt && canRetryLayout && session.mode === CaptureMode.FULL_PAGE &&
+      session.report.restoration === "verified by read-back" && remainingTiles > tileMetadata.length && remaining > Math.max(5000, elapsed * 0.75)) {
+    throwIfAborted(controller.signal);
+    const previousMinimum = session.report.seamConfidence.minimum;
+    await clearCaptureTiles(session.id);
+    session.tiles = []; session.semantics = { text: [], links: [] };
+    session.state = SessionState.PREPARING;
+    session.report = { target: session.mode, mode: session.mode, dimensionsCss: null, dimensionsPx: null,
+      tileCount: 0, seamConfidence: null, coverage: null, restoration: "pending", fallbackUsed: null,
+      warnings: ["The page layout changed during capture. WinShot recaptured it once after stabilization."],
+      layoutRetry: { attempt: 1, previousMinimum, previousTileCount: tileMetadata.length } };
+    const limits = session.limits;
+    session.limits = { ...limits, maxDurationMs: remaining, maxTiles: remainingTiles };
+    progress(session, "Page layout changed. Rechecking the capture once…");
+    try { await storeScrollingCapture(session, controller, 1); }
+    finally { session.limits = limits; }
   }
 }
 

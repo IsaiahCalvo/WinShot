@@ -220,6 +220,63 @@ test("first scrolling tile rejects a stale browser paint before declaring comple
   } finally { await run.close(); }
 });
 
+for (const height of [0, 1]) test(`a ${height}px fixed wrapper with visible absolute children is captured once`, async () => {
+  const run = await launch();
+  try {
+    await run.page.evaluate(height => {
+      document.body.innerHTML = `<div id="nav" style="position:fixed;left:0;top:0;width:0;height:${height}px;z-index:10"><div style="position:absolute;left:0;top:0;width:600px;height:80px;background:#ff00cc;visibility:visible!important">FIXED NAV</div></div><div style="height:3200px;background:#ddd"></div>`;
+    }, height);
+    const { editor, record } = await capture(run);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    expect(await magentaTiles(editor)).toHaveLength(1);
+    expect(await run.page.$eval("#nav", node => ({ opacity: node.style.opacity, visibility: node.style.visibility }))).toEqual({ opacity: "", visibility: "" });
+  } finally { await run.close(); }
+});
+
+test("GSAP reveals finish while hidden paused menus stay hidden and playback is restored", async () => {
+  const run = await launch();
+  try {
+    await run.page.goto("http://127.0.0.1:4173/gsap", { waitUntil: "networkidle0" });
+    const { editor, record } = await capture(run);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    expect(await magentaTiles(editor)).toHaveLength(0);
+    const greens = await editor.evaluate(async () => {
+      const { getTiles } = await import(chrome.runtime.getURL("src/store.js"));
+      const tiles = await getTiles(new URL(location.href).searchParams.get("id"));
+      const ctx = new OffscreenCanvas(1200,4800).getContext("2d");
+      for(const tile of tiles){const image=await createImageBitmap(tile.blob);ctx.drawImage(image,tile.destXPx,tile.destYPx);image.close();}
+      return Array.from({length:6},(_,i)=>[...ctx.getImageData(200,i*800+280,1,1).data].slice(0,3));
+    });
+    expect(greens).toEqual(Array.from({length:6},()=>[26,180,92]));
+    await run.page.bringToFront();
+    const after=await run.page.evaluate(()=>({menu:window.menu.paused(),hidden:getComputedStyle(document.querySelector('#menu')).visibility,user:window.userPaused.paused(),time:window.userPaused.time(),root:gsap.globalTimeline.paused(),spinner:window.spinner.totalTime()}));
+    expect(after).toMatchObject({menu:true,hidden:'hidden',user:true,time:.4,root:false});
+    await expect.poll(()=>run.page.evaluate(()=>window.spinner.totalTime())).toBeGreaterThan(after.spinner+.05);
+    expect(record.report.restoration).toBe("verified by read-back");
+  } finally { await run.close(); }
+});
+
+test("a layout that collapses after the first tile is recaptured without stale pixels or tiles", async () => {
+  const run = await launch();
+  try {
+    await run.page.evaluate(() => {
+      document.body.innerHTML = '<div id="ad" style="height:200px;background:#888"></div><div style="height:3600px;background:repeating-linear-gradient(#000 0 40px,#fff 40px 80px)"></div>';
+      addEventListener('scroll',()=>{if(scrollY>500)document.querySelector('#ad').style.height='0px';});
+    });
+    const { editor, record } = await capture(run);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    expect(record.report.dimensionsPx.height).toBe(3600);
+    const actual = await editor.evaluate(async () => {
+      const { getTiles } = await import(chrome.runtime.getURL("src/store.js"));
+      const tiles=await getTiles(new URL(location.href).searchParams.get('id'));
+      const first=tiles.find(t=>t.index===0),image=await createImageBitmap(first.blob),ctx=new OffscreenCanvas(image.width,image.height).getContext('2d');ctx.drawImage(image,0,0);image.close();
+      return{count:tiles.length,pixel:[...ctx.getImageData(10,10,1,1).data]};
+    });
+    expect(actual).toEqual({count:record.report.tileCount,pixel:[0,0,0,255]});
+    expect(record.report.restoration).toBe("verified by read-back");
+  } finally { await run.close(); }
+});
+
 test("Stop cancels a delayed capture before it starts", async () => {
   const run = await launch();
   try {
