@@ -265,12 +265,15 @@ export class ImageEditor {
     this.overlay.addEventListener("pointerdown", (e) => this.down(e));
     this.overlay.addEventListener("pointermove", (e) => this.move(e));
     this.overlay.addEventListener("pointerup", (e) => this.up(e));
-    this.overlay.addEventListener("pointercancel", () => {
-      if (this.drag?.before) {
-        Object.assign(this.doc, this.drag.before);
-      }
-      this.drag = null;
-      this.render();
+    this.overlay.addEventListener("pointercancel", (event) => {
+      if (event.pointerId === this.pointerId) this.cancelGesture();
+    });
+    this.overlay.addEventListener("lostpointercapture", (event) => {
+      if (
+        event.pointerId === this.pointerId &&
+        !this.overlay.hasPointerCapture(event.pointerId)
+      )
+        this.cancelGesture();
     });
     document.addEventListener("keydown", (e) => {
       if (e.target.closest("input,textarea,select,[contenteditable]")) return;
@@ -305,7 +308,21 @@ export class ImageEditor {
       }
     });
   }
+  cancelGesture() {
+    const drag = this.drag;
+    this.drag = null;
+    if (drag?.before) Object.assign(this.doc, drag.before);
+    this.releasePointer();
+    if (drag) this.render();
+  }
+  releasePointer() {
+    const pointerId = this.pointerId;
+    this.pointerId = null;
+    if (pointerId != null && this.overlay.hasPointerCapture(pointerId))
+      this.overlay.releasePointerCapture(pointerId);
+  }
   setTool(tool) {
+    this.cancelGesture();
     this.tool = tool;
     this.pendingCrop = null;
     this.render();
@@ -332,6 +349,7 @@ export class ImageEditor {
     };
   }
   updateStyle() {
+    this.cancelGesture();
     const item = this.doc.objects.find((s) => s.id === this.selected);
     if (!item) return;
     this.remember();
@@ -363,9 +381,11 @@ export class ImageEditor {
     };
   }
   down(e) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || e.isPrimary === false) return;
+    this.cancelGesture();
     e.preventDefault();
     this.overlay.focus();
+    this.pointerId = e.pointerId;
     this.overlay.setPointerCapture(e.pointerId);
     const p = this.point(e),
       before = snapshot(this.doc);
@@ -419,10 +439,14 @@ export class ImageEditor {
   }
   move(e) {
     const d = this.drag;
-    if (!d) return;
+    if (!d || e.pointerId !== this.pointerId) return;
     const p = this.point(e);
     if (d.moving) {
       const item = this.doc.objects.find((s) => s.id === this.selected);
+      if (!item) {
+        this.cancelGesture();
+        return;
+      }
       item.x = d.original.x + p.x - d.start.x;
       item.y = d.original.y + p.y - d.start.y;
       if (item.type === "pen")
@@ -439,10 +463,16 @@ export class ImageEditor {
     this.renderOverlay();
   }
   up(e) {
+    if (e.pointerId !== this.pointerId) return;
     const d = this.drag;
-    if (!d) return;
+    if (!d) {
+      this.releasePointer();
+      return;
+    }
     this.move(e);
+    if (this.drag !== d) return;
     this.drag = null;
+    this.releasePointer();
     if (d.moving) {
       if (JSON.stringify(snapshot(this.doc)) !== JSON.stringify(d.before)) {
         this.doc.past.push(d.before);
@@ -471,6 +501,7 @@ export class ImageEditor {
     this.doc.future = [];
   }
   undo() {
+    this.cancelGesture();
     if (!this.doc.past.length) return;
     this.doc.future.push(snapshot(this.doc));
     Object.assign(this.doc, this.doc.past.pop());
@@ -479,6 +510,7 @@ export class ImageEditor {
     this.changed();
   }
   redo() {
+    this.cancelGesture();
     if (!this.doc.future.length) return;
     this.doc.past.push(snapshot(this.doc));
     Object.assign(this.doc, this.doc.future.pop());
@@ -487,6 +519,7 @@ export class ImageEditor {
     this.changed();
   }
   deleteSelection() {
+    this.cancelGesture();
     if (!this.selected) return;
     this.remember();
     this.doc.objects = this.doc.objects.filter((s) => s.id !== this.selected);
@@ -494,6 +527,7 @@ export class ImageEditor {
     this.changed();
   }
   applyCrop() {
+    this.cancelGesture();
     if (!this.pendingCrop) return;
     const b = this.pendingCrop;
     this.remember();

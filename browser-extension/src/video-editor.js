@@ -2,7 +2,8 @@ import { saveVideo, getVideo, listVideos, updateVideo, deleteVideo } from "./vid
 import { MAX_VIDEO_BYTES, inspectVideo, supportedRecordingType, exportVideoClip, mediaEvent, seekVideo } from "./video-tools.js";
 
 const $ = selector => document.querySelector(selector);
-const preview = $("#preview"), status = $("#status");
+let preview = $("#preview");
+const status = $("#status");
 const editingControls = ["#video-title", "#resolution", "#quality", "#fps", "#mute-export", "#mono-export", "#volume", "#trim-start", "#trim-end", "#start-time", "#end-time", "#reset-trim", "#play-selection"];
 let current, currentBlob, currentUrl, state = "loading", recorder, recordingStream, recordingTimer, exportAbort, previewSelection = false;
 let metadataRevision = 0;
@@ -21,8 +22,8 @@ function setState(next) {
   $("#export-video").title = supportedRecordingType() ? "Export selected clip as WebM" : "A supported WebM encoder is unavailable. You can still save the original.";
   $("#import-video").disabled = $("#empty-import").disabled = busy;
   $("#save-source").disabled = busy || !currentBlob;
-  $("#export-video").disabled = busy || !currentBlob || !supportedRecordingType();
-  for (const selector of editingControls) $(selector).disabled = busy || !current;
+  $("#export-video").disabled = busy || !currentBlob || current?.previewUnavailable || !supportedRecordingType();
+  for (const selector of editingControls) $(selector).disabled = busy || !current || current.previewUnavailable;
   $("#capture-audio").disabled = busy;
   $("#stop-record").hidden = next !== "recording";
   $("#cancel-export").hidden = next !== "exporting";
@@ -64,37 +65,81 @@ function releasePreview() {
   currentUrl = undefined;
 }
 async function showVideo(record, blob) {
-  releasePreview();
-  current = { ...record, persisted: record.persisted !== false };
-  currentBlob = blob;
-  previewSelection = false;
-  current.trimStart = Math.max(0, Math.min(current.duration - .1, current.trimStart || 0));
-  current.trimEnd = Math.max(current.trimStart + .1, Math.min(current.duration, current.trimEnd || current.duration));
-  currentUrl = URL.createObjectURL(blob);
-  const previewReady = mediaEvent(preview, "loadedmetadata");
-  preview.src = currentUrl; preview.controls = true; preview.muted = false;
-  preview.hidden = false; $("#empty-state").hidden = true; $("#timeline").hidden = false;
-  $("#video-title").value = current.title;
-  $("#video-meta").textContent = `${current.width} × ${current.height} · ${timeLabel(current.duration)} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
-  for (const selector of ["#trim-start", "#trim-end", "#start-time", "#end-time"]) $(selector).max = current.duration;
-  $("#resolution").value = current.resolution || (current.width * current.height > 16_777_216 ? "1080" : "original");
-  $("#quality").value = current.exportOptions?.quality || "balanced";
-  $("#fps").value = String(current.exportOptions?.fps || 30);
-  $("#mute-export").checked = Boolean(current.exportOptions?.mute);
-  $("#mono-export").checked = Boolean(current.exportOptions?.mono);
-  $("#volume").value = Math.round((current.exportOptions?.volume ?? 1) * 100);
-  $("#volume-value").textContent = `${$("#volume").value}%`;
-  preview.muted = $("#mute-export").checked; preview.volume = Math.min(1, Number($("#volume").value) / 100);
-  $("#save-local").hidden = current.persisted;
-  if (current.persisted) history.replaceState(null, "", `video-editor.html?id=${encodeURIComponent(current.id)}`);
-  else history.replaceState(null, "", "video-editor.html");
-  updateTrimUI();
-  await previewReady;
-  if (!Number.isFinite(preview.duration)) await seekVideo(preview, 1e10);
-  await seekVideo(preview, current.trimStart);
-  setState("ready");
-  await refreshHistory();
+  // Prepare the complete media surface off-screen. A metadata/seek failure must
+  // not replace the only in-memory source or leave the visible controls broken.
+  const nextRecord = { ...record, persisted: record.persisted !== false };
+  nextRecord.trimStart = Math.max(0, Math.min(nextRecord.duration - .1, nextRecord.trimStart || 0));
+  nextRecord.trimEnd = Math.max(nextRecord.trimStart + .1, Math.min(nextRecord.duration, nextRecord.trimEnd || nextRecord.duration));
+  const staged = preview.cloneNode(false), nextUrl = URL.createObjectURL(blob);
+  let committed = false;
+  staged.srcObject = null; staged.controls = true; staged.hidden = false;
+  staged.muted = Boolean(nextRecord.exportOptions?.mute);
+  staged.volume = Math.min(1, nextRecord.exportOptions?.volume ?? 1);
+  try {
+    const ready = mediaEvent(staged, "loadedmetadata");
+    ready.catch(() => {}); // A synchronous browser assignment failure is handled below.
+    staged.src = nextUrl;
+    await ready;
+    if (!Number.isFinite(staged.duration)) await seekVideo(staged, 1e10);
+    await seekVideo(staged, nextRecord.trimStart);
+
+    releasePreview();
+    preview.replaceWith(staged); preview = staged; bindPreview(preview);
+    current = nextRecord; currentBlob = blob; currentUrl = nextUrl;
+    committed = true;
+    previewSelection = false;
+    $("#empty-state").hidden = true; $("#timeline").hidden = false;
+    $("#video-title").value = current.title;
+    $("#video-meta").textContent = `${current.width} × ${current.height} · ${timeLabel(current.duration)} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
+    for (const selector of ["#trim-start", "#trim-end", "#start-time", "#end-time"]) $(selector).max = current.duration;
+    $("#resolution").value = current.resolution || (current.width * current.height > 16_777_216 ? "1080" : "original");
+    $("#quality").value = current.exportOptions?.quality || "balanced";
+    $("#fps").value = String(current.exportOptions?.fps || 30);
+    $("#mute-export").checked = Boolean(current.exportOptions?.mute);
+    $("#mono-export").checked = Boolean(current.exportOptions?.mono);
+    $("#volume").value = Math.round((current.exportOptions?.volume ?? 1) * 100);
+    $("#volume-value").textContent = `${$("#volume").value}%`;
+    $("#save-local").hidden = current.persisted;
+    if (current.persisted) history.replaceState(null, "", `video-editor.html?id=${encodeURIComponent(current.id)}`);
+    else history.replaceState(null, "", "video-editor.html");
+    updateTrimUI(); setState("ready");
+    await refreshHistory();
+  } finally {
+    if (!committed) {
+      staged.pause(); staged.removeAttribute("src"); staged.load();
+      URL.revokeObjectURL(nextUrl);
+    }
+  }
 }
+async function recoverRecordingPreview(error, recoveryBlob) {
+  let extra = "";
+  const hadPrevious = Boolean(currentBlob);
+  try {
+    if (currentBlob) await showVideo(current, currentBlob);
+    else { releasePreview(); preview.hidden = true; $("#empty-state").hidden = false; }
+  } catch {
+    // Restoration is best effort. Keep current/currentBlob even if the browser
+    // cannot build a preview, so Save original and Retry history remain usable.
+    releasePreview(); preview.hidden = true; $("#empty-state").hidden = false; $("#timeline").hidden = true;
+    extra = " The previous video is still available through Save original, but its preview could not reload.";
+  } finally {
+    if (!hadPrevious && recoveryBlob?.size) {
+      // A recording can be downloadable even if Chrome cannot reopen it. Keep
+      // its raw bytes without claiming it is a playable editable history item.
+      current = { id: crypto.randomUUID(), title: `Recording recovery ${new Date().toLocaleString()}`, originalName: "recording.webm", persisted: false, previewUnavailable: true };
+      currentBlob = recoveryBlob;
+      $("#video-title").value = current.title;
+      $("#video-meta").textContent = `Preview unavailable · ${(recoveryBlob.size / 1024 / 1024).toFixed(1)} MB`;
+      $("#timeline").hidden = true; $("#save-local").hidden = true;
+      history.replaceState(null, "", "video-editor.html");
+      extra = " Your recording bytes are still available through Save original. Save them before closing this tab.";
+    }
+    setState("ready");
+    await refreshHistory();
+  }
+  message(`${error.message}${extra}`, true);
+}
+
 async function refreshHistory() {
   const list = $("#video-history");
   try {
@@ -183,14 +228,19 @@ $("#record").addEventListener("click", async () => {
       const duration = (performance.now() - started) / 1000;
       recordingStream.getTracks().forEach(track => track.stop()); recordingStream = null; recorder = null;
       setState("loading"); message("Finishing your recording…");
+      const recordedBlob = new Blob(parts, { type: mimeType });
       try {
-        await keepVideo(new Blob(parts, { type: mimeType }), { title: `Recording ${new Date().toLocaleString()}`, knownDuration: duration, source: "recording" });
+        await keepVideo(recordedBlob, { title: `Recording ${new Date().toLocaleString()}`, knownDuration: duration, source: "recording" });
         if (recordingError || stopReason) message(`${recordingError?.message || stopReason} The playable recording was kept; check it before exporting.`, true);
-      } catch (error) { releasePreview(); if (currentBlob) await showVideo(current, currentBlob); else { preview.hidden = true; $("#empty-state").hidden = false; } setState("ready"); message(error.message, true); }
+      } catch (error) { await recoverRecordingPreview(error, recordedBlob); }
     };
     recordingStream.getVideoTracks()[0].addEventListener("ended", () => { if (recorder?.state !== "inactive") recorder?.stop(); }, { once: true });
     preview.pause(); preview.removeAttribute("src"); preview.srcObject = recordingStream; preview.controls = false; preview.muted = true; preview.hidden = false; $("#empty-state").hidden = true;
-    await preview.play();
+    // Recording consumes the shared stream directly. Chrome may defer a hidden
+    // preview play promise after activating the selected source tab. Never let
+    // that optional preview prevent the recorder from starting.
+    const sharedStream = recordingStream;
+    preview.play().catch(() => { if (state === "recording" && recordingStream === sharedStream) message("Recording continues. The live preview is unavailable; use Stop recording or Chrome’s Stop sharing button."); });
     recorder.start(1000); $("#recording-time").textContent = "Recording · 0:00.0"; setState("recording");
     message(recordingStream.getAudioTracks().length ? "Recording video and shared audio. Stop here or use Chrome’s Stop sharing button." : "Recording video. This source did not provide shared audio.");
     recordingTimer = setInterval(() => {
@@ -201,9 +251,7 @@ $("#record").addEventListener("click", async () => {
   } catch (error) {
     if (recorder) { recorder.onstop = null; recorder.onerror = null; if (recorder.state !== "inactive") recorder.stop(); }
     recordingStream?.getTracks().forEach(track => track.stop()); recordingStream = null; recorder = null;
-    if (currentBlob) await showVideo(current, currentBlob);
-    else { releasePreview(); preview.hidden = true; $("#empty-state").hidden = false; }
-    setState("ready");
+    await recoverRecordingPreview(error);
     message(error.name === "NotAllowedError" || error.name === "AbortError" ? "Sharing cancelled or not allowed. Choose Record screen to try again." : `Recording could not start: ${error.message}`, !["NotAllowedError", "AbortError"].includes(error.name));
   }
 });
@@ -223,12 +271,16 @@ $("#play-selection").addEventListener("click", async () => {
   preview.currentTime = current.trimStart; previewSelection = true;
   try { await preview.play(); } catch { message("Playback could not start. Use the video’s Play button.", true); }
 });
-preview.addEventListener("timeupdate", () => {
-  if (!current || state === "recording") return;
-  $("#playhead").style.left = `${Math.min(1, preview.currentTime / current.duration) * 100}%`;
-  if (previewSelection && preview.currentTime >= current.trimEnd) { preview.pause(); previewSelection = false; }
-});
-preview.addEventListener("error", () => { if (current && state === "ready") message("Chrome could not play this video. Save the original or import a supported video.", true); });
+function bindPreview(element) {
+  element.addEventListener("timeupdate", () => {
+    if (element !== preview) return;
+    if (!current || state === "recording") return;
+    $("#playhead").style.left = `${Math.min(1, preview.currentTime / current.duration) * 100}%`;
+    if (previewSelection && preview.currentTime >= current.trimEnd) { preview.pause(); previewSelection = false; }
+  });
+  element.addEventListener("error", () => { if (element !== preview) return; if (current && state === "ready") message("Chrome could not play this video. Save the original or import a supported video.", true); });
+}
+bindPreview(preview);
 for (const selector of ["#video-title", "#resolution", "#quality", "#fps", "#mute-export", "#mono-export"]) $(selector).addEventListener("change", () => { preview.muted = $("#mute-export").checked; rememberEdits().then(refreshHistory); });
 $("#volume").addEventListener("input", () => { $("#volume-value").textContent = `${$("#volume").value}%`; preview.volume = Math.min(1, Number($("#volume").value) / 100); });
 $("#volume").addEventListener("change", rememberEdits);

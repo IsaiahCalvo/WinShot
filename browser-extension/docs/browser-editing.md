@@ -1,8 +1,9 @@
 # Edit locally in a Chrome tab
 
 WinShot Capture does not need the Windows application to edit a screenshot or
-recording. Page captures open the image editor automatically. Use **Open file**
-to bring in an image, paste an image, or reopen an editable browser project.
+recording. Page captures open the image editor automatically. Use **Open image
+or project** in the popup, or **Open file** in the editor, to bring in an image,
+paste an image, or reopen an editable browser project.
 Each document has its own tab, and edits are saved in the extension's local
 history. No file is uploaded.
 
@@ -11,6 +12,7 @@ history. No file is uploaded.
 Use Select, Arrow, Rectangle, Ellipse, Pen, Text, Redact, and Crop. Select an
 annotation to move, recolor or delete it. Undo/redo works from the toolbar or
 Ctrl+Z/Ctrl+Y (Cmd+Z on macOS). Choose a zoom level for detailed work.
+Escape cancels an unfinished drawing or move.
 PNG/JPEG/WebP/PDF, Copy and Print all use the current edits. Very long images
 remain tiled; they do not require a page-sized canvas. Some large formats retain
 their existing browser allocation limits.
@@ -29,7 +31,8 @@ flattened image/PDF rather than an editable project when sharing a redaction.
 
 ## Video studio
 
-Open **Video studio** from the popup or history. Record using Chrome's screen,
+Open **Record & edit video** from the popup, or **Video studio** from history.
+Record using Chrome's screen,
 window or tab chooser, or import a video file supported by Chrome. Review the
 video, select the start and end of the clip, and export WebM, or download the
 original. Sharing audio depends on the chosen source and Chrome/OS support.
@@ -39,6 +42,9 @@ Clipped export plays and re-records the selected segment, so export takes about
 the length of the clip. It is not a lossless or frame-accurate professional
 timeline editor. Recording/import/export remain in the browser; no native app
 handoff is involved. Saved originals remain available in local video history.
+Recording continues when Chrome activates the shared source tab, even if the
+studio's live preview cannot play. If Chrome cannot reopen a new recording,
+**Save original** keeps its raw bytes available; save them before closing the tab.
 
 ## Optional desktop application
 

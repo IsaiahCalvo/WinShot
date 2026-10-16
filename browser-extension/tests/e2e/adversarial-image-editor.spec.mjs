@@ -615,3 +615,107 @@ test("browser image editor still exports PDF when saving PDF preferences fails",
     }
   });
 });
+
+async function beginGesture(editor, tool, x, y, x2, y2) {
+  await editor.click(`[data-tool='${tool}']`);
+  const box = await editor.$eval(".annotation-overlay", (node) => {
+    node.addEventListener(
+      "pointerdown",
+      (event) => {
+        window.qaPointerId = event.pointerId;
+      },
+      { once: true },
+    );
+    const rect = node.getBoundingClientRect();
+    return {
+      x: rect.x,
+      y: rect.y,
+      scale: rect.width / Number(node.getAttribute("width")),
+    };
+  });
+  await editor.mouse.move(box.x + x * box.scale, box.y + y * box.scale);
+  await editor.mouse.down();
+  await editor.mouse.move(box.x + x2 * box.scale, box.y + y2 * box.scale, {
+    steps: 4,
+  });
+  expect(
+    await editor.$eval(".annotation-overlay", (node) =>
+      node.hasPointerCapture(window.qaPointerId),
+    ),
+  ).toBe(true);
+  return box;
+}
+async function pressEditorCommand(editor, command) {
+  if (command === "Undo" || command === "Redo") {
+    await editor.keyboard.down("Control");
+    await editor.keyboard.press(command === "Undo" ? "z" : "y");
+    await editor.keyboard.up("Control");
+  } else await editor.keyboard.press(command);
+}
+for (const command of ["Escape", "Delete", "Undo", "Redo"]) {
+  test(`browser image editor ${command} interrupts an active annotation move and releases pointer capture`, async () => {
+    await runEditor(async ({ editor, errors }) => {
+      await drag(editor, "rectangle", 80, 80, 280, 180);
+      await drag(editor, "ellipse", 340, 80, 480, 180);
+      await editor.click("#edit-undo");
+      await saved(editor);
+      const box = await beginGesture(editor, "select", 120, 120, 150, 150);
+      await pressEditorCommand(editor, command);
+      const captured = await editor.$eval(".annotation-overlay", (node) =>
+        node.hasPointerCapture(window.qaPointerId),
+      );
+      await editor.mouse.move(
+        box.x + 200 * box.scale,
+        box.y + 160 * box.scale,
+        { steps: 3 },
+      );
+      await editor.mouse.up();
+      await saved(editor);
+      const doc = (await stored(editor)).editorDocument;
+      expect(errors).toEqual([]);
+      expect(captured).toBe(false);
+      expect(doc.objects.map((o) => o.type)).toEqual(
+        command === "Escape"
+          ? ["rectangle"]
+          : command === "Redo"
+            ? ["rectangle", "ellipse"]
+            : [],
+      );
+      if (doc.objects.length) {
+        expect(doc.objects[0].x).toBeCloseTo(80, 0);
+        expect(doc.objects[0].y).toBeCloseTo(80, 0);
+      }
+      // A fresh gesture after the interruption still works and saves normally.
+      await drag(editor, "arrow", 80, 260, 280, 300);
+      await saved(editor);
+      expect((await stored(editor)).editorDocument.objects.at(-1).type).toBe(
+        "arrow",
+      );
+    });
+  });
+}
+
+test("browser image editor undo during a new drawing cancels it without a later pointer-up commit", async () => {
+  await runEditor(async ({ editor, errors }) => {
+    await drag(editor, "rectangle", 80, 80, 280, 180);
+    await saved(editor);
+    const box = await beginGesture(editor, "pen", 80, 260, 280, 300);
+    await pressEditorCommand(editor, "Undo");
+    const captured = await editor.$eval(".annotation-overlay", (node) =>
+      node.hasPointerCapture(window.qaPointerId),
+    );
+    await editor.mouse.move(box.x + 320 * box.scale, box.y + 340 * box.scale, {
+      steps: 3,
+    });
+    await editor.mouse.up();
+    await saved(editor);
+    expect(errors).toEqual([]);
+    expect(captured).toBe(false);
+    expect((await stored(editor)).editorDocument.objects).toEqual([]);
+    await pressEditorCommand(editor, "Redo");
+    await saved(editor);
+    expect(
+      (await stored(editor)).editorDocument.objects.map((o) => o.type),
+    ).toEqual(["rectangle"]);
+  });
+});
