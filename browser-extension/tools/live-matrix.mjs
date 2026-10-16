@@ -45,6 +45,32 @@ async function waitFile(folder, extension) {
   throw new Error(`${extension} download timed out`);
 }
 
+function restorationVerified(record) {
+  return record?.report?.restoration === "verified by read-back" ||
+    (record?.report?.mode === "visible" && record.report.restoration === "not needed");
+}
+
+async function editorReady(editor, started) {
+  const remaining = () => Math.max(1, Math.min(60_000, 180_000 - (performance.now() - started)));
+  await editor.waitForFunction(() => {
+    const state = document.querySelector("#state")?.textContent.trim() || "";
+    if (state.toLowerCase() === "failed") return true;
+    const images = [...document.querySelectorAll("#preview img")];
+    const overlay = document.querySelector("#preview .annotation-overlay"), box = overlay?.getBoundingClientRect();
+    return state && !/^loading\b/i.test(state) && images.length > 0 &&
+      images.every(image => image.complete && image.naturalWidth > 0) &&
+      (!document.querySelector("[data-tool]") || Boolean(box?.width > 0 && box?.height > 0));
+  }, { timeout: remaining() });
+  if ((await editor.$eval("#state", node => node.textContent.trim())).toLowerCase() === "failed") throw new Error("Editor failed to load capture");
+  let timer;
+  try {
+    await Promise.race([
+      editor.evaluate(() => Promise.all([...document.querySelectorAll("#preview img")].map(image => image.decode()))),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Editor image decode deadline exceeded")), remaining()); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
 try {
   browser = await launchCaptureBrowser(profile, { width: 1200, height: 1000 }, { args: proxy ? [`--proxy-server=${proxy}`] : [] });
   const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || fileURLToPath(new URL("../dist/winshot-capture", import.meta.url)));
@@ -152,10 +178,12 @@ try {
         } else await ui.click(`[data-mode='${mode}']`);
         editor = await (await targetPromise).asPage();
         editor.on("pageerror", error => extensionErrors.push(error.message));
-        await editor.waitForSelector("#state:not(:empty)");
+        await editorReady(editor, start);
         const record = await editor.evaluate(async () => (await import(chrome.runtime.getURL("src/store.js"))).getRecord(new URL(location.href).searchParams.get("id")));
         result.elapsedMs = Math.round(performance.now() - start);
         result.state = record.state; result.report = record.report;
+        result.captureComplete = record.state === "complete" && record.report.coverage?.complete === true;
+        result.fullRestorationVerified = restorationVerified(record);
         if (!record.report.dimensionsPx) throw new Error(record.error || "No captured pixels");
         await editor.waitForSelector("#preview img");
         await editor.screenshot({ path: path.join(folder, "editor.png") });
@@ -179,6 +207,8 @@ try {
         const restored = await page.evaluate(() => ({ x: scrollX, y: scrollY, captureStyles: document.querySelectorAll("style[data-winshot-capture]").length, pickers: document.querySelectorAll("[data-winshot-picker]").length }));
         result.restored = restored;
         if (Math.abs(restored.x - source.x) > 2 || Math.abs(restored.y - source.y) > 2 || restored.captureStyles || restored.pickers) throw new Error("Page/picker state was not restored");
+        if (!result.fullRestorationVerified) throw new Error(`Capture restoration was not fully verified: ${record.report.restoration}`);
+        if (!result.captureComplete) throw new Error(`Capture did not complete: ${record.state}`);
         if (extensionErrors.length) throw new Error(`Extension errors: ${extensionErrors.join("; ")}`);
       } catch (error) {
         result.error = error.message;
@@ -251,6 +281,7 @@ try {
           const store = await import(chrome.runtime.getURL("src/store.js"));
           return Promise.all(results.map(async item => { const record = await store.getRecord(item.captureId); return { state: record.state, report: record.report }; }));
         }, batch.results);
+        if (result.records.some(record => record.state !== "complete" || record.report.coverage?.complete !== true || !restorationVerified(record))) throw new Error("Batch contains an incomplete capture or unverified restoration");
         await summary.screenshot({ path: path.join(folder, "summary.png") });
         if (variant.combinePdf) {
           const pdf = await waitFile(folder, ".pdf");

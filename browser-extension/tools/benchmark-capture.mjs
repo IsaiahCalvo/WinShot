@@ -153,7 +153,9 @@ try {
       },values.url?[]:colors);
       row.state=audit.record.state;row.report=audit.record.report;row.audit=audit.audit;
       row.restored=await page.evaluate(()=>({x:scrollX,y:scrollY,captureStyles:document.querySelectorAll('style[data-winshot-capture]').length,pickers:document.querySelectorAll('[data-winshot-picker]').length,ticks:window.benchmarkTicks}));
-      row.correct=row.state==='complete'&&row.restored.x===row.source.x&&row.restored.y===row.source.y&&row.restored.captureStyles===0&&row.restored.pickers===0;
+      row.captureComplete=row.state==='complete'&&row.report.coverage?.complete===true;
+      row.fullRestorationVerified=row.report.restoration==='verified by read-back';
+      row.correct=row.captureComplete&&row.fullRestorationVerified&&row.restored.x===row.source.x&&row.restored.y===row.source.y&&row.restored.captureStyles===0&&row.restored.pickers===0;
       if(!values.url)row.correct&&=row.audit.markerRows.every(rows=>rows.length===48)&&row.audit.headerRows.length===54&&row.audit.footerRows.length===46&&row.audit.dimensions.width===1200&&row.audit.dimensions.height===5600;
       else row.correct&&=row.audit.tiles.some(tile=>tile.distinctSampledColors>3)&&row.audit.tileCount===row.report.tileCount;
       if(index===0)await editor.screenshot({path:path.join(output,`${values.label}-editor.png`)});
@@ -163,10 +165,13 @@ try {
       row.stages={readbacks:screenshotCalls.length,readbackMs:screenshotCalls.reduce((sum,entry)=>sum+entry.durationMs,0),minReadbackCallGapMs:gaps.length?Math.min(...gaps):null,quotaErrors:screenshotCalls.filter(entry=>/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|quota/i.test(entry.error||'')).length,scrollCalls:scrollCalls.length,scrollMs:scrollCalls.reduce((sum,entry)=>sum+entry.durationMs,0),scrollP95Ms:percentile(scrollCalls.map(entry=>entry.durationMs),.95),restoreMs:row.trace.filter(entry=>entry.type==='WINSHOT_RESTORE').reduce((sum,entry)=>sum+entry.durationMs,0)};
       if(row.stages.quotaErrors)row.correct=false;
     }catch(error){row.error=String(error);row.correct=false;}
-    finally{if(client)await client.detach().catch(()=>{});row.pageErrors=errors;rows.push(row);fs.writeFileSync(path.join(output,`${values.label}-runs.json`),JSON.stringify(rows,null,2));console.log(JSON.stringify({attempt:row.attempt,elapsedMs:row.elapsedMs,correct:row.correct,state:row.state,stages:row.stages,error:row.error}));await popup?.close().catch(()=>{});await editor?.close().catch(()=>{});await page.close().catch(()=>{});}
+    finally{if(client)await client.detach().catch(()=>{});row.pageErrors=errors;rows.push(row);fs.writeFileSync(path.join(output,`${values.label}-runs.json`),JSON.stringify(rows,null,2));console.log(JSON.stringify({attempt:row.attempt,elapsedMs:row.elapsedMs,correct:row.correct,captureComplete:row.captureComplete,fullRestorationVerified:row.fullRestorationVerified,restoration:row.report?.restoration,state:row.state,stages:row.stages,error:row.error}));await popup?.close().catch(()=>{});await editor?.close().catch(()=>{});await page.close().catch(()=>{});}
   }
   const times=rows.filter(row=>row.correct).map(row=>row.elapsedMs);
   const summary={label:values.label,scenario:values.url?'public':values.scenario,url,version,extensionPath:extensionRoot,extensionSha256,measurement:'Popup click to non-Loading editor state, positive-sized annotation overlay when present, and all preview img.decode() promises resolved; editorOpenedMs and previewLoadedMs separately record earlier stages',networkCachePolicy:values.url?'Browser HTTP cache disabled before each navigation':'Fixture served with Cache-Control:no-store',profileFirstAttempt:values.profile,browser:await browser.version(),platform:process.platform,viewport:{width:1200,height:1000},samples:rows.length,passed:times.length,failed:rows.length-times.length,p50Ms:percentile(times,.5),p95Ms:percentile(times,.95),minMs:times.length?Math.min(...times):null,maxMs:times.length?Math.max(...times):null,percentileMethod:'nearest rank, passing samples only; failures are separately counted; small-sample p95 is descriptive, not a population guarantee',fixtureSha256:crypto.createHash('sha256').update(html).digest('hex'),capturedAt:new Date().toISOString(),graphics:{softwareGL:process.env.WINSHOT_TEST_SOFTWARE_GL||'0',softwareCompositing:process.env.WINSHOT_TEST_SOFTWARE_COMPOSITING||'default'}};
+  summary.captureCompleteCount=rows.filter(row=>row.captureComplete).length;
+  summary.fullyRestoredCount=rows.filter(row=>row.fullRestorationVerified&&row.restored?.x===row.source?.x&&row.restored?.y===row.source?.y&&!row.restored?.captureStyles&&!row.restored?.pickers).length;
+  summary.unverifiedRestorationCount=rows.filter(row=>row.report&&row.report.restoration!=='verified by read-back').length;
   fs.writeFileSync(path.join(output,`${values.label}-summary.json`),JSON.stringify(summary,null,2));console.log(JSON.stringify(summary));
   if(summary.failed)process.exitCode=1;
 }finally{await browser?.close();server.close();fs.rmSync(profileRoot,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
