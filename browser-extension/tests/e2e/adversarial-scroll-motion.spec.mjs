@@ -119,6 +119,16 @@ test("a fixed footer inserted after scrolling appears once at the true bottom", 
   });
 });
 
+test("a fixed overlay that was hidden by the page stays hidden throughout capture", async () => {
+  await runFixture(() => {
+    document.body.innerHTML = '<style>body{margin:0;height:4800px;background:white}#hidden{position:fixed;top:0;left:0;width:100%;height:80px;background:#ff00cc;visibility:hidden}</style><aside id="hidden"></aside>';
+  }, async ({ pixels, record, page }) => {
+    expect(record.state).toBe("complete");
+    expect(pixels.magentaBands).toEqual([]);
+    expect(await page.$eval("#hidden", node => getComputedStyle(node).visibility)).toBe("hidden");
+  });
+});
+
 test("repeating Web Animations resume after capture while user-paused effects stay paused", async () => {
   await runFixture(() => {
     document.body.innerHTML = '<style>body{margin:0;height:4800px}.box{width:500px;height:150px;background:#26b45c}</style><div id="running" class="box"></div><div id="paused" class="box"></div>';

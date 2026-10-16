@@ -61,7 +61,12 @@ Finite CSS/Web Animations entrance effects finish before capture so scroll-revea
 content is visible. Repeating effects pause, and scroll/view-timeline effects use
 a temporary final-keyframe snapshot. Original animation state is restored afterward.
 Positioning is rechecked when nodes/classes/styles change, so headers that become
-fixed and late-inserted floating footers do not repeat across tiles. JavaScript
+fixed and late-inserted floating footers do not repeat across tiles. Hidden overlays
+retain the page's own visibility rules. Pickers start in the top page immediately
+and bound setup/cleanup of embedded frames, with per-picker identities protecting
+new selections from late messages belonging to an earlier selection. Region drags
+use a top-page input plane so they can cross embedded frames without losing mouseup.
+JavaScript
 canvas rendering and arbitrary scroll handlers cannot all be frozen; changing
 overlap pixels or effects that cannot be stabilized produce partial results.
 

@@ -110,6 +110,44 @@ async function startPicker(run, page, mode) {
   await popup.close().catch(() => {});
 }
 
+for (const mode of ["region", "element"]) test(`a stalled embedded frame cannot block ${mode} selection or revive its closed picker`, async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/iframes", { waitUntil: "networkidle0" });
+    // Fault-inject a slow child-script response, while retaining the real MV3
+    // popup, message channels, selection, screenshot API, and saved image.
+    await run.worker.evaluate(() => {
+      const execute = chrome.scripting.executeScript.bind(chrome.scripting);
+      chrome.scripting.executeScript = async details => {
+        if (details.target.allFrames || details.target.frameIds?.some(id => id !== 0)) await new Promise(resolve => setTimeout(resolve, 6000));
+        return execute(details);
+      };
+    });
+    const ui = await openPopup(run, page);
+    const start = performance.now();
+    await ui.click(`[data-picker='${mode}']`);
+    await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 2500 });
+    expect(performance.now() - start).toBeLessThan(2500);
+    const waiting = editorTarget(run);
+    if (mode === "region") {
+      // The drag ends inside an iframe: its mouseup must reach the top picker.
+      await page.mouse.move(30, 70); await page.mouse.down();
+      await page.mouse.move(300, 170, { steps: 5 }); await page.mouse.up();
+    } else {
+      await page.keyboard.down("Control"); await page.mouse.click(150, 40); await page.keyboard.up("Control");
+    }
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state).toBe("complete");
+    if (mode === "region") expect(record.report.dimensionsPx).toEqual({ width: 270, height: 100 });
+    else expect(record.report.target).toBe("page-element");
+    // Wait beyond the injected delay: late completion must never add overlays.
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, 6500 - (performance.now() - start))));
+    for (const frame of page.frames()) expect(await frame.$$eval("[data-winshot-picker]", nodes => nodes.length)).toBe(0);
+    expect(run.errors).toEqual([]);
+  } finally { await closeExactExtension(run); }
+});
+
 test("element picker Ctrl-click captures an element inside an open shadow root", async () => {
   const run = await launchExactExtension();
   try {

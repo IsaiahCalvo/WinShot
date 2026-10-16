@@ -15,6 +15,7 @@ const modes = (process.env.WINSHOT_LIVE_MODES || "visible,full-page,region,eleme
 if (modes.some(mode => !["visible", "full-page", "region", "element", "frame"].includes(mode))) throw new Error("Unknown capture mode");
 const results = [];
 let browser;
+const workerErrors = [];
 
 async function popup(extension, page) {
   await page.bringToFront();
@@ -22,6 +23,7 @@ async function popup(extension, page) {
   const target = browser.waitForTarget(t => !prior.has(t) && t.type() === "page" && t.url().endsWith("/src/popup.html"));
   await extension.triggerAction(page);
   const ui = await (await target).asPage();
+  ui.on("pageerror", error => workerErrors.push(`popup: ${error.message}`));
   await ui.waitForSelector("[data-mode='full-page']");
   await ui.evaluate(() => {
     document.querySelector("#capture-height").value = "80000";
@@ -45,14 +47,19 @@ try {
   browser = await launchCaptureBrowser(profile, { width: 1200, height: 1000 }, { args: proxy ? [`--proxy-server=${proxy}`] : [] });
   const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || fileURLToPath(new URL("../dist/winshot-capture", import.meta.url)));
   const extension = (await browser.extensions()).get(id);
+  const workerTarget = await browser.waitForTarget(t => t.type() === "service_worker" && t.url().endsWith("/src/background.js"));
+  const worker = await workerTarget.worker();
+  worker.on("console", message => { if (message.type() === "error") workerErrors.push(message.text()); });
   for (const [siteIndex, url] of urls.entries()) {
     for (const mode of modes) {
       const folder = path.join(output, String(siteIndex + 1), mode);
       fs.mkdirSync(folder, { recursive: true });
       const page = await browser.newPage();
       let editor, ui, result = { url, mode, folder };
-      const pageErrors = [], extensionErrors = [];
+      const pageErrors = [], extensionErrors = [], sourceConsole = [];
+      const workerErrorIndex = workerErrors.length;
       page.on("pageerror", error => pageErrors.push(error.message));
+      page.on("console", message => { if (["error", "warn"].includes(message.type()) && sourceConsole.length < 50) sourceConsole.push({ level: message.type(), message: message.text() }); });
       try {
         await page.setCacheEnabled(false);
         const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
@@ -80,9 +87,9 @@ try {
             const choices = [];
             for (let y = 180; y < innerHeight - 150; y += 100) for (let x = 160; x < innerWidth - 150; x += 140) {
               const node = document.elementFromPoint(x, y);
-              if (!node || node.closest("nav,header,footer,button,a,dialog") || ["BODY", "HTML"].includes(node.tagName)) continue;
+              if (!node || node.closest("nav,header,footer,button,dialog") || ["BODY", "HTML", "IFRAME", "FRAME", "OBJECT", "EMBED"].includes(node.tagName)) continue;
               const rect = node.getBoundingClientRect();
-              if (rect.width > 200 && rect.height > 80 && rect.height < 20000) choices.push({ x, y, tag: node.tagName, width: rect.width, height: rect.height });
+              if (rect.width > 100 && rect.height > 28 && rect.height < 20000) choices.push({ x, y, tag: node.tagName, width: rect.width, height: rect.height });
             }
             return choices.sort((a, b) => b.height - a.height)[0];
           });
@@ -90,8 +97,17 @@ try {
           result.selectedElement = point;
         }
         if (mode === "frame") {
-          const frame = source.frames.find(frame => frame.rect.width > 200 && frame.rect.height > 100 && frame.rect.y > 80 && frame.rect.y < 850 && /^https?:/.test(frame.src));
-          if (!frame) { result = { ...result, state: "not-applicable", reason: "No visible public HTTP(S) frame" }; continue; }
+          const frame = await page.evaluate(() => {
+            const candidates = [...document.querySelectorAll("iframe")].filter(node => node.clientWidth > 200 && node.clientHeight > 100 && (/^https?:/.test(node.src) || node.srcdoc) && !/doubleclick|adservice/.test(node.src));
+            const node = candidates[0];
+            if (!node) return null;
+            node.scrollIntoView({ block: "center", behavior: "instant" });
+            const rect = node.getBoundingClientRect();
+            return { src: node.src, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, x: scrollX, y: scrollY };
+          });
+          if (!frame) { result = { ...result, state: "not-applicable", reason: "No public content frame with a visible layout box" }; continue; }
+          await new Promise(resolve => setTimeout(resolve, 500));
+          source.x = frame.x; source.y = frame.y;
           point = { x: frame.rect.x + 80, y: frame.rect.y + 80 };
           result.selectedFrame = frame;
         }
@@ -145,9 +161,16 @@ try {
         result.restored = restored;
         if (Math.abs(restored.x - source.x) > 2 || Math.abs(restored.y - source.y) > 2 || restored.captureStyles || restored.pickers) throw new Error("Page/picker state was not restored");
         if (extensionErrors.length) throw new Error(`Extension errors: ${extensionErrors.join("; ")}`);
-      } catch (error) { result.error = error.message; }
+      } catch (error) {
+        result.error = error.message;
+        result.popupStatus = await ui?.$eval("#status", node => node.textContent).catch(() => null);
+        await page.screenshot({ path: path.join(folder, "failure.png") }).catch(() => {});
+      }
       finally {
+        extensionErrors.push(...workerErrors.slice(workerErrorIndex));
+        if (extensionErrors.length && !result.error) result.error = `Extension errors: ${extensionErrors.join("; ")}`;
         result.pageErrors = [...new Set(pageErrors)]; result.extensionErrors = [...new Set(extensionErrors)];
+        result.sourceConsole = sourceConsole;
         results.push(result); console.log(JSON.stringify(result));
         await ui?.close().catch(() => {}); await editor?.close().catch(() => {}); await page.close().catch(() => {});
         fs.writeFileSync(path.join(output, "results.json"), JSON.stringify(results, null, 2));

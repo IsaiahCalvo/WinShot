@@ -7,6 +7,7 @@
   let session = null;
   let frameHostSession = null;
   let pickerCleanup = null;
+  let activePickerId = null;
   let pendingPickerState = null;
   const announcedFrames = new Map();
 
@@ -800,7 +801,9 @@
       const tall = rect.height > innerHeight * 0.5;
       const anchor = tall ? "overlay" : rect.top + rect.height / 2 < innerHeight / 2 ? "top" : "bottom";
       if (!session.floatingNodes.has(node)) {
-        session.floating.push({ node, anchor });
+        session.floating.push({ node, anchor, visibility: {
+          value: node.style.getPropertyValue("visibility"), priority: node.style.getPropertyPriority("visibility")
+        } });
         session.floatingNodes.add(node);
       }
     }
@@ -885,14 +888,15 @@
     session.atEnd = atEnd;
     for (const item of session.floating) {
       if (getComputedStyle(item.node).position !== "fixed") {
-        const original = session.changedStyles.get(item.node)?.get("visibility");
-        if (original) rememberStyle(item.node, "visibility", original.value, original.priority);
+        rememberStyle(item.node, "visibility", item.visibility.value, item.visibility.priority);
         continue;
       }
       // Fixed header appears once (first tile), fixed footer/chat bar once (last tile,
       // which lands at the true page bottom). Viewport-covering overlays only in tile 1.
       const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd) || (item.anchor === "overlay" && atStart);
-      rememberStyle(item.node, "visibility", show ? "visible" : "hidden");
+      // Showing a tile restores the page's own visibility rule. Forcing visible
+      // would expose hidden menus/dialogs that happen to have a layout box.
+      rememberStyle(item.node, "visibility", show ? item.visibility.value : "hidden", show ? item.visibility.priority : "important");
     }
   }
 
@@ -921,8 +925,9 @@
     return result;
   }
 
-  async function beginPicker(mode, frameInfo = null) {
+  async function beginPicker(mode, frameInfo = null, pickerId = null) {
     pickerCleanup?.();
+    activePickerId = pickerId;
     restore("picker-started");
     savePickerState();
     if (mode === "region") startRegionPicker();
@@ -952,8 +957,10 @@
     };
   }
 
-  function cancelPicker() {
+  function cancelPicker(pickerId = null) {
+    if (pickerId && pickerId !== activePickerId) return { cancelled: false };
     pickerCleanup?.();
+    activePickerId = null;
     restorePickerState();
     return { cancelled: true };
   }
@@ -971,7 +978,9 @@
   }
 
   function sendPickerResult(payload) {
-    chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload }).catch(() => {});
+    const pickerId = activePickerId;
+    activePickerId = null;
+    chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload, pickerId }).catch(() => {});
   }
 
   function startElementPicker(mode = "element", frameInfo = null) {
@@ -1082,14 +1091,17 @@
     const dim = document.createElement("div");
     dim.style.cssText = `position:fixed;inset:0;pointer-events:none;z-index:${PICKER_Z - 2};background:rgba(0,0,0,.3)`;
     dim.dataset.winshotPicker = "dim";
+    const inputPlane = document.createElement("div");
+    inputPlane.style.cssText = `position:fixed;inset:0;pointer-events:auto;z-index:${PICKER_Z - 3};cursor:crosshair`;
+    inputPlane.dataset.winshotPicker = "input";
     const guideH = document.createElement("div");
     const guideV = document.createElement("div");
     guideH.style.cssText = `position:fixed;left:0;width:100vw;height:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-top:1px dashed rgba(255,255,255,.85)`;
     guideV.style.cssText = `position:fixed;top:0;height:100vh;width:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-left:1px dashed rgba(255,255,255,.85)`;
     guideH.dataset.winshotPicker = "guide";
     guideV.dataset.winshotPicker = "guide";
-    document.documentElement.append(dim, guideH, guideV);
-    const ownNodes = [outline, tip, dim, guideH, guideV];
+    document.documentElement.append(inputPlane, dim, guideH, guideV);
+    const ownNodes = [outline, tip, inputPlane, dim, guideH, guideV];
     const unswallow = swallowPageEvents();
     let dragging = false;
     let start = null;
@@ -1099,9 +1111,17 @@
     let autoTimer = 0;
 
     const elementUnderCursor = (event) => {
-      const path = event.composedPath?.() || [];
-      const candidate = path.find((node) => node instanceof Element && !ownNodes.includes(node)) || event.target;
-      return candidate instanceof Element ? candidate : null;
+      inputPlane.style.pointerEvents = "none";
+      let candidate;
+      try {
+        candidate = document.elementFromPoint(event.clientX, event.clientY);
+        while (candidate?.shadowRoot) {
+          const inner = candidate.shadowRoot.elementFromPoint(event.clientX, event.clientY);
+          if (!inner || inner === candidate) break;
+          candidate = inner;
+        }
+      } finally { inputPlane.style.pointerEvents = "auto"; }
+      return candidate instanceof Element && !ownNodes.includes(candidate) ? candidate : null;
     };
     const showElementHighlight = (element) => {
       const rect = element.getBoundingClientRect();
@@ -1229,7 +1249,7 @@
       removeEventListener("mousemove", move, true);
       removeEventListener("mouseup", up, true);
       removeEventListener("keydown", key, true);
-      outline.remove(); tip.remove(); dim.remove(); guideH.remove(); guideV.remove();
+      outline.remove(); tip.remove(); inputPlane.remove(); dim.remove(); guideH.remove(); guideV.remove();
       pickerCleanup = null;
     };
     pickerCleanup = cleanup;
@@ -1259,8 +1279,8 @@
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
           return { alive: Boolean(frameHostSession) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
-        case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null);
-        case "WINSHOT_CANCEL_PICKER": return cancelPicker();
+        case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null, request.pickerId || null);
+        case "WINSHOT_CANCEL_PICKER": return cancelPicker(request.pickerId || null);
         default: return undefined;
       }
     };

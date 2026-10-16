@@ -13,6 +13,7 @@ import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserve
 const activeCaptures = new Map();     // keyed by tabId
 const activeWindowLocks = new Set();  // captureVisibleTab is window-scoped — one capture per window
 const pickerFrames = new Map();
+const pickerTokens = new Map();
 const pickerSettings = new Map();
 const pendingCaptures = new Map();
 let activeBatch = null;
@@ -57,11 +58,21 @@ async function sendToTab(tabId, message, frameId = 0) {
   return response;
 }
 
-async function injectCaptureScript(tabId, frameId = 0, allFrames = false) {
+async function injectCaptureScript(tabId, frameId = 0) {
   return await chrome.scripting.executeScript({
-    target: allFrames ? { tabId, allFrames: true } : { tabId, frameIds: [frameId] },
+    target: { tabId, frameIds: [frameId] },
+    injectImmediately: true,
     files: ["src/content.js"]
   });
+}
+
+async function boundedPickerCall(promise) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("The embedded frame did not respond.")), 2000);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 function screenshotMetrics(metrics, frameHost) {
@@ -887,39 +898,63 @@ async function startPicker(mode, tabOverride = null, suppliedSettings = null) {
   const tab = tabOverride || await activeTab();
   const settings = normalizeSettings(suppliedSettings || await loadSettings());
   await waitCaptureDelay(tab, settings.delayMs);
+  await stopPickers(tab.id);
+  const frameIds = [0];
+  const pickerId = captureId();
+  pickerFrames.set(tab.id, frameIds);
+  pickerTokens.set(tab.id, pickerId);
+  pickerSettings.set(tab.id, settings);
   try {
-    const injected = await injectCaptureScript(tab.id, 0, true);
-    const frameIds = [...new Set(injected.map((result) => result.frameId))];
-    let frameInfo = null;
+    await boundedPickerCall(injectCaptureScript(tab.id));
+    if (pickerTokens.get(tab.id) !== pickerId) return { started: false, cancelled: true };
+    const allFrames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
+    // A slow/loading ad or embedded demo must not hold the top-page picker hostage.
+    if (mode !== "frame") await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, pickerId }, 0));
+    // The top-page region input plane spans iframes. Child overlays would only
+    // compete for drag events and risk being included in the selected pixels.
+    if (mode === "region") return { started: true, frameCount: 1 };
+    await Promise.allSettled(allFrames.filter(frame => frame.frameId !== 0).map(async frame => {
+      await boundedPickerCall(injectCaptureScript(tab.id, frame.frameId));
+      if (pickerFrames.get(tab.id) !== frameIds) return;
+      frameIds.push(frame.frameId);
+      try {
+        await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, pickerId }, frame.frameId));
+      } catch {
+        const index = frameIds.indexOf(frame.frameId);
+        if (index !== -1) frameIds.splice(index, 1);
+        // Also unwind a queued start if an unresponsive frame later comes back.
+        sendToTab(tab.id, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frame.frameId).catch(() => {});
+      }
+      if (pickerFrames.get(tab.id) !== frameIds) sendToTab(tab.id, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frame.frameId).catch(() => {});
+    }));
+    if (pickerFrames.get(tab.id) !== frameIds) return { started: false, cancelled: true };
     if (mode === "frame") {
-      if (frameIds.length <= 1) {
+      if (frameIds.length === 1) {
         const error = new Error("No capturable frames were found on this page. Cross-origin frames need site access, and scrolling areas are captured with Select an element.");
         error.winshotFriendly = true;
         throw error;
       }
-      const allFrames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => null);
       const inaccessible = allFrames ? Math.max(0, allFrames.length - frameIds.length) : 0;
-      frameInfo = { accessible: frameIds.length - 1, inaccessible };
+      const frameInfo = { accessible: frameIds.length - 1, inaccessible };
+      await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo, pickerId }, 0));
     }
-    pickerFrames.set(tab.id, frameIds);
-    pickerSettings.set(tab.id, settings);
-    const started = await Promise.allSettled(frameIds.map((frameId) =>
-      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo }, frameId)));
-    if (!started.some((result) => result.status === "fulfilled")) throw new Error("The picker could not start in any accessible frame.");
     return { started: true, frameCount: frameIds.length };
   } catch (error) {
-    pickerFrames.delete(tab.id);
-    pickerSettings.delete(tab.id);
+    await stopPickers(tab.id, null, pickerId);
+    if (!pickerTokens.has(tab.id)) pickerSettings.delete(tab.id);
     if (error?.winshotFriendly) throw error;
     throw new Error(`${restrictedPageReason(tab.url)} (${friendlyError(error)})`);
   }
 }
 
-async function stopPickers(tabId, keepFrameId = null) {
+async function stopPickers(tabId, keepFrameId = null, expectedPickerId = null) {
+  const pickerId = pickerTokens.get(tabId);
+  if (expectedPickerId && expectedPickerId !== pickerId) return;
   const frameIds = pickerFrames.get(tabId) || [];
   pickerFrames.delete(tabId);
+  pickerTokens.delete(tabId);
   await Promise.allSettled(frameIds.filter((frameId) => frameId !== keepFrameId).map((frameId) =>
-    sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER" }, frameId)));
+    boundedPickerCall(sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frameId))));
 }
 
 async function cancelActiveCapture() {
@@ -968,6 +1003,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "WINSHOT_PICK_RESULT") {
       const tab = sender.tab;
       if (!tab?.id) throw new Error("The picker tab is no longer available.");
+      if (message.pickerId && pickerTokens.get(tab.id) !== message.pickerId) return { cancelled: true };
       const settings = pickerSettings.get(tab.id) || await loadSettings();
       pickerSettings.delete(tab.id);
       await stopPickers(tab.id, sender.frameId || 0);
