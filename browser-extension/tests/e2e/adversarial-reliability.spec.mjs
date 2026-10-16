@@ -565,14 +565,15 @@ for(const fault of ['readback','unstable']) test(`a ${fault} recapture keeps the
       chrome.tabs.sendMessage=async(...args)=>{
         const message=args[1];
         if(message.type==='WINSHOT_PREPARE'&&++prepares===2){
-          const s=await import(chrome.runtime.getURL('src/store.js'));
-          globalThis.originalHashes=await Promise.all((await s.getTiles(message.sessionId)).map(async t=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await t.blob.arrayBuffer()))).join(',')));
+          const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('winshot-captures');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+          const tiles=await new Promise((resolve,reject)=>{const r=db.transaction('tiles').objectStore('tiles').index('byCapture').getAll(IDBKeyRange.only(message.sessionId));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});db.close();
+          globalThis.originalHashes=await Promise.all(tiles.map(async t=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await t.blob.arrayBuffer()))).join(',')));
         }
         const result=await send(...args);
-        if(prepares>1&&fault==='unstable'&&message.type==='WINSHOT_SCROLL')return{...result,stable:false,warnings:['Forced recapture readiness failure']};
+        if(prepares>1&&fault==='unstable'&&message.type==='WINSHOT_SCROLL'){globalThis.recaptureFaultReached=true;return{...result,stable:false,warnings:['Forced recapture readiness failure']};}
         return result;
       };
-      chrome.tabs.captureVisibleTab=(...args)=>prepares>1&&fault==='readback'?Promise.reject(new Error('Missing host permission during recapture')):image(...args);
+      chrome.tabs.captureVisibleTab=(...args)=>{if(prepares>1&&fault==='readback'){globalThis.recaptureFaultReached=true;return Promise.reject(new Error('Missing host permission during recapture'));}return image(...args);};
     },fault);
     const {editor,record}=await capture(run);
     expect(record.state,JSON.stringify(record.report)).toBe('partial');
@@ -585,7 +586,24 @@ for(const fault of ['readback','unstable']) test(`a ${fault} recapture keeps the
       const keys=await new Promise((resolve,reject)=>{const r=db.transaction('tiles').objectStore('tiles').getAllKeys();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});db.close();
       return{hashes,staged:keys.filter(k=>String(k[0]).includes('-retry-')).length};
     });
+    expect(await worker.evaluate(()=>globalThis.recaptureFaultReached)).toBe(true);
     expect(actual.hashes).toEqual(await worker.evaluate(()=>globalThis.originalHashes));
     expect(actual.staged).toBe(0);
+  } finally {await run.close();}
+});
+
+
+test("an old main-world animation bridge cannot intercept an upgraded capture",async()=>{
+  const run=await launch();
+  try {
+    await run.page.goto('http://127.0.0.1:4173/gsap',{waitUntil:'networkidle0'});
+    await run.page.evaluate(()=>{
+      window[Symbol.for('winshot.page-effects.v1')]=true;window.legacyRequests=0;
+      addEventListener('message',event=>{if(event.source===window&&event.data?.source==='winshot-effects-request'){window.legacyRequests++;postMessage({source:'winshot-effects-response',nonce:event.data.nonce,result:{error:'Obsolete page bridge'}},'*');}});
+    });
+    const {record}=await capture(run);
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    expect(record.report.restoration).toBe('verified by read-back');
+    expect(await run.page.evaluate(()=>window.legacyRequests)).toBe(0);
   } finally {await run.close();}
 });

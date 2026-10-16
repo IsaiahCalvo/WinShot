@@ -1,7 +1,8 @@
 (() => {
-  const key = Symbol.for("winshot.page-effects.v1");
-  if (window[key]) return;
-  window[key] = true;
+  const key = Symbol.for("winshot.page-effects");
+  const version = 2;
+  if (window[key]?.version === version) return;
+  window[key]?.dispose?.();
   let capture = null;
   const roots = () => {
     const all = [document];
@@ -56,8 +57,10 @@
     if (!capture || capture.id !== id) return { restored: true };
     const saved = capture; capture = null;
     clearInterval(saved.watchdog);
-    if (HTMLMediaElement.prototype.play === saved.playProxy) HTMLMediaElement.prototype.play = saved.play;
     const failures = [];
+    try {
+      if (HTMLMediaElement.prototype.play === saved.playProxy) HTMLMediaElement.prototype.play = saved.play;
+    } catch { failures.push("media playback function"); }
     if (saved.gsap) {
       try {
         try { saved.gsap.globalTimeline.totalTime(saved.rootTime, true); }
@@ -115,9 +118,9 @@
     update();
     return { handled: true, gsap: Boolean(gsap), media: capture.media.size };
   }
-  addEventListener("message", event => {
+  const receive = event => {
     const message = event.data;
-    if (event.source !== window || message?.source !== "winshot-effects-request" || typeof message.nonce !== "string") return;
+    if (event.source !== window || message?.source !== "winshot-effects-request-v2" || typeof message.nonce !== "string") return;
     let result;
     try {
       if (message.action === "begin") result = begin(message.id);
@@ -125,6 +128,11 @@
       else if (message.action === "update" && capture?.id === message.id) { update(); result = { handled: true }; }
       else result = { handled: false };
     } catch (error) { result = { error: String(error.message) }; }
-    postMessage({ source: "winshot-effects-response", nonce: message.nonce, result }, "*");
-  });
+    postMessage({ source: "winshot-effects-response-v2", nonce: message.nonce, result }, "*");
+  };
+  addEventListener("message", receive);
+  window[key] = { version, dispose() {
+    try { if (capture) restore(capture.id); }
+    finally { removeEventListener("message", receive); }
+  } };
 })();

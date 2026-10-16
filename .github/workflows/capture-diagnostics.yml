@@ -30,7 +30,7 @@ jobs:
           printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-review-regression "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-review-regression > /dev/null
           sudo apparmor_parser -r /etc/apparmor.d/winshot-review-regression
       - run: npm run build:extension
-      - run: npx playwright test -c browser-extension/playwright.config.mjs --project=extension-smoke --grep "nested fixed header and footer|GSAP Infinity|GSAP invalidated|recapture keeps the original" --reporter=list --output=output/review-regressions
+      - run: npx playwright test -c browser-extension/playwright.config.mjs --project=extension-smoke --grep "nested fixed header and footer|GSAP Infinity|GSAP invalidated|recapture keeps the original|old main-world animation bridge" --reporter=list --output=output/review-regressions
       - uses: actions/upload-artifact@v4
         if: always()
         with:
