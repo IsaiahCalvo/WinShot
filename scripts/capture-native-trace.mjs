@@ -87,6 +87,7 @@ const result = {
   githubSha: process.env.GITHUB_SHA || null,
   githubRunId: process.env.GITHUB_RUN_ID || null,
   platform: process.platform,
+  experiment: {diagnosticOnly:true,temporarySourceBackgroundBeforeRestore:true,foregroundReturnBudgetMs:8000,productionRuntimeModified:false},
   claims: { nativeRootCauseProven: false, diagnosticTimingIsComparativeBenchmark: false, sourcePoststateIsFullMediaProof: false },
   startedAt: new Date().toISOString(),
   sourceUrl,
@@ -237,6 +238,17 @@ try {
       chrome.tabs[key]=async function(...args) {
         const type=key==="sendMessage"?args[1]?.type:null;
         const request=args[1];
+        if(type==="WINSHOT_RESTORE"&&!globalThis.__winshotDiagnosticHideProof){
+          const source=await chrome.tabs.get(args[0]);
+          const proof={sourceTabId:source.id,sourceWindowId:source.windowId,start:performance.now(),timeOrigin:performance.timeOrigin};
+          globalThis.__winshotDiagnosticHideProof=proof;
+          console.timeStamp("WS DIAGNOSTIC background source begin");
+          // Intervention lives only in this disposable diagnostic wrapper. The
+          // original sendMessage still receives the exact original arguments.
+          const cover=await chrome.tabs.create({windowId:source.windowId,url:"about:blank",active:true});
+          proof.coverTabId=cover.id;proof.end=performance.now();
+          console.timeStamp("WS DIAGNOSTIC background source end");
+        }
         if(!armed && (type==="WINSHOT_RESTORE" || (type==="WINSHOT_SCROLL" && request.viewport?.height>0 && request.extent?.height>0 &&
             request.y>=request.extent.height-2*request.viewport.height && request.x>=request.extent.width-request.viewport.width-1))){
           armed=true;
@@ -297,6 +309,19 @@ try {
         emit("WS MAIN "+(data.action?"request ":"response ")+action);
         if(!data.action)actions.delete(data.nonce);
       });
+      const nativePlay=HTMLMediaElement.prototype.play,nativePause=HTMLMediaElement.prototype.pause;
+      const originalMedia=[...document.querySelectorAll("video,audio")],originalCanvases=[...document.querySelectorAll("canvas")];
+      let contextLossEvents=0;
+      for(const canvas of originalCanvases)canvas.addEventListener("webglcontextlost",()=>contextLossEvents++);
+      // Read-only inspection: no media prototype wrapping or playback requests.
+      window.__winshotDiagnosticInspect=()=>({
+        visibility:document.visibilityState,x:scrollX,y:scrollY,
+        captureStyles:document.querySelectorAll("style[data-winshot-capture]").length,
+        snapshots:document.querySelectorAll("canvas[data-winshot-surface]").length,
+        playPrototypeRestored:HTMLMediaElement.prototype.play===nativePlay,pausePrototypeRestored:HTMLMediaElement.prototype.pause===nativePause,
+        media:originalMedia.map((node,index)=>({index,connected:node.isConnected,paused:node.paused,time:node.currentTime,rate:node.playbackRate,readyState:node.readyState,error:node.error?.code??null})),
+        originalCanvasNodesConnected:originalCanvases.every(node=>node.isConnected),contextLossEvents
+      });
       emit("WS MAIN diagnostic ready");
     }
   }),{tabId,relay});
@@ -328,8 +353,56 @@ try {
   result.decodedEditorReadyMs=performance.now()-captureStarted;
   result.record=await limit(editor.evaluate(async()=>{const store=await import(chrome.runtime.getURL("src/store.js"));return store.getRecord(new URL(location.href).searchParams.get("id"));}),2000,"Record retrieval");
   await saveWorker();
-  try { result.sourcePoststate=await limit(page.evaluate(()=>({x:scrollX,y:scrollY,captureStyles:document.querySelectorAll("style[data-winshot-capture]").length,snapshots:document.querySelectorAll("canvas[data-winshot-surface]").length,play:Function.prototype.toString.call(HTMLMediaElement.prototype.play),pause:Function.prototype.toString.call(HTMLMediaElement.prototype.pause)})),2000,"Source poststate"); }
-  catch(error){result.sourcePoststateError=String(error);}
+  result.hideBeforeRestore=await limit(worker.evaluate(()=>globalThis.__winshotDiagnosticHideProof||null),1000,"Diagnostic cover-tab proof");
+  const foregroundStarted=performance.now(),foregroundDeadline=Math.min(foregroundStarted+8000,deadline-45000);
+  const foregroundRemaining=()=>Math.max(1,foregroundDeadline-performance.now());
+  result.foregroundReturn={budgetMs:8000,startedNodeAt:foregroundStarted,mediaIntentParityCertified:false,mediaScope:"All original media states are read without playback calls; latest arbitrary page requests are not independently reconstructed."};
+  await limit(worker.evaluate(()=>console.timeStamp("WS DIAGNOSTIC foreground return begin")),foregroundRemaining(),"Foreground trace marker");
+  try{
+    await limit(page.bringToFront(),foregroundRemaining(),"Foreground source activation");
+    result.foregroundReturn.beforePaint=await limit(page.evaluate(async()=>{
+      const frames=[];
+      await new Promise(resolve=>requestAnimationFrame(first=>{frames.push(first);requestAnimationFrame(second=>{frames.push(second);resolve();});}));
+      return {...window.__winshotDiagnosticInspect(),rafTimestamps:frames};
+    }),foregroundRemaining(),"Foreground rAF and state readback");
+    const paint=await limit(worker.evaluate(async({windowId,tabId,budgetMs})=>{
+      const workerDeadline=performance.now()+budgetMs;
+      const lastStart=globalThis.__winshotNativeApiTrace.filter(item=>item.api==="captureVisibleTab").at(-1)?.start??-Infinity;
+      const quotaWait=Math.max(0,550-(performance.now()-lastStart));
+      if(quotaWait>=workerDeadline-performance.now())throw new Error("Foreground quota wait exceeds remaining 8 s budget");
+      if(quotaWait)await new Promise(resolve=>setTimeout(resolve,quotaWait));
+      const [active]=await chrome.tabs.query({active:true,windowId});
+      if(active?.id!==tabId)throw new Error("The original source tab is not active for native foreground readback");
+      if(performance.now()>=workerDeadline)throw new Error("Foreground native capture start exceeds remaining 8 s budget");
+      const dataUrl=await chrome.tabs.captureVisibleTab(windowId,{format:"png"});
+      const bitmap=await createImageBitmap(await(await fetch(dataUrl)).blob());
+      const canvas=new OffscreenCanvas(64,64),context=canvas.getContext("2d",{willReadFrequently:true});context.drawImage(bitmap,0,0,64,64);
+      const rgba=context.getImageData(0,0,64,64).data,colors=new Set();let low=255,high=0,opaque=0;
+      for(let index=0;index<rgba.length;index+=4){const r=rgba[index],g=rgba[index+1],b=rgba[index+2];low=Math.min(low,r,g,b);high=Math.max(high,r,g,b);if(rgba[index+3]>=250)opaque++;colors.add(((r>>3)<<10)|((g>>3)<<5)|(b>>3));}
+      const stats={width:bitmap.width,height:bitmap.height,opaqueRatio:opaque/4096,colorBuckets:colors.size,channelRange:high-low,activeTabId:active.id};bitmap.close();return {dataUrl,stats};
+    },{windowId:result.hideBeforeRestore.sourceWindowId,tabId,budgetMs:foregroundRemaining()}),foregroundRemaining(),"Actual native foreground paint readback");
+    const paintPath=path.join(output,"foreground-native-paint.png");fs.writeFileSync(paintPath,Buffer.from(paint.dataUrl.split(",")[1],"base64"));
+    result.foregroundReturn.paint={...paint.stats,path:paintPath,sha256:sha256(fs.readFileSync(paintPath))};
+    result.foregroundReturn.afterPaint=await limit(page.evaluate(()=>window.__winshotDiagnosticInspect()),foregroundRemaining(),"Post-paint source responsiveness");
+    const post=result.foregroundReturn.afterPaint,pre=result.foregroundReturn.beforePaint;
+    result.foregroundReturn.checks={
+      originalSourceActive:paint.stats.activeTabId===tabId,visible:post.visibility==="visible",
+      rafProgress:pre.rafTimestamps.length===2&&pre.rafTimestamps[1]>pre.rafTimestamps[0],
+      actualNativePaintNonblank:paint.stats.width===1200&&paint.stats.height===1000&&paint.stats.opaqueRatio>.95&&paint.stats.colorBuckets>=8&&paint.stats.channelRange>=32,
+      scrollRestored:Math.abs(post.x-result.source.x)<=2&&Math.abs(post.y-result.source.y)<=2,
+      noCaptureStylesOrSnapshots:post.captureStyles===0&&post.snapshots===0,
+      prototypesRestored:post.playPrototypeRestored&&post.pausePrototypeRestored,
+      allOriginalMediaRead:post.media.length===result.source.media&&post.media.every(node=>node.connected&&Number.isFinite(node.time)&&Number.isFinite(node.rate)&&!node.error),
+      originalCanvasesConnectedNoObservedContextLoss:post.originalCanvasNodesConnected&&post.contextLossEvents===0
+    };
+    result.foregroundReturn.requiredChecksPassed=Object.values(result.foregroundReturn.checks).every(Boolean);
+  }catch(error){result.foregroundReturn.error=String(error);result.foregroundReturn.requiredChecksPassed=false;}
+  finally{
+    result.foregroundReturn.durationMs=performance.now()-foregroundStarted;
+    result.foregroundReturn.withinBudget=result.foregroundReturn.durationMs<=8000;
+    result.foregroundReturn.requiredChecksPassed=Boolean(result.foregroundReturn.requiredChecksPassed&&result.foregroundReturn.withinBudget);
+    await limit(worker.evaluate(()=>console.timeStamp("WS DIAGNOSTIC foreground return end")),1000,"Foreground end trace marker").catch(error=>{result.foregroundReturn.markerError=String(error);});
+  }
   result.completed=true;
   result.captureReachedDecodedEditor=true;
   result.restorationVerified=result.record?.report?.restoration==="verified by read-back";
@@ -365,7 +438,10 @@ try {
       const begin=markers.find(item=>item.label==="WS API WINSHOT_RESTORE begin")?.atUs;
       const end=markers.find(item=>item.label==="WS API WINSHOT_RESTORE end"&&(!begin||item.atUs>=begin))?.atUs;
       const longest=begin===undefined?[]:events.filter(event=>event.ph==="X"&&event.dur>=10000&&event.ts<(end??Infinity)&&event.ts+event.dur>begin).sort((a,b)=>b.dur-a.dur).slice(0,80).map(event=>({startRelativeMs:(event.ts-begin)/1000,durationMs:event.dur/1000,name:event.name,category:event.cat,pid:event.pid,tid:event.tid,process:processes[event.pid],thread:threads[event.pid+":"+event.tid],args:JSON.stringify(event.args||{}).slice(0,2000)}));
-      const summary={nativeRootCauseProven:false,scope:"Native trace task wall durations can overlap; they are not additive CPU time or automatic root-cause attribution.",eventCount:events.length,tracingComplete:result.traceComplete,dataLossStatus:typeof result.traceComplete?.dataLossOccurred==="boolean"?result.traceComplete.dataLossOccurred:"unknown",processes,threads,markers,longestTasksOverlappingRestore:longest};
+      const foregroundBegin=markers.find(item=>item.label==="WS DIAGNOSTIC foreground return begin")?.atUs;
+      const foregroundEnd=markers.find(item=>item.label==="WS DIAGNOSTIC foreground return end"&&(!foregroundBegin||item.atUs>=foregroundBegin))?.atUs;
+      const foregroundLongest=foregroundBegin===undefined?[]:events.filter(event=>event.ph==="X"&&event.dur>=10000&&event.ts<(foregroundEnd??Infinity)&&event.ts+event.dur>foregroundBegin).sort((a,b)=>b.dur-a.dur).slice(0,80).map(event=>({startRelativeMs:(event.ts-foregroundBegin)/1000,durationMs:event.dur/1000,name:event.name,category:event.cat,pid:event.pid,tid:event.tid,process:processes[event.pid],thread:threads[event.pid+":"+event.tid],args:JSON.stringify(event.args||{}).slice(0,2000)}));
+      const summary={foregroundReturnIntervalUs:{begin:foregroundBegin,end:foregroundEnd},longestTasksDuringForegroundReturn:foregroundLongest,nativeRootCauseProven:false,scope:"Native trace task wall durations can overlap; they are not additive CPU time or automatic root-cause attribution.",eventCount:events.length,tracingComplete:result.traceComplete,dataLossStatus:typeof result.traceComplete?.dataLossOccurred==="boolean"?result.traceComplete.dataLossOccurred:"unknown",processes,threads,markers,longestTasksOverlappingRestore:longest};
       fs.writeFileSync(path.join(output,"native-timeline-summary.json"),JSON.stringify(summary,null,2));
       result.traceValidation={gzipAndJsonParsed:true,eventCount:events.length,markerCount:markers.length,dataLossStatus:summary.dataLossStatus,restoreBeginObserved:begin!==undefined,restoreEndObserved:end!==undefined,captureCssRemovalObserved:markers.some(marker=>marker.label==="WS capture CSS removed")};
     }catch(error){result.traceValidationError=String(error);}
@@ -375,7 +451,7 @@ try {
   process.stdout.write("WINSHOT_NATIVE_RESULT "+JSON.stringify(result)+"\n");
   const timelineFile=path.join(output,"native-timeline-summary.json");
   if(fs.existsSync(timelineFile))process.stdout.write("WINSHOT_NATIVE_TIMELINE "+JSON.stringify(JSON.parse(fs.readFileSync(timelineFile,"utf8")))+"\n");
-  if(!result.completed||!result.traceValidation?.gzipAndJsonParsed)process.exitCode=1;
+  if(!result.completed||!result.traceValidation?.gzipAndJsonParsed||!result.foregroundReturn?.requiredChecksPassed)process.exitCode=1;
   fs.rmSync(profile,{recursive:true,force:true,maxRetries:3,retryDelay:100});
   process.stdout.write(JSON.stringify({completed:result.completed,error:result.error,editorOpenedMs:result.editorOpenedMs,decodedEditorReadyMs:result.decodedEditorReadyMs,restoration:result.record?.report?.restoration,tracePath:result.tracePath,traceBytes:result.traceBytes,traceError:result.traceError,totalMs:result.totalMs})+"\n");
 }
