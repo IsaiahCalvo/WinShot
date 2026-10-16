@@ -558,7 +558,12 @@
     for (const root of openRoots()) {
       if (session.roots.includes(root)) continue;
       session.roots.push(root);
-      for (const animation of pageAnimations()) rememberAnimation(animation, true);
+      for (const animation of pageAnimations()) {
+        // Temporary scroll/view-timeline pins live in captureAnimations. Recording
+        // them here would revive the cancelled fill:both snapshot on restore.
+        if (session.captureAnimations.has(animation)) continue;
+        rememberAnimation(animation, true);
+      }
       installFreezeStyle(root, session.id);
       session.observer?.observe(root, { childList: true, subtree: true, attributes: true });
       for (const node of root.querySelectorAll("*")) session.pendingNodes.add(node);
