@@ -9,6 +9,7 @@
   let frameHostSession = null;
   let pickerCleanup = null;
   let activePickerId = null;
+  let cancelledPickerIds = new Set();
   let pendingPickerState = null;
   const announcedFrames = new Map();
 
@@ -928,6 +929,7 @@
   }
 
   async function beginPicker(mode, frameInfo = null, pickerId = null) {
+    if (pickerId && cancelledPickerIds.has(pickerId)) return { started: false, cancelled: true };
     pickerCleanup?.();
     activePickerId = pickerId;
     restore("picker-started");
@@ -960,7 +962,8 @@
   }
 
   function cancelPicker(pickerId = null) {
-    if (pickerId && pickerId !== activePickerId) return { cancelled: false };
+    if (pickerId) cancelledPickerIds.add(pickerId);
+    if (pickerId && activePickerId && pickerId !== activePickerId) return { cancelled: false };
     pickerCleanup?.();
     activePickerId = null;
     restorePickerState();

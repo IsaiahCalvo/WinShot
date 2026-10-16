@@ -61,7 +61,9 @@ async function sendToTab(tabId, message, frameId = 0) {
 async function injectCaptureScript(tabId, frameId = 0) {
   return await chrome.scripting.executeScript({
     target: { tabId, frameIds: [frameId] },
-    injectImmediately: true,
+    // Top frame: start even while the page is still parsing. Child frames must wait
+    // for document_idle so a placeholder about:blank is not replaced after inject.
+    injectImmediately: frameId === 0,
     files: ["src/content.js"]
   });
 }
