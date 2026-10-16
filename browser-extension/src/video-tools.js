@@ -47,9 +47,13 @@ export async function inspectVideo(blob, knownDuration) {
     if (!Number.isFinite(video.duration)) {
       // MediaRecorder's streaming WebM omits duration. Chrome discovers its last
       // timestamp by seeking past EOF; never write a fabricated duration to it.
-      const discovered = mediaEvent(video, "seeked");
-      video.currentTime = 1e10;
-      await discovered;
+      try {
+        const discovered = mediaEvent(video, "seeked");
+        video.currentTime = 1e10;
+        await discovered;
+      } catch (error) {
+        if (!Number.isFinite(knownDuration) || knownDuration < .1) throw error;
+      }
     }
     const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : knownDuration;
     if (!Number.isFinite(duration) || duration < .1 || !video.videoWidth || !video.videoHeight)
@@ -108,8 +112,8 @@ export async function exportVideoClip(blob, {
       if (mono) { gain.channelCount = 1; gain.channelCountMode = "explicit"; gain.channelInterpretation = "speakers"; destination.channelCount = 1; }
       source.connect(gain).connect(destination);
       // HTMLMediaElement.muted also silences MediaElementAudioSource in Chrome.
-      // Route unmuted audio only to the recording destination, never speakers.
-      video.muted = false;
+      // Keep muted through play() so autoplay policy still allows it after
+      // loadeddata/seek, then unmute so the graph can hear the element.
       for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
     }
     const multiplier = { compact: .06, balanced: .12, high: .2 }[quality] || .12;
@@ -128,6 +132,7 @@ export async function exportVideoClip(blob, {
     stopPromise.catch(() => {});
     recorder.start(500);
     await bounded(video.play(), { signal: localAbort.signal, message: "Playback could not start for export. Try again or save the original." });
+    if (audio) video.muted = false;
     let lastTime = video.currentTime, lastAdvance = performance.now();
     await new Promise((resolve, reject) => {
       const cancel = () => { clean(); reject(localAbort.signal.reason || new DOMException("Cancelled", "AbortError")); };

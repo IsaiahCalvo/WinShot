@@ -286,6 +286,10 @@ export class ImageEditor {
           this.deleteSelection();
         }
       } else if (e.key === "Escape") {
+        if (this.drag?.before) {
+          Object.assign(this.doc, this.drag.before);
+        }
+        this.drag = null;
         this.pendingCrop = null;
         this.selected = null;
         this.setTool("select");
@@ -423,6 +427,10 @@ export class ImageEditor {
     const p = this.point(e);
     if (d.moving) {
       const item = this.doc.objects.find((s) => s.id === this.selected);
+      if (!item) {
+        this.drag = null;
+        return;
+      }
       item.x = d.original.x + p.x - d.start.x;
       item.y = d.original.y + p.y - d.start.y;
       if (item.type === "pen")
@@ -442,6 +450,10 @@ export class ImageEditor {
     const d = this.drag;
     if (!d) return;
     this.move(e);
+    if (!this.drag) {
+      this.render();
+      return;
+    }
     this.drag = null;
     if (d.moving) {
       if (JSON.stringify(snapshot(this.doc)) !== JSON.stringify(d.before)) {
@@ -476,6 +488,7 @@ export class ImageEditor {
     Object.assign(this.doc, this.doc.past.pop());
     this.selected = null;
     this.pendingCrop = null;
+    this.drag = null;
     this.changed();
   }
   redo() {
@@ -484,6 +497,7 @@ export class ImageEditor {
     Object.assign(this.doc, this.doc.future.pop());
     this.selected = null;
     this.pendingCrop = null;
+    this.drag = null;
     this.changed();
   }
   deleteSelection() {
@@ -491,6 +505,7 @@ export class ImageEditor {
     this.remember();
     this.doc.objects = this.doc.objects.filter((s) => s.id !== this.selected);
     this.selected = null;
+    this.drag = null;
     this.changed();
   }
   applyCrop() {

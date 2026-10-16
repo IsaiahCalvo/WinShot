@@ -64,6 +64,7 @@ function releasePreview() {
   currentUrl = undefined;
 }
 async function showVideo(record, blob) {
+  const previous = current, previousBlob = currentBlob;
   releasePreview();
   current = { ...record, persisted: record.persisted !== false };
   currentBlob = blob;
@@ -89,11 +90,27 @@ async function showVideo(record, blob) {
   if (current.persisted) history.replaceState(null, "", `video-editor.html?id=${encodeURIComponent(current.id)}`);
   else history.replaceState(null, "", "video-editor.html");
   updateTrimUI();
-  await previewReady;
-  if (!Number.isFinite(preview.duration)) await seekVideo(preview, 1e10);
-  await seekVideo(preview, current.trimStart);
-  setState("ready");
-  await refreshHistory();
+  try {
+    await previewReady;
+    try {
+      if (!Number.isFinite(preview.duration)) await seekVideo(preview, 1e10);
+      await seekVideo(preview, current.trimStart);
+    } catch (error) {
+      if (!Number.isFinite(current.duration) || current.duration < .1) throw error;
+    }
+    setState("ready");
+    await refreshHistory();
+  } catch (error) {
+    current = previous;
+    currentBlob = previousBlob;
+    if (previousBlob && previousBlob !== blob) {
+      try { await showVideo(previous, previousBlob); }
+      catch { releasePreview(); preview.hidden = true; $("#empty-state").hidden = false; }
+    } else if (!previousBlob) {
+      preview.hidden = true; $("#empty-state").hidden = false;
+    }
+    throw error;
+  }
 }
 async function refreshHistory() {
   const list = $("#video-history");
@@ -186,7 +203,15 @@ $("#record").addEventListener("click", async () => {
       try {
         await keepVideo(new Blob(parts, { type: mimeType }), { title: `Recording ${new Date().toLocaleString()}`, knownDuration: duration, source: "recording" });
         if (recordingError || stopReason) message(`${recordingError?.message || stopReason} The playable recording was kept; check it before exporting.`, true);
-      } catch (error) { releasePreview(); if (currentBlob) await showVideo(current, currentBlob); else { preview.hidden = true; $("#empty-state").hidden = false; } setState("ready"); message(error.message, true); }
+      } catch (error) {
+        releasePreview();
+        try {
+          if (currentBlob) await showVideo(current, currentBlob);
+          else { preview.hidden = true; $("#empty-state").hidden = false; }
+        } catch { preview.hidden = true; $("#empty-state").hidden = false; }
+        setState("ready");
+        message(error.message, true);
+      }
     };
     recordingStream.getVideoTracks()[0].addEventListener("ended", () => { if (recorder?.state !== "inactive") recorder?.stop(); }, { once: true });
     preview.pause(); preview.removeAttribute("src"); preview.srcObject = recordingStream; preview.controls = false; preview.muted = true; preview.hidden = false; $("#empty-state").hidden = true;
