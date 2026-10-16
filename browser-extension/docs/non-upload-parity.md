@@ -7,7 +7,7 @@ Previous capture-only scope decisions do not close the remaining items below.
 
 | Area | Existing capability | Remaining completion work |
 | --- | --- | --- |
-| Capture | Visible/full-page/region/element/panels/frames, batches, PDF | GSAP JavaScript stabilization, zero-size floating containers, transient layout recovery; repeat the public failures |
+| Capture | Visible/full-page/region/element/panels/frames, batches, PDF | Repeat the public failures on each candidate; GSAP stabilization, zero-size floating containers, transient layout recovery, canvas snapshots, and loading-only frame selection now have regression tests |
 | Desktop connection | Convenience external URL | Acknowledged native messaging, actual window pixels, editor handoff and Windows integration test |
 | Editing | Native Windows shapes/styles/counters/undo/resize/projects; browser preview only | Accessible browser annotation workflow with styles, undo/redo, crop/resize, multiple documents and persistent editable annotations |
 | Saving | PNG/JPEG/WebP, searchable linked PDF, clipboard, print | GIF/BMP, editable PNG metadata, external editor/native handoff, email drafts and drag-file export |

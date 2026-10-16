@@ -62,3 +62,10 @@ additional upstream source was copied and no runtime dependencies were added.
 | [GoFullPage's original extension](https://github.com/mrcoles/full-page-screen-capture-chrome-extension/blob/master/page.js) | MIT | Overlapping tiles, zoom rounding, and watchdog cleanup. Keep these existing safeguards; add bounded image readiness instead of trusting a fixed delay. |
 | [Playwright screenshotter](https://github.com/microsoft/playwright/blob/main/packages/playwright-core/src/server/screenshotter.ts) | Apache-2.0 | Screenshot styling must reach open shadow roots and be restored. WinShot applies its own capture stylesheet and sticky handling in those roots. |
 | [ShareX scrolling capture](https://github.com/ShareX/ShareX/blob/master/ShareX.ScreenCaptureLib/ScrollingCaptureManager.cs) | GPL-3.0 | Reviewed for behavior: adjustable waits, bounded capture, and partial results. No ShareX source copied. |
+
+## Development-only animation fixture
+
+The test corpus uses the unmodified GSAP 3.15.0 distribution under the GSAP
+Standard no-charge license. See `tests/vendor/README.md` in the source repository
+for its pinned upstream commit. It is not bundled in this extension. Runtime
+animation stabilization calls the GSAP installation already present on a page.

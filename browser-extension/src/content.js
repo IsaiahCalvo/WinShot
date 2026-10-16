@@ -27,13 +27,17 @@
   }
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const nextPaint = () => new Promise((resolve) => {
+  const nextPaint = (onPaint = null) => new Promise((resolve) => {
     let frame;
-    const finish = () => { clearTimeout(timer); cancelAnimationFrame(frame); resolve(); };
+    const finish = (painted = false) => {
+      clearTimeout(timer); cancelAnimationFrame(frame);
+      if (painted && session) onPaint?.();
+      resolve();
+    };
     // A hidden frame/tab can suspend rAF. Keep messages bounded so cancellation
     // and the watchdog can still unwind a capture when the user switches tabs.
-    const timer = setTimeout(finish, 250);
-    frame = requestAnimationFrame(() => { frame = requestAnimationFrame(finish); });
+    const timer = setTimeout(() => finish(), 250);
+    frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => finish(true)); });
   });
 
   function scrollingElement() {
@@ -133,6 +137,8 @@
     current.observer?.disconnect();
     const failures = [];
 
+    for (const snapshot of current.surfaceSnapshots.values()) snapshot.remove();
+
     for (const [element, properties] of [...current.changedStyles].reverse()) {
       if (!(element instanceof Element)) continue;
       for (const [property, original] of properties) {
@@ -198,7 +204,8 @@
       else current.targetElement.setAttribute("data-winshot-target", current.targetAttributeBefore);
     }
     const effects = await pageEffects("restore", current.id);
-    if (effects.error || effects.restored === false) failures.push("page-animation-state");
+    if (effects.error) failures.push(`page-animation-state: ${effects.error}`);
+    for (const failure of effects.failures || []) failures.push(`page-animation-state: ${failure}`);
     return { restored: failures.length === 0, reason, failures };
   }
 
@@ -522,7 +529,7 @@
     let previous = "";
     let repeats = 0;
     while (performance.now() - start < timeoutMs) {
-      await nextPaint();
+      await nextPaint(snapshotVisibleCanvases);
       await pageEffects("update", session.id);
       refreshCaptureEffects();
       const metrics = currentMetrics();
@@ -555,6 +562,67 @@
     return [...new Set(session.roots.flatMap(root => root === document
       ? document.getAnimations()
       : [...root.querySelectorAll("*")].flatMap(node => node.getAnimations())))];
+  }
+
+  function snapshotVisibleCanvases() {
+    // Copy browser-rendered canvas pixels during the paint callback's microtask,
+    // before WebGL clears a non-preserved drawing buffer. Keep the original
+    // canvas/context connected and running; cover it with a static canvas in the
+    // same containing block. No page CSP exception or image serialization needed.
+    for (const root of session.roots) for (const canvas of root.querySelectorAll("canvas:not([data-winshot-surface])")) {
+      if (session.surfaceSnapshots.has(canvas) || !canvas.width || !canvas.height) continue;
+      const rect = canvas.getBoundingClientRect(), style = getComputedStyle(canvas);
+      if (!rect.width || !rect.height || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth ||
+          style.visibility !== "visible" || hasTransparentAncestor(canvas)) continue;
+      const pixels = canvas.width * canvas.height;
+      if (pixels + session.surfacePixels > 32_000_000) continue;
+      const snapshot = document.createElement("canvas");
+      snapshot.width = canvas.width; snapshot.height = canvas.height;
+      snapshot.dataset.winshotSurface = session.id;
+      snapshot.setAttribute("aria-hidden", "true");
+      for (const property of style) snapshot.style.setProperty(property, style.getPropertyValue(property), "important");
+      snapshot.style.setProperty("pointer-events", "none", "important");
+      if (!["fixed", "absolute"].includes(style.position)) {
+        snapshot.style.setProperty("position", "absolute", "important");
+        snapshot.style.setProperty("left", `${canvas.offsetLeft - (parseFloat(style.marginLeft) || 0)}px`, "important");
+        snapshot.style.setProperty("top", `${canvas.offsetTop - (parseFloat(style.marginTop) || 0)}px`, "important");
+        snapshot.style.setProperty("right", "auto", "important");
+        snapshot.style.setProperty("bottom", "auto", "important");
+      }
+      try {
+        const context = snapshot.getContext("2d", { willReadFrequently: true });
+        context.drawImage(canvas, 0, 0);
+        try {
+          // An idle WebGL buffer may already have been cleared by the browser.
+          // Never cover its still-visible front buffer with a transparent copy.
+          const rgba = context.getImageData(0, 0, snapshot.width, snapshot.height).data;
+          let painted = false;
+          for (let i = 3; i < rgba.length; i += 4) if (rgba[i]) { painted = true; break; }
+          if (!painted) continue;
+        } catch (error) {
+          // A tainted 2D canvas can be copied for display, though script cannot
+          // inspect its pixels. Chrome's actual screenshot still owns export.
+          if (error.name !== "SecurityError") throw error;
+        }
+        canvas.after(snapshot);
+        const placed = snapshot.getBoundingClientRect();
+        if (["left", "top", "width", "height"].some(key => Math.abs(placed[key] - rect[key]) > 1)) {
+          snapshot.remove(); continue;
+        }
+        // An absolutely positioned copy can escape a non-positioned overflow
+        // ancestor's clip. Do not cover those shapes until placement is provable.
+        let clipped = false;
+        for (let parent = composedParent(canvas); parent && parent !== canvas.offsetParent; parent = composedParent(parent)) {
+          const parentStyle = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+          if ((/(hidden|clip|scroll|auto)/.test(parentStyle.overflowX) && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) ||
+              (/(hidden|clip|scroll|auto)/.test(parentStyle.overflowY) && (rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1))) clipped = true;
+        }
+        if (clipped) { snapshot.remove(); continue; }
+        session.surfaceSnapshots.set(canvas, snapshot);
+        session.surfacePixels += pixels;
+        rememberStyle(canvas, "visibility", "hidden", "important");
+      } catch { snapshot.remove(); }
+    }
   }
 
   function rememberAnimation(animation, created) {
@@ -918,6 +986,8 @@
       captureAnimations: new Set(),
       pinnedAnimations: new Set(),
       animationIssues: new Set(),
+      surfaceSnapshots: new Map(),
+      surfacePixels: 0,
       atStart: true,
       atEnd: false,
       mutationCount: 0,
@@ -974,7 +1044,8 @@
       const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd) || (item.anchor === "overlay" && atStart);
       // Showing a tile restores the page's own visibility rule. Forcing visible
       // would expose hidden menus/dialogs that happen to have a layout box.
-      rememberStyle(item.node, "visibility", show ? item.visibility.value : "hidden", show ? item.visibility.priority : "important");
+      const visible = show && !session.surfaceSnapshots.has(item.node);
+      rememberStyle(item.node, "visibility", visible ? item.visibility.value : "hidden", visible ? item.visibility.priority : "important");
       // Descendants can override inherited visibility:hidden (common in nav bars).
       // Group opacity hides the entire rendered subtree without changing layout.
       rememberStyle(item.node, "opacity", show ? item.opacity.value : "0", show ? item.opacity.priority : "important");
@@ -1073,7 +1144,7 @@
     const { outline, tip } = pickerChrome("Click an element · Hold Ctrl for the exact node · Yellow means hidden scrollable content · Esc cancels");
     if (frameMode) {
       const blocked = frameInfo?.inaccessible
-        ? ` · ${frameInfo.inaccessible} frame(s) here can't be captured (cross-origin or restricted)`
+        ? ` · ${frameInfo.inaccessible} frame(s) are still loading or restricted`
         : "";
       tip.textContent = window === top
         ? `Click inside the frame you want to capture${blocked} · Esc cancels`
@@ -1364,6 +1435,9 @@
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
           return { alive: Boolean(frameHostSession) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
+        case "WINSHOT_FRAME_INVENTORY": return {
+          count: openRoots().reduce((count, root) => count + [...root.querySelectorAll("iframe,frame")].filter(node => node.clientWidth > 100 && node.clientHeight > 50).length, 0)
+        };
         case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null, request.pickerId || null);
         case "WINSHOT_CANCEL_PICKER": return cancelPicker(request.pickerId || null);
         default: return undefined;

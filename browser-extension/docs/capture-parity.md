@@ -11,6 +11,7 @@
 - All-open-tab and URL-list batches in visible or full-page mode, plus one-click all-tabs-to-one-PDF.
 - Browser-window capture exists in WinShot desktop. The extension requests it by navigating the active tab to `winshot://capture-window` (an external-protocol launch that leaves the page untouched), but the handoff still requires live manual acceptance and does not return a success acknowledgement.
 - Tile-backed captures above 32,000 pixels, cancellation, navigation failure, service-worker recovery, and exact page restoration.
+- GSAP entrance/repeating-animation stabilization, media playback restoration, and static canvas/WebGL snapshots with verified placement and context preservation. Zero-height fixed wrappers with visible children are tracked; one layout retry shares the original time/tile budget.
 - Bounded visible-image loading/decoding, smooth-scroll restoration, open-shadow-root sticky handling, scaled 2D panels, and automatic main-panel capture on fixed-height app layouts.
 - Stop cancels a capture delay and remains visible while popup content scrolls. Package and UI icons are extracted from the Windows icon.
 - PNG, bounded-canvas JPEG/WebP, searchable linked PDF, single- or multipage PDF, standard/custom page sizes, headers, footers, and watermarks. An independent PDF reader extracts the Latin, Japanese, and Arabic text and link annotations in the end-to-end suite.
@@ -29,7 +30,7 @@ See [fireshot-capture-matrix.md](fireshot-capture-matrix.md) for the feature-by-
 
 ## Deliberate boundaries
 
-- Editing/annotation parity is a separate workstream, as requested.
+- This document covers capture verification. See [non-upload-parity.md](non-upload-parity.md) for the wider requested feature ledger; capture verification does not establish completion of those editing and integration items.
 - FireShot's webpage JavaScript API is an automation/integration surface, not a capture mode. WinShot currently exposes browser commands and the desktop protocol; a public webpage API is not included here.
 - GIF/BMP, clipboard, email, printing, cloud upload, and store publishing are output/distribution features rather than capture-engine features.
 - Very large JPEG/WebP exports fall back to PNG/PDF because browsers cannot reliably allocate one giant canvas.

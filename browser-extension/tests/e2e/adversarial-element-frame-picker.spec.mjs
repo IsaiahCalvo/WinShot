@@ -408,6 +408,30 @@ test("a frame that finishes navigating after picker startup becomes selectable",
   } finally { await closeExactExtension(run); }
 });
 
+test("a frame picker stays usable when its only embedded document is still loading", async () => {
+  const run=await launchExactExtension();
+  try {
+    const page=await run.browser.newPage();await page.goto('http://127.0.0.1:4173/srcdoc-frame',{waitUntil:'networkidle0'});
+    await run.worker.evaluate(()=>{
+      const execute=chrome.scripting.executeScript.bind(chrome.scripting);
+      globalThis.__holdChildInjection=true;
+      chrome.scripting.executeScript=(details)=>details.target.frameIds?.some(id=>id!==0)&&globalThis.__holdChildInjection?new Promise(()=>{}):execute(details);
+    });
+    await startPicker(run,page,'frame');
+    expect(await page.$eval("[data-winshot-picker='tip']",n=>n.textContent)).toContain('still loading or restricted');
+    await run.worker.evaluate(()=>{globalThis.__holdChildInjection=false;});
+    await page.$eval('iframe',n=>{n.removeAttribute('srcdoc');n.src='/frame';});
+    const frame=await(await page.$('iframe')).contentFrame();
+    await frame.waitForSelector("[data-winshot-picker='tip']",{timeout:10000});
+    const waiting=editorTarget(run),box=await(await page.$('iframe')).boundingBox();
+    await page.mouse.click(box.x+100,box.y+100);
+    const {record}=await recordFromEditorTarget(await waiting);
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    expect(record.frameUrl).toBe('http://127.0.0.1:4173/frame');
+    expect(record.report.restoration).toBe('verified by read-back');
+  } finally {await closeExactExtension(run);}
+});
+
 test("an element removed the instant it is selected fails gracefully and cleans up", async () => {
   const run = await launchExactExtension();
   try {

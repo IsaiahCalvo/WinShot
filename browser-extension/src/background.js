@@ -1084,12 +1084,13 @@ async function beginConfiguredPicker(mode, tab, settings, controller) {
     await Promise.allSettled(allFrames.map(frame => attachChildPicker(tab.id, frame, pickerId)));
     if (pickerFrames.get(tab.id) !== frameIds) return { started: false, cancelled: true };
     if (mode === "frame") {
-      if (frameIds.length === 1) {
+      const inventory = await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_FRAME_INVENTORY" }, 0));
+      if (frameIds.length === 1 && !inventory.count) {
         const error = new Error("No capturable frames were found on this page. Cross-origin frames need site access, and scrolling areas are captured with Select an element.");
         error.winshotFriendly = true;
         throw error;
       }
-      const inaccessible = allFrames ? Math.max(0, allFrames.length - frameIds.length) : 0;
+      const inaccessible = Math.max(0, allFrames.length - frameIds.length, inventory.count - (frameIds.length - 1));
       const frameInfo = { accessible: frameIds.length - 1, inaccessible };
       await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo, pickerId }, 0));
     }

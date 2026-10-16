@@ -9,7 +9,10 @@
     return all;
   };
   function rememberMedia(node) {
-    if (!capture.media.has(node)) capture.media.set(node, { paused: node.paused, time: node.currentTime, rate: node.playbackRate });
+    if (!capture.media.has(node)) capture.media.set(node, {
+      paused: node.paused, time: node.currentTime, rate: node.playbackRate,
+      source: node.currentSrc, stream: node.srcObject
+    });
     node.pause();
   }
   function isLoop(animation) {
@@ -52,7 +55,7 @@
     if (!capture || capture.id !== id) return { restored: true };
     const saved = capture; capture = null;
     clearInterval(saved.watchdog);
-    HTMLMediaElement.prototype.play = saved.play;
+    if (HTMLMediaElement.prototype.play === saved.playProxy) HTMLMediaElement.prototype.play = saved.play;
     const failures = [];
     if (saved.gsap) {
       try {
@@ -69,9 +72,10 @@
     for (const [node, original] of saved.media) {
       try {
         node.playbackRate = original.rate;
-        if (Number.isFinite(original.time)) node.currentTime = original.time;
-        if (!original.paused || saved.requestedPlay.has(node)) saved.play.call(node).catch(() => {});
-      } catch { failures.push("media playback"); }
+        if (node.readyState > 0 && Number.isFinite(original.time) && Number.isFinite(node.duration) &&
+            node.currentSrc === original.source && node.srcObject === original.stream && Math.abs(node.currentTime - original.time) > .001) node.currentTime = original.time;
+        if (!original.paused || saved.requestedPlay.has(node)) Promise.resolve(saved.play.call(node)).catch(() => {});
+      } catch (error) { failures.push(`media playback (${error.message})`); }
     }
     return { restored: !failures.length, failures };
   }
@@ -86,13 +90,14 @@
     for (const animation of capture.initial) capture.animations.set(animation, {
       time: animation.totalTime(), paused: animation.paused(), created: false
     });
-    HTMLMediaElement.prototype.play = function () {
+    capture.playProxy = function () {
       if (!capture) return savedPlay.call(this);
       rememberMedia(this);
       capture.requestedPlay.add(this);
       return Promise.resolve();
     };
     const savedPlay = capture.play;
+    if (Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play")?.writable) HTMLMediaElement.prototype.play = capture.playProxy;
     capture.watchdog = setInterval(() => {
       if (capture && performance.now() - capture.touched > 9000) restore(capture.id);
     }, 1000);

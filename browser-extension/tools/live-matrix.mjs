@@ -8,7 +8,9 @@ import { launchCaptureBrowser } from "../tests/e2e/launch-browser.mjs";
 
 const urls = process.argv.slice(2);
 if (!urls.length || urls.some(url => !/^https?:\/\//i.test(url))) throw new Error("Provide public HTTP(S) URLs.");
-const output = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-live-matrix-"));
+const artifactRoot = process.env.WINSHOT_LIVE_ARTIFACT_ROOT || os.tmpdir();
+fs.mkdirSync(artifactRoot, { recursive: true });
+const output = fs.mkdtempSync(path.join(artifactRoot, "winshot-live-matrix-"));
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-live-profile-"));
 const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 const modes = (process.env.WINSHOT_LIVE_MODES || "visible,full-page,region,element").split(",");
@@ -55,7 +57,7 @@ try {
       const folder = path.join(output, String(siteIndex + 1), mode);
       fs.mkdirSync(folder, { recursive: true });
       const page = await browser.newPage();
-      let editor, ui, result = { url, mode, folder };
+      let editor, ui, targetWait, result = { url, mode, folder };
       const pageErrors = [], extensionErrors = [], sourceConsole = [], urlChanges = [];
       const workerErrorIndex = workerErrors.length;
       page.on("pageerror", error => pageErrors.push(error.message));
@@ -84,6 +86,7 @@ try {
           };
         });
         if (/^(just a moment|access denied|attention required|verify you are human)/i.test(source.title)) throw new Error(`Site blocked automated access: ${source.title}`);
+        source.frameDocuments = page.frames().filter(frame => frame !== page.mainFrame()).map(frame => ({ url: frame.url(), name: frame.name() }));
         result.source = source;
         let point;
         if (mode === "element") {
@@ -117,7 +120,8 @@ try {
         }
         await page.screenshot({ path: path.join(folder, "before.png") });
         const prior = new Set(browser.targets());
-        const targetPromise = browser.waitForTarget(t => !prior.has(t) && t.type() === "page" && t.url().includes("/src/editor.html?id="), { timeout: 180_000 });
+        targetWait = new AbortController();
+        const targetPromise = browser.waitForTarget(t => !prior.has(t) && t.type() === "page" && t.url().includes("/src/editor.html?id="), { timeout: 180_000, signal: targetWait.signal });
         // Attach a handler now so a failed picker does not leave an unhandled timeout.
         targetPromise.catch(() => {});
         ui = await popup(extension, page);
@@ -126,6 +130,13 @@ try {
         if (["region", "element", "frame"].includes(mode)) {
           await ui.click(`[data-picker='${mode}']`);
           await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 15_000 });
+          if (mode === "frame") {
+            const handle = await page.evaluateHandle(src => [...document.querySelectorAll('iframe')].find(n => n.src === src), result.selectedFrame.src);
+            const selected = await handle.asElement()?.contentFrame();
+            if (!selected) throw new Error('The selected embedded document has not loaded.');
+            await selected.waitForSelector("[data-winshot-picker='tip']", { timeout: 15_000 });
+            await handle.dispose();
+          }
           if (mode === "region") {
             await page.mouse.move(120, 180);
             await page.mouse.down(); await page.mouse.move(700, 600, { steps: 10 }); await page.mouse.up();
@@ -167,10 +178,12 @@ try {
         if (extensionErrors.length) throw new Error(`Extension errors: ${extensionErrors.join("; ")}`);
       } catch (error) {
         result.error = error.message;
+        result.frameDocumentsAtFailure = page.frames().filter(frame => frame !== page.mainFrame()).map(frame => ({ url: frame.url(), name: frame.name() }));
         result.popupStatus = await ui?.$eval("#status", node => node.textContent).catch(() => null);
         await page.screenshot({ path: path.join(folder, "failure.png") }).catch(() => {});
       }
       finally {
+        targetWait?.abort();
         extensionErrors.push(...workerErrors.slice(workerErrorIndex));
         if (extensionErrors.length && !result.error) result.error = `Extension errors: ${extensionErrors.join("; ")}`;
         result.pageErrors = [...new Set(pageErrors)]; result.extensionErrors = [...new Set(extensionErrors)];

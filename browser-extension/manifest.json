@@ -3,7 +3,7 @@
   "name": "WinShot Capture",
   "short_name": "WinShot",
   "description": "Reliable, local-first webpage capture for WinShot.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "minimum_chrome_version": "109",
   "offline_enabled": true,
   "incognito": "spanning",

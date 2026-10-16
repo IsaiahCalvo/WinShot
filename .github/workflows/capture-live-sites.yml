@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   public-web:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -52,10 +52,25 @@ jobs:
               https://example.com
               https://en.wikipedia.org/wiki/Screenshot
               https://react.dev/learn
+          - name: windows-motion
+            os: windows-2022
+            modes: full-page
+            batches: '0'
+            urls: >-
+              https://gsap.com/
+              https://lenis.dev/
+          - name: windows-frames
+            os: windows-2022
+            modes: frame
+            batches: '0'
+            urls: >-
+              https://www.w3schools.com/html/html_iframe.asp
+              https://web.dev/learn/css/animations
     env:
       WINSHOT_LIVE_MODES: ${{ matrix.modes }}
       WINSHOT_LIVE_BATCHES: ${{ matrix.batches }}
       WINSHOT_LIVE_URLS: ${{ matrix.urls }}
+      WINSHOT_TEST_SOFTWARE_GL: ${{ matrix.os == 'windows-2022' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,6 +79,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Allow sandboxed test Chrome user namespaces
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           capture_chrome_path="$(node --input-type=module -e 'import puppeteer from "puppeteer"; console.log(await puppeteer.executablePath());')"
@@ -71,7 +87,10 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/winshot-live-test
       - run: npm run build:extension
       - name: Capture public websites through the real popup
-        # Exercise GSAP, zero-height fixed wrappers, and one bounded layout recovery.
+        shell: bash
+        env:
+          WINSHOT_LIVE_ARTIFACT_ROOT: ${{ runner.temp }}
+        # Exercise canvas snapshots and loading frames on both Linux and Windows.
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';
@@ -81,11 +100,15 @@ jobs:
           JS
       - name: Verify batches captured the intended pages
         if: matrix.batches == '1'
+        shell: bash
+        env:
+          WINSHOT_LIVE_ARTIFACT_ROOT: ${{ runner.temp }}
         run: |
           node --input-type=module <<'JS'
           import fs from 'node:fs';
-          const root = fs.readdirSync('/tmp').find(name => name.startsWith('winshot-live-matrix-'));
-          const results = JSON.parse(fs.readFileSync(`/tmp/${root}/results.json`, 'utf8'));
+          const directory = process.env.WINSHOT_LIVE_ARTIFACT_ROOT;
+          const root = fs.readdirSync(directory).find(name => name.startsWith('winshot-live-matrix-'));
+          const results = JSON.parse(fs.readFileSync(`${directory}/${root}/results.json`, 'utf8'));
           const titles = new Map(results.filter(r => r.source && !r.error).map(r => [new URL(r.url).href, r.source.title]));
           for (const batch of results.filter(r => r.batch)) {
             for (const item of batch.results || []) {
@@ -97,5 +120,5 @@ jobs:
         if: always()
         with:
           name: live-capture-${{ matrix.name }}
-          path: /tmp/winshot-live-matrix-*
+          path: ${{ runner.temp }}/winshot-live-matrix-*
           if-no-files-found: warn
