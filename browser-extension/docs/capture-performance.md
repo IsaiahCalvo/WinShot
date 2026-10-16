@@ -104,8 +104,8 @@ Screenshot quota waits, compositor readback and scheduler variance still affect
 total time. Current public-page results are kept in the evidence artifact rather
 than used as a hard performance guarantee.
 
-The `capture-performance` GitHub workflow repeats ten attempts for each cohort on
-Windows and Linux when the capture runtime/benchmark changes, and can also be
+The `matched-capture-cohorts` job in the `browser-extension` GitHub workflow repeats ten attempts for each cohort on
+Windows and Linux on extension pull requests, and the workflow can also be
 started manually. Its two current-UI builds differ only in `src/content.js` and
 `src/background.js`, with the baseline files pinned to commit
 `3e50145d782db99637a5d23d463950fc84005d40`.
