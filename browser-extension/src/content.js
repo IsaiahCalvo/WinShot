@@ -109,6 +109,10 @@
     for (const animation of current.captureAnimations) animation.cancel();
     for (const [animation, original] of current.changedAnimations) {
       try {
+        // Reveals discovered mid-capture are finish()'ed so the screenshot sees
+        // the last frame. Seeking back to the freeze-paused offset and play()ing
+        // them would rewind every entrance effect after restore.
+        if (original.created && animation.playState === "finished") continue;
         animation.playbackRate = original.playbackRate;
         animation.currentTime = original.currentTime;
         let resume = original.playState === "running";
@@ -507,6 +511,9 @@
   }
 
   function refreshCaptureEffects() {
+    // Pin/finish/pause misses are retried each settle pass. Keep only this
+    // attempt's failures so one transient throw cannot poison later tiles.
+    session.animationIssues.clear();
     const nodes = [...session.pendingNodes];
     session.pendingNodes.clear();
     trackFloatingNodes(nodes);
