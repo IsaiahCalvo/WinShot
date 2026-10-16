@@ -234,12 +234,12 @@ async function cropScreenshot(blob, metrics) {
   }
 }
 
-async function seamScore(previous, current) {
+async function seamScore(previous, current, allowTiny = false) {
   const left = Math.max(previous.destXPx, current.destXPx);
   const top = Math.max(previous.destYPx, current.destYPx);
   const right = Math.min(previous.destXPx + previous.widthPx, current.destXPx + current.widthPx);
   const bottom = Math.min(previous.destYPx + previous.heightPx, current.destYPx + current.heightPx);
-  if (right - left < 8 || bottom - top < 4) return null;
+  if (right - left < (allowTiny ? 1 : 8) || bottom - top < (allowTiny ? 1 : 4)) return null;
 
   const sampleWidth = Math.min(256, right - left);
   const sampleHeight = Math.min(64, bottom - top);
@@ -466,7 +466,7 @@ async function storeScrollingCapture(session, controller) {
         if (frameHostPrepared.length) await heartbeatFrameChain(session, frameHostPrepared);
 
         progress(session, `Capturing tile ${index + 1}…`);
-        const result = await sendToTab(session.tabId, {
+        const scrollRequest = {
           type: "WINSHOT_SCROLL",
           sessionId: session.id,
           x: position.x,
@@ -474,7 +474,37 @@ async function storeScrollingCapture(session, controller) {
           extent,
           viewport: viewportSize,
           settleTimeoutMs: session.limits.settleTimeoutMs
-        }, session.frameId);
+        };
+        let result = await sendToTab(session.tabId, scrollRequest, session.frameId);
+        let cropped;
+        let initialPaintConfirmed = index !== 0;
+        let previousPaint = null;
+        // On Windows Chrome can return the pre-scroll compositor surface even
+        // after DOM/rAF readiness. Confirm two consecutive first-tile readbacks;
+        // one additional bounded read recovers a stale initial surface.
+        for (let read = 0; read < (index === 0 ? 3 : 1); read++) {
+          if (read) result = await sendToTab(session.tabId, scrollRequest, session.frameId);
+          if (result.metrics.documentToken !== documentToken) throw new Error("The document changed during capture.");
+          const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal, session);
+          cropped = await cropScreenshot(source, screenshotMetrics(result.metrics, frameHost));
+          const paint = { blob: cropped.blob, destXPx: 0, destYPx: 0, widthPx: cropped.width, heightPx: cropped.height };
+          if (index === 0) session.report.initialPaint = { readbacks: read + 1, confirmed: false, confidence: null };
+          if (previousPaint && previousPaint.widthPx === paint.widthPx && previousPaint.heightPx === paint.heightPx &&
+              previousPaint.reachedX === result.metrics.reachedX && previousPaint.reachedY === result.metrics.reachedY) {
+            const score = await seamScore(previousPaint, paint, true);
+            session.report.initialPaint.confidence = score;
+            if (score >= 0.999) {
+              initialPaintConfirmed = true;
+              session.report.initialPaint.confirmed = true;
+              break;
+            }
+          }
+          previousPaint = { ...paint, reachedX: result.metrics.reachedX, reachedY: result.metrics.reachedY };
+        }
+        if (!initialPaintConfirmed) {
+          allTilesStable = false;
+          session.report.warnings.push("The initial viewport pixels did not settle across browser readbacks; the result is marked partial.");
+        }
         if (result.metrics.documentToken !== documentToken) throw new Error("The document changed during capture.");
         if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) {
           const warning = "The page updated its URL during scrolling; document identity was verified for every tile.";
@@ -500,8 +530,6 @@ async function storeScrollingCapture(session, controller) {
           }
         }
 
-        const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal, session);
-        const cropped = await cropScreenshot(source, screenshotMetrics(result.metrics, frameHost));
         const scale = (cropped.scaleX + cropped.scaleY) / 2;
         if (expectedScale === null) expectedScale = scale;
         else if (Math.abs(scale - expectedScale) / expectedScale > 0.02) {

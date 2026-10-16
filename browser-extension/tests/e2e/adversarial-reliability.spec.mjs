@@ -186,6 +186,40 @@ for (const pending of [false, true]) {
   });
 }
 
+test("first scrolling tile rejects a stale browser paint before declaring complete", async () => {
+  const run = await launch();
+  try {
+    await run.page.goto("http://127.0.0.1:4173/sticky", { waitUntil: "networkidle0" });
+    await run.page.evaluate(async () => {
+      document.querySelector("header").style.position = "static";
+      scrollTo(0, 255);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    const worker = await (await run.browser.waitForTarget(target => target.type() === "service_worker")).worker();
+    await worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const original = chrome.tabs.captureVisibleTab;
+      const stale = await original.call(chrome.tabs, tab.windowId, { format: "png" });
+      let calls = 0;
+      chrome.tabs.captureVisibleTab = (...args) => ++calls === 1 ? Promise.resolve(stale) : original.apply(chrome.tabs, args);
+    });
+    await run.page.evaluate(() => document.querySelector("header").style.removeProperty("position"));
+    const { editor, record } = await capture(run);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    const firstPixel = await editor.evaluate(async () => {
+      const { getTile } = await import(chrome.runtime.getURL("src/store.js"));
+      const tile = await getTile(new URL(location.href).searchParams.get("id"), 0);
+      const image = await createImageBitmap(tile.blob);
+      const ctx = new OffscreenCanvas(image.width, image.height).getContext("2d");
+      ctx.drawImage(image, 0, 0); image.close();
+      return [...ctx.getImageData(5, 5, 1, 1).data];
+    });
+    expect(firstPixel).toEqual([255, 207, 51, 255]);
+    expect(record.report.seamConfidence.minimum).toBe(1);
+    expect(record.report.restoration).toBe("verified by read-back");
+  } finally { await run.close(); }
+});
+
 test("Stop cancels a delayed capture before it starts", async () => {
   const run = await launch();
   try {

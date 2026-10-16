@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 15
     env:
       WINSHOT_TEST_SOFTWARE_GL: '1'
-      WINSHOT_DIAGNOSTIC_REPEATS: '10'
+      WINSHOT_DIAGNOSTIC_REPEATS: '30'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

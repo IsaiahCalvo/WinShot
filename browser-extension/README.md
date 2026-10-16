@@ -93,7 +93,11 @@ Popup controls remain disabled with a loading indicator until settings, handlers
 and initial capture status are ready. Tests wait for that same visible readiness
 state; a slow storage read cannot silently discard the first capture click.
 Capture timing uses a monotonic clock, and temporary Chrome quota/readback failures
-get one bounded retry. URL batches subscribe before checking load completion and
+get one bounded retry. The first scrolling tile must match across two consecutive
+browser readbacks. A third read can recover an initially stale compositor frame;
+continuously changing initial pixels produce a partial result. This adds one
+quota-spaced read on a settled page and records the confirmation in the report.
+URL batches subscribe before checking load completion and
 recheck tabs after activation so reloading or discarded pages are not captured early.
 Batch readiness accepts a parsed top document while offscreen embeds are still
 loading; visible images still use the capture engine's bounded readiness checks.
