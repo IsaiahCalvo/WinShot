@@ -775,7 +775,9 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     throwIfAborted(controller.signal);
     if (mode === CaptureMode.VISIBLE) await storeVisibleCapture(session, controller);
     else await storeScrollingCapture(session, controller);
+    throwIfAborted(controller.signal);
     await attachThumbnail(session);
+    throwIfAborted(controller.signal);
   } catch (error) {
     if (activeEntry.failureReason) {
       session.state = SessionState.FAILED;

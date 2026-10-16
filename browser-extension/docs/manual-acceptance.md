@@ -10,7 +10,7 @@ Automated tests use disposable browser profiles. They cover every browser-native
 4. Select `C:\Users\icalvo\winshot\browser-extension\dist\winshot-capture`.
 5. Pin **WinShot Capture** to the toolbar.
 
-After rebuilding, use **Reload** on this extension's card. Check that its icon is
+After rebuilding, use **Reload** on this extension's card, then reload the tabs you will capture so older injected scripts are replaced. Check that its icon is
 the same capture-corner mark as WinShot desktop. Remove an older WinShot Capture
 entry loaded from a different folder so hotkeys and the toolbar use this build.
 
