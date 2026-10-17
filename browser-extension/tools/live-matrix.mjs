@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { launchCaptureBrowser } from "../tests/e2e/launch-browser.mjs";
+import { inspectPublicDocument, trackDocumentResponses } from "./live-document-health.mjs";
 
 const urls = process.argv.slice(2);
 if (!urls.length || urls.some(url => !/^https?:\/\//i.test(url))) throw new Error("Provide public HTTP(S) URLs.");
@@ -83,7 +84,16 @@ try {
       const folder = path.join(output, String(siteIndex + 1), mode);
       fs.mkdirSync(folder, { recursive: true });
       const page = await browser.newPage();
-      let editor, ui, targetWait, frameElement, result = { url, mode, folder };
+      const documents = trackDocumentResponses(page);
+      let editor, ui, targetWait, frameElement, selectedDocument, result = { url, mode, folder };
+      const verifySelectedDocument = async () => {
+        const selected = await frameElement.contentFrame();
+        if (!selected || selected !== selectedDocument) throw new Error("The selected embedded document changed before capture.");
+        const health = await inspectPublicDocument(selected, documents);
+        result.selectedFrame.document = health;
+        if (health.error) throw new Error(`Selected embedded document unavailable: ${health.error}`);
+        return selected;
+      };
       const pageErrors = [], extensionErrors = [], sourceConsole = [], urlChanges = [];
       const workerErrorIndex = workerErrors.length;
       page.on("pageerror", error => pageErrors.push(error.message));
@@ -99,6 +109,8 @@ try {
         await page.waitForFunction(() => document.body?.innerText.trim().length > 20, { timeout: 15_000 });
         await page.evaluate(() => Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 3000))]));
         await new Promise(resolve => setTimeout(resolve, 1200));
+        result.document = await inspectPublicDocument(page.mainFrame(), documents);
+        if (result.document.error) throw new Error(`Public document unavailable: ${result.document.error}`);
         const source = await page.evaluate(() => {
           const nodes = [...document.querySelectorAll("body *")];
           return {
@@ -148,6 +160,10 @@ try {
           source.x = frame.x; source.y = frame.y;
           point = { x: frame.rect.x + 80, y: frame.rect.y + 80 };
           result.selectedFrame = frame;
+          selectedDocument = await frameElement.contentFrame();
+          if (!selectedDocument) throw new Error("The selected embedded document has not loaded.");
+          await selectedDocument.waitForFunction(() => document.body && document.readyState !== "loading", { timeout: 15_000 });
+          await verifySelectedDocument();
         }
         await page.screenshot({ path: path.join(folder, "before.png") });
         const prior = new Set(browser.targets());
@@ -159,13 +175,14 @@ try {
         ui.on("pageerror", error => extensionErrors.push(error.message));
         const start = performance.now();
         if (["region", "element", "frame"].includes(mode)) {
+          if (mode === "frame") await verifySelectedDocument();
           await ui.click(`[data-picker='${mode}']`);
           await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 15_000 });
           if (mode === "frame") {
             // Keep the exact chosen DOM element: URLs are not frame identity.
-            const selected = await frameElement.contentFrame();
-            if (!selected) throw new Error('The selected embedded document has not loaded.');
+            const selected = await verifySelectedDocument();
             await selected.waitForSelector("[data-winshot-picker='tip']", { timeout: 15_000 });
+            await verifySelectedDocument();
           }
           if (mode === "region") {
             await page.mouse.move(120, 180);
@@ -226,6 +243,7 @@ try {
         await page.screenshot({ path: path.join(folder, "failure.png") }).catch(() => {});
       }
       finally {
+        documents.dispose();
         targetWait?.abort();
         await frameElement?.dispose().catch(() => {});
         extensionErrors.push(...workerErrors.slice(workerErrorIndex));
