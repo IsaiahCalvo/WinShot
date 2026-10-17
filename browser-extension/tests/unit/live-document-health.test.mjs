@@ -38,6 +38,9 @@ test("proxy and browser failure documents are rejected even without a failing HT
   for (const response of [null, { url: "https://example.com/frame", status: 200 }]) {
     assert.match(publicDocumentError({ url: "https://example.com/frame", text: "upstream connect error or disconnect/reset before headers. reset reason: connection termination", response }), /error document/i);
     assert.match(publicDocumentError({ url: "https://example.com/frame", title: "Just a moment...", text: "Verifying your browser", response }), /Blocked/);
+    for (const title of ["Attention Required", "Attention Required!", "Attention Required | Cloudflare", "Attention Required! | Cloudflare"]) {
+      assert.match(publicDocumentError({ url: "https://example.com/frame", title, text: "Please enable cookies.", response }), /Blocked/);
+    }
   }
   assert.match(publicDocumentError({ url: "chrome-error://chromewebdata/", title: "example.com" }), /Browser error/);
   assert.match(publicDocumentError({ url: "about:srcdoc", text: "Blocked: Only HTTPS requests are allowed" }), /error document/i);
