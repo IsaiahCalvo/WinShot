@@ -1,0 +1,9 @@
+{
+  "name": "mimetext",
+  "version": "3.0.28",
+  "license": "MIT",
+  "source": "https://github.com/muratgozel/MIMEText",
+  "npmTarball": "https://registry.npmjs.org/mimetext/-/mimetext-3.0.28.tgz",
+  "tarballSha256": "fcd5af708ea2448ccbfa2eb8cf3c6e6a9c624b8a7927191b346f20d01737c763",
+  "modifications": "Appended an ESM export of createMimeMessage to the standalone IIFE. No upstream behavior changed."
+}

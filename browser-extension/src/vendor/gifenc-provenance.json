@@ -1,0 +1,13 @@
+{
+  "project": "gifenc",
+  "version": "1.0.3",
+  "license": "MIT",
+  "upstream": "https://github.com/mattdesl/gifenc",
+  "sourceTarball": "https://registry.npmjs.org/gifenc/-/gifenc-1.0.3.tgz",
+  "npmTarballIntegrity": "sha512-xdr6AdrfGBcfzncONUOlXMBuc5wJDtOueE3c5rdG0oNgtINLD+f2iFZltrBRZYzACRbKr+mSVU/x98zv2u3jmw==",
+  "distributionFile": "package/dist/gifenc.esm.js",
+  "vendoredSha256": "217761244379253ba5815510d3048a4fb1f4c4dbe9fb51a5cfbfe26f34eec093",
+  "modifications": "None",
+  "licenseFile": "gifenc-LICENSE.md",
+  "integrityVerified": true
+}

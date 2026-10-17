@@ -13,14 +13,14 @@
 // there are not exported). Fixtures served by tests/fixture-server.mjs on 4173.
 
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 function removeOwnedDirectory(directory, prefix) {
   const resolved = path.resolve(directory);
@@ -38,17 +38,10 @@ function monitorPage(page, errors) {
   page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 }
 
-async function launchExactExtension() {
+async function launchExactExtension(viewport = { width: 1200, height: 1000 }) {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot, viewport);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -87,7 +80,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -116,6 +109,83 @@ async function startPicker(run, page, mode) {
   await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 10_000 });
   await popup.close().catch(() => {});
 }
+
+for (const mode of ["region", "element"]) test(`a stalled embedded frame cannot block ${mode} selection or revive its closed picker`, async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/iframes", { waitUntil: "networkidle0" });
+    // Fault-inject a slow child-script response, while retaining the real MV3
+    // popup, message channels, selection, screenshot API, and saved image.
+    await run.worker.evaluate(() => {
+      const execute = chrome.scripting.executeScript.bind(chrome.scripting);
+      chrome.scripting.executeScript = async details => {
+        if (details.target.allFrames || details.target.frameIds?.some(id => id !== 0)) await new Promise(resolve => setTimeout(resolve, 6000));
+        return execute(details);
+      };
+    });
+    const ui = await openPopup(run, page);
+    const start = performance.now();
+    await ui.click(`[data-picker='${mode}']`);
+    await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 2500 });
+    expect(performance.now() - start).toBeLessThan(2500);
+    const waiting = editorTarget(run);
+    if (mode === "region") {
+      // The drag ends inside an iframe: its mouseup must reach the top picker.
+      await page.mouse.move(30, 70); await page.mouse.down();
+      await page.mouse.move(300, 170, { steps: 5 }); await page.mouse.up();
+    } else {
+      await page.keyboard.down("Control"); await page.mouse.click(150, 40); await page.keyboard.up("Control");
+    }
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state).toBe("complete");
+    if (mode === "region") expect(record.report.dimensionsPx).toEqual({ width: 270, height: 100 });
+    else expect(record.report.target).toBe("page-element");
+    // Wait beyond the injected delay: late completion must never add overlays.
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, 6500 - (performance.now() - start))));
+    for (const frame of page.frames()) expect(await frame.$$eval("[data-winshot-picker]", nodes => nodes.length)).toBe(0);
+    expect(run.errors).toEqual([]);
+  } finally { await closeExactExtension(run); }
+});
+
+for (const dpr of [1, 2]) test(`a fixed sidebar survives frame-tile overlaps intact at DPR ${dpr}`, async () => {
+  const run = await launchExactExtension({ width: 1200, height: 1000, deviceScaleFactor: dpr });
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/iframes", { waitUntil: "networkidle0" });
+    await page.$eval("iframe", node => { node.style.cssText = "display:block;margin:100px;width:700px;height:350px;border:0;box-sizing:content-box"; node.scrollIntoView({ block: "center" }); });
+    const frame = page.frames().find(frame => frame.url() === "http://127.0.0.1:4173/frame" && frame.parentFrame() === page.mainFrame());
+    await frame.evaluate(() => {
+      document.body.innerHTML = '<style>body{margin:0;height:2800px;background:#1ab45c}aside{position:fixed;left:0;top:0;width:400px;height:340px;background:#ff00cc}</style><aside></aside>';
+    });
+    const before = await page.evaluate(() => scrollY);
+    const waiting = editorTarget(run);
+    await startPicker(run, page, "frame");
+    const box = await (await page.$("iframe")).boundingBox();
+    await page.mouse.click(box.x + 500, box.y + 150);
+    const { editor, record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    const bands = await editor.evaluate(async dpr => {
+      const tiles = await (await import(chrome.runtime.getURL("src/store.js"))).getTiles(new URL(location.href).searchParams.get("id"));
+      const context = new OffscreenCanvas(700 * dpr, 2800 * dpr).getContext("2d");
+      for (const tile of tiles.sort((a, b) => a.index - b.index)) {
+        const image = await createImageBitmap(tile.blob);
+        context.drawImage(image, tile.destXPx, tile.destYPx, tile.widthPx, tile.heightPx); image.close();
+      }
+      const column = context.getImageData(50 * dpr, 0, 1, 2800 * dpr).data;
+      const bands = [];
+      for (let y = 0; y < 2800 * dpr; y++) if (column[y * 4] === 255 && column[y * 4 + 1] === 0 && column[y * 4 + 2] === 204) {
+        const last = bands.at(-1);
+        if (last && last.end === y - 1) last.end = y; else bands.push({ start: y, end: y });
+      }
+      return bands;
+    }, dpr);
+    expect(bands).toEqual([{ start: 0, end: 340 * dpr - 1 }]);
+    expect(record.report.seamConfidence.minimum).toBeGreaterThan(0.99);
+    expect(await page.evaluate(() => scrollY)).toBe(before);
+    expect(await frame.evaluate(() => scrollY)).toBe(0);
+  } finally { await closeExactExtension(run); }
+});
 
 test("element picker Ctrl-click captures an element inside an open shadow root", async () => {
   const run = await launchExactExtension();
@@ -310,6 +380,56 @@ test("same-origin srcdoc frame is fully captured through the frame picker", asyn
   } finally {
     await closeExactExtension(run);
   }
+});
+
+test("a frame that finishes navigating after picker startup becomes selectable", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/srcdoc-frame", { waitUntil: "networkidle0" });
+    await startPicker(run, page, "frame");
+    await page.evaluate(() => {
+      const frame = document.createElement("iframe");
+      frame.id = "late-frame";
+      frame.style.cssText = "display:block;width:700px;height:320px;border:0";
+      frame.src = "/frame";
+      document.body.prepend(frame);
+    });
+    const frame = await (await page.waitForSelector("#late-frame")).contentFrame();
+    await frame.waitForSelector("[data-winshot-picker='tip']", { timeout: 10_000 });
+    const waiting = editorTarget(run);
+    const box = await (await page.$("#late-frame")).boundingBox();
+    await page.mouse.click(box.x + 100, box.y + 100);
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, record.error).toBe("complete");
+    expect(record.frameUrl).toBe("http://127.0.0.1:4173/frame");
+    expect(record.report.tileCount).toBeGreaterThan(1);
+    expect(record.report.restoration).toBe("verified by read-back");
+  } finally { await closeExactExtension(run); }
+});
+
+test("a frame picker stays usable when its only embedded document is still loading", async () => {
+  const run=await launchExactExtension();
+  try {
+    const page=await run.browser.newPage();await page.goto('http://127.0.0.1:4173/srcdoc-frame',{waitUntil:'networkidle0'});
+    await run.worker.evaluate(()=>{
+      const execute=chrome.scripting.executeScript.bind(chrome.scripting);
+      globalThis.__holdChildInjection=true;
+      chrome.scripting.executeScript=(details)=>details.target.frameIds?.some(id=>id!==0)&&globalThis.__holdChildInjection?new Promise(()=>{}):execute(details);
+    });
+    await startPicker(run,page,'frame');
+    expect(await page.$eval("[data-winshot-picker='tip']",n=>n.textContent)).toContain('still loading or restricted');
+    await run.worker.evaluate(()=>{globalThis.__holdChildInjection=false;});
+    await page.$eval('iframe',n=>{n.removeAttribute('srcdoc');n.src='/frame';});
+    const frame=await(await page.$('iframe')).contentFrame();
+    await frame.waitForSelector("[data-winshot-picker='tip']",{timeout:10000});
+    const waiting=editorTarget(run),box=await(await page.$('iframe')).boundingBox();
+    await page.mouse.click(box.x+100,box.y+100);
+    const {record}=await recordFromEditorTarget(await waiting);
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    expect(record.frameUrl).toBe('http://127.0.0.1:4173/frame');
+    expect(record.report.restoration).toBe('verified by read-back');
+  } finally {await closeExactExtension(run);}
 });
 
 test("an element removed the instant it is selected fails gracefully and cleans up", async () => {

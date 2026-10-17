@@ -1,4 +1,5 @@
 import http from "node:http";
+import { readFileSync } from "node:fs";
 
 const host = "127.0.0.1";
 
@@ -16,6 +17,15 @@ function rows(count, prefix = "ROW") {
 
 function fixture(name, crossPort) {
   switch (name) {
+    case "gsap":
+      return shell("gsap-motion", '<script src="/test-gsap.js"></script><div id="menu">HIDDEN MENU</div><div id="spinner"></div><div id="user-paused"></div>' + Array.from({length:6},()=>'<section class="gsap-section"><div class="gsap-reveal">REVEALED CONTENT</div></section>').join(''), `
+        window.menu=gsap.timeline({paused:true}).fromTo('#menu',{autoAlpha:0},{autoAlpha:1,duration:1});
+        window.spinner=gsap.to('#spinner',{rotation:360,repeat:-1,duration:.8,ease:'none'});
+        window.userPaused=gsap.to('#user-paused',{x:100,duration:2,paused:true}).time(.4);
+        new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting&&!e.target.dataset.seen){e.target.dataset.seen='1';gsap.fromTo(e.target,{autoAlpha:0,y:20},{autoAlpha:1,y:0,duration:1});}}).observe(document.querySelector('.gsap-reveal'));
+        const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting&&!e.target.dataset.seen){e.target.dataset.seen='1';gsap.fromTo(e.target,{autoAlpha:0,y:20},{autoAlpha:1,y:0,duration:1});}});
+        document.querySelectorAll('.gsap-reveal').forEach(n=>observer.observe(n));
+      `, '.gsap-section{height:800px;padding:200px 100px}.gsap-reveal{width:320px;height:160px;background:rgb(26,180,92);opacity:0}#menu{position:fixed;inset:0;visibility:hidden;background:#ff00cc;z-index:20}#spinner{position:fixed;right:100px;top:100px;width:30px;height:30px;background:#1687ff}#user-paused{position:fixed;right:50px;top:100px;width:20px;height:20px;background:#333}');
     case "body":
       return shell("body-scroll", `<h1>SEARCHABLE WINSHOT DOCUMENT</h1><p>検索可能 مرحبا</p><a href="https://example.com/winshot-link">WORKING PDF LINK</a><input id="state" value="focus-restoration"><div id="rows">${rows(28)}</div>`, "");
     case "horizontal":
@@ -59,7 +69,9 @@ function fixture(name, crossPort) {
         function render(){const first=Math.floor(view.scrollTop/itemHeight);rail.replaceChildren(...Array.from({length:14},(_,slot)=>{const index=Math.min(total-1,first+slot);const node=document.createElement('div');node.className='virtual-row';node.style.transform='translateY('+(index*itemHeight)+'px)';node.textContent='VIRTUAL '+String(index).padStart(4,'0');node.dataset.index=index;return node}))}view.addEventListener('scroll',render);render();
       `, "#virtual{margin:30px;width:760px;height:520px;overflow:auto;border:4px solid #1687ff;position:relative}#rail{position:relative}.virtual-row{position:absolute;left:0;right:0;height:64px;padding:18px;border-bottom:1px solid #556;background:#fff}");
     case "media":
-      return shell("pixel-surfaces", `<canvas id="two" width="700" height="500"></canvas><canvas id="gl" width="700" height="500"></canvas><video controls width="700"></video>${rows(10)}`, `const c=document.querySelector('#two').getContext('2d');c.fillStyle='#1687ff';c.fillRect(0,0,700,500);c.fillStyle='white';c.font='40px sans-serif';c.fillText('CANVAS PIXELS',100,250);const gl=document.querySelector('#gl').getContext('webgl');gl.clearColor(.1,.7,.3,1);gl.clear(gl.COLOR_BUFFER_BIT);`);
+      // This fixture draws once, unlike an application's render loop. Retain its
+      // buffer so Windows/ANGLE cannot discard it between draw and capture.
+      return shell("pixel-surfaces", `<canvas id="two" width="700" height="500"></canvas><canvas id="gl" width="700" height="500"></canvas><video controls width="700"></video>${rows(10)}`, `const c=document.querySelector('#two').getContext('2d');c.fillStyle='#1687ff';c.fillRect(0,0,700,500);c.fillStyle='white';c.font='40px sans-serif';c.fillText('CANVAS PIXELS',100,250);const gl=document.querySelector('#gl').getContext('webgl',{preserveDrawingBuffer:true});gl.clearColor(.1,.7,.3,1);gl.clear(gl.COLOR_BUFFER_BIT);`);
     case "recovery":
       return shell("recovery", `<input id="focus" value="original"><div id="snap" style="scroll-snap-type:y mandatory;height:500px;overflow:auto">${rows(20,"RECOVERY")}</div>`);
     case "fixed-badge":
@@ -108,6 +120,11 @@ function fixture(name, crossPort) {
 function start(port, crossPort) {
   return http.createServer((request, response) => {
     const name = new URL(request.url, `http://${host}:${port}`).pathname.slice(1) || "index";
+    if (name === "test-gsap.js") {
+      response.writeHead(200, { "content-type": "application/javascript" });
+      response.end(readFileSync(new URL("./vendor/gsap.min.js", import.meta.url)));
+      return;
+    }
     const body = fixture(name, crossPort);
     response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     response.end(body);

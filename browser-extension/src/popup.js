@@ -1,7 +1,22 @@
-import { loadSettings, normalizeSettings, saveSettings } from "./settings.js";
+import { loadSettings, normalizeSettings, normalizeAutomationOrigins, saveSettings } from "./settings.js";
 
 const status = document.querySelector("#status");
-let settings = await loadSettings();
+let settings = await loadSettings().catch(error => {
+  status.className = "error";
+  status.textContent = "Capture settings could not load. Reload WinShot and try again.";
+  throw error;
+});
+let busy = false;
+let statusRevision = 0;
+const popupWindowId = (await chrome.windows.getCurrent()).id;
+const startButtons = [...document.querySelectorAll("[data-mode], [data-picker], #repeat-last, #all-tabs, #all-tabs-pdf, #url-batch, #browser-window, #open-library, #open-video-studio")];
+
+function setBusy(value) {
+  busy = value;
+  document.body.dataset.busy = String(value);
+  document.body.setAttribute("aria-busy", String(value));
+  for (const button of startButtons) button.disabled = value;
+}
 
 const delayNode = document.querySelector("#capture-delay");
 const infiniteNode = document.querySelector("#capture-infinite");
@@ -10,6 +25,12 @@ const heightNode = document.querySelector("#capture-height");
 const tilesNode = document.querySelector("#capture-tiles");
 const templateNode = document.querySelector("#filename-template");
 const batchModeNode = document.querySelector("#batch-mode");
+const batchScopeNode = document.querySelector("#batch-scope");
+const batchOutputNode = document.querySelector("#batch-output");
+const actionModeNode = document.querySelector("#capture-action-mode");
+const actionOutputNode = document.querySelector("#capture-action-output");
+const automationEnabledNode = document.querySelector("#automation-enabled");
+const automationOriginsNode = document.querySelector("#automation-origins");
 const retentionNode = document.querySelector("#history-retention");
 const contextMenuNode = document.querySelector("#context-menu");
 
@@ -21,6 +42,12 @@ function showSettings() {
   tilesNode.value = String(settings.maxTiles);
   templateNode.value = settings.fileNameTemplate;
   batchModeNode.value = settings.batchMode;
+  batchScopeNode.value = settings.batchScope;
+  document.querySelector("#all-tabs span").textContent = settings.batchScope === "selected-tabs" ? "Capture selected web tabs" : settings.batchScope === "all-windows" ? "Capture web tabs in all windows" : "Capture web tabs in this window";
+  batchOutputNode.value = settings.batchOutput;
+  actionOutputNode.value = settings.captureActions[actionModeNode.value];
+  automationEnabledNode.checked = settings.automation.enabled;
+  automationOriginsNode.value = settings.automation.origins.join("\n");
   retentionNode.value = String(settings.historyRetentionDays);
   contextMenuNode.checked = settings.contextMenu;
 }
@@ -35,24 +62,50 @@ async function persistSettings() {
     maxTiles: Number(tilesNode.value),
     fileNameTemplate: templateNode.value,
     batchMode: batchModeNode.value,
+    batchScope: batchScopeNode.value,
+    batchOutput: batchOutputNode.value,
+    captureActions: { ...settings.captureActions, [actionModeNode.value]: actionOutputNode.value },
     historyRetentionDays: Number(retentionNode.value),
     contextMenu: contextMenuNode.checked
   }));
+  document.querySelector("#all-tabs span").textContent = settings.batchScope === "selected-tabs" ? "Capture selected web tabs" : settings.batchScope === "all-windows" ? "Capture web tabs in all windows" : "Capture web tabs in this window";
 }
 
 showSettings();
-for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode, templateNode, batchModeNode, retentionNode, contextMenuNode]) {
+for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode, templateNode, batchModeNode, batchScopeNode, batchOutputNode, actionOutputNode, retentionNode, contextMenuNode]) {
   node.addEventListener("change", () => persistSettings().catch((error) => {
     status.className = "error";
     status.textContent = error.message;
   }));
 }
 
+actionModeNode.addEventListener("change", () => { actionOutputNode.value = settings.captureActions[actionModeNode.value]; });
+document.querySelector("#automation-use-site").addEventListener("click", async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, windowId: popupWindowId });
+    const origin = new URL(tab.url).origin;
+    if (!/^https?:/.test(origin)) throw new Error("Open a regular website first.");
+    automationOriginsNode.value = [...new Set([...automationOriginsNode.value.split(/\n/).map(x => x.trim()).filter(Boolean), origin])].join("\n");
+  } catch (error) { status.textContent = error.message; }
+});
+document.querySelector("#automation-save").addEventListener("click", async () => {
+  try {
+    const requested = [...new Set(automationOriginsNode.value.split(/\n/).map(x => x.trim()).filter(Boolean))];
+    const origins = normalizeAutomationOrigins(requested);
+    if (requested.length > 20 || origins.length !== requested.length) throw new Error("Enter up to 20 exact http:// or https:// origins without paths, queries, or credentials.");
+    if (automationEnabledNode.checked && !origins.length) throw new Error("Add at least one allowed website before enabling automation.");
+    settings = await saveSettings({ ...await loadSettings(), automation: { enabled: automationEnabledNode.checked, origins } });
+    const result = await request({ type: "WINSHOT_REFRESH_AUTOMATION" });
+    status.textContent = settings.automation.enabled ? `Website access saved for ${origins.length} origin(s).` : "Website automation disabled. Access revoked.";
+    if (result?.error) throw new Error(result.error);
+  } catch (error) { status.className = "error"; status.textContent = error.message; }
+});
+
 // Callers set their own status text BEFORE calling (a delayed capture shows its
 // countdown) — request must not stomp it with a generic message.
 async function request(message) {
   status.className = "";
-  const response = await chrome.runtime.sendMessage(message);
+  const response = await chrome.runtime.sendMessage({ ...message, windowId: popupWindowId });
   if (response?.error) throw new Error(response.error);
   return response;
 }
@@ -64,6 +117,8 @@ function launchSettings(event) {
 }
 
 async function startMode(mode, event) {
+  if (busy) return;
+  setBusy(true);
   try {
     await persistSettings();
     const launch = launchSettings(event);
@@ -72,12 +127,16 @@ async function startMode(mode, event) {
     if (result?.error) throw new Error(result.error);
     status.textContent = result?.state === "complete" ? "Capture complete." : `Capture ${result?.state || "finished"}.`;
   } catch (error) {
-    status.className = "error";
+    status.className = /cancelled/i.test(error.message) ? "" : "error";
     status.textContent = error.message;
+  } finally {
+    setBusy(false);
   }
 }
 
 async function startPicker(mode, event) {
+  if (busy) return;
+  setBusy(true);
   try {
     await persistSettings();
     const launch = launchSettings(event);
@@ -85,8 +144,10 @@ async function startPicker(mode, event) {
     await request({ type: "WINSHOT_START_PICKER", mode, settings: launch });
     window.close();
   } catch (error) {
-    status.className = "error";
+    status.className = /cancelled/i.test(error.message) ? "" : "error";
     status.textContent = error.message;
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -116,7 +177,7 @@ document.querySelector("#browser-window").addEventListener("click", async () => 
   try {
     // Navigating the current tab to an external-protocol URL launches the handler
     // without committing a navigation, so the page is untouched either way.
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const [tab] = await chrome.tabs.query({ active: true, windowId: popupWindowId });
     if (!tab?.id) throw new Error("No active browser tab was found.");
     await chrome.tabs.update(tab.id, { url: "winshot://capture-window" });
     status.textContent = "Asked WinShot desktop to capture this window. Nothing happening? Install WinShot desktop, or press Ctrl+Shift+8 in WinShot.";
@@ -127,8 +188,13 @@ document.querySelector("#browser-window").addEventListener("click", async () => 
 });
 
 async function launchBatch(kind, urls = [], combinePdf = false) {
-  await persistSettings();
-  return await request({ type: "WINSHOT_START_BATCH", kind, urls, combinePdf, settings });
+  setBusy(true);
+  try {
+    await persistSettings();
+    return await request({ type: "WINSHOT_START_BATCH", kind, urls, combinePdf, settings, windowId: popupWindowId });
+  } finally {
+    setBusy(false);
+  }
 }
 
 document.querySelector("#all-tabs").addEventListener("click", async () => {
@@ -178,11 +244,46 @@ document.querySelector("#cancel").addEventListener("click", async () => {
 
 document.querySelector("#open-history").addEventListener("click", async (event) => {
   event.preventDefault();
-  await chrome.tabs.create({ url: chrome.runtime.getURL("src/history.html") });
+  await chrome.tabs.create({ windowId: popupWindowId, url: chrome.runtime.getURL("src/history.html") });
+  window.close();
+});
+
+document.querySelector("#open-library").addEventListener("click", async () => {
+  await chrome.tabs.create({ windowId: popupWindowId, url: chrome.runtime.getURL("src/library.html") });
+  window.close();
+});
+
+document.querySelector("#open-video-studio").addEventListener("click", async () => {
+  await chrome.tabs.create({ windowId: popupWindowId, url: chrome.runtime.getURL("src/video-editor.html") });
   window.close();
 });
 
 chrome.runtime.onMessage.addListener((message) => {
+  if ((message.type === "WINSHOT_CAPTURE_STATUS" || message.type === "WINSHOT_PROGRESS") &&
+      message.windowId !== popupWindowId && !message.global) return;
+  if (message.type === "WINSHOT_CAPTURE_STATUS") {
+    statusRevision++;
+    setBusy(message.busy);
+    if (message.message) status.textContent = message.message;
+    return;
+  }
   if (message.type !== "WINSHOT_PROGRESS") return;
+  statusRevision++;
+  setBusy(message.busy ?? (message.state === "preparing" || message.state === "capturing"));
   status.textContent = message.message;
+});
+
+const initialRevision = statusRevision;
+chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS", windowId: popupWindowId }).then(result => {
+  if (statusRevision !== initialRevision) return;
+  setBusy(Boolean(result?.busy));
+  status.textContent = result?.message || "Captures stay on this device.";
+}).catch(() => {
+  if (statusRevision !== initialRevision) return;
+  setBusy(false);
+  status.textContent = "Captures stay on this device.";
+}).finally(() => {
+  document.querySelector("main").inert = false;
+  document.querySelector("#cancel").disabled = false;
+  document.body.dataset.ready = "true";
 });

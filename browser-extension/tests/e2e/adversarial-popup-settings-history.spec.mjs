@@ -9,14 +9,14 @@
 //     overlay first instead of capturing/stranding it
 
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 const SETTINGS_KEY = "winshot:capture-settings";
 
 function removeOwnedDirectory(directory, prefix) {
@@ -38,14 +38,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension() {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -81,7 +74,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -90,6 +83,7 @@ async function openPopup(run, fixturePage) {
 async function openExtensionPage(run, file = "src/popup.html") {
   const page = await run.browser.newPage();
   await page.goto(`chrome-extension://${run.extension.id}/${file}`, { waitUntil: "domcontentloaded" });
+  if (file === "src/popup.html") await page.waitForSelector("body[data-ready='true']");
   return page;
 }
 
@@ -119,6 +113,198 @@ function badgeText(run) {
 function storedLastMode(run) {
   return run.worker.evaluate(async (key) => (await chrome.storage.local.get(key))[key]?.lastMode, SETTINGS_KEY);
 }
+
+test("Stop remains effective while a countdown hands off to delayed storage startup", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    await page.bringToFront();
+    await run.worker.evaluate(() => {
+      const original = chrome.storage.local.set;
+      chrome.storage.local.set = async data => {
+        if (data["winshot:capture-settings"]?.fileNameCounter > 1) {
+          globalThis.counterWaiting = true;
+          await new Promise(resolve => { globalThis.releaseCounter = resolve; });
+        }
+        return original.call(chrome.storage.local, data);
+      };
+      globalThis.startupResult = globalThis.__winshotTest.handleCommand("capture-visible");
+    });
+    await expect.poll(() => run.worker.evaluate(() => Boolean(globalThis.counterWaiting))).toBe(true);
+    expect(await run.worker.evaluate(() => globalThis.__winshotTest.cancelActiveCapture())).toEqual({ cancelled: true });
+    const result = await run.worker.evaluate(async () => { globalThis.releaseCounter(); return globalThis.startupResult; });
+    expect(result.state).toBe("cancelled");
+    expect(run.browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
+  } finally { await closeExactExtension(run); }
+});
+
+test("countdowns allow same-document History updates and capture the current URL", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    const popup = await openPopup(run, page);
+    await popup.$eval("details", node => { node.open = true; });
+    await popup.select("#capture-delay", "3000");
+    const waiting = editorTarget(run);
+    await popup.click("[data-mode='visible']");
+    await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    await page.evaluate(() => history.replaceState(null, "", "/body?countdown=ready#section"));
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, record.error).toBe("complete");
+    expect(record.sourceUrl).toContain("?countdown=ready#section");
+  } finally { await closeExactExtension(run); }
+});
+
+test("a cancelled picker identity cannot start late or replace a newer overlay", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    await page.bringToFront();
+    await run.worker.evaluate(() => globalThis.__winshotTest.startPicker("region"));
+    await page.keyboard.press("Escape");
+    const results = await run.worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const send = message => chrome.tabs.sendMessage(tab.id, message, { frameId: 0 });
+      await send({ type: "WINSHOT_CANCEL_PICKER", pickerId: "cancelled-before-start" });
+      const fresh = await send({ type: "WINSHOT_START_PICKER", mode: "region", pickerId: "fresh-picker" });
+      const late = await send({ type: "WINSHOT_START_PICKER", mode: "element", pickerId: "cancelled-before-start" });
+      return { fresh, late };
+    });
+    expect(results.fresh.started).toBe(true);
+    expect(results.late).toEqual({ started: false, cancelled: true });
+    expect(await page.$eval("[data-winshot-picker='tip']", node => node.textContent)).toContain("Drag");
+    await page.keyboard.press("Escape");
+    expect(await page.$$('[data-winshot-picker]')).toHaveLength(0);
+  } finally { await closeExactExtension(run); }
+});
+
+test("cross-window progress cannot disable idle controls or finish another window's countdown", async () => {
+  const run = await launchExactExtension();
+  const trace = { events: [] };
+  let popup;
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    // Identify the source before the second window opens the same fixture URL.
+    const source = await run.worker.evaluate(async () => {
+      const tabs = await chrome.tabs.query({});
+      const tab = tabs.find(candidate => candidate.url === "http://127.0.0.1:4173/body");
+      if (!tab) throw new Error("The source fixture tab was not found.");
+      globalThis.popupCancellationTrace = [];
+      chrome.runtime.onMessage.addListener((message, sender) => {
+        if (!["WINSHOT_START_CAPTURE", "WINSHOT_CANCEL_CAPTURE", "WINSHOT_GET_CAPTURE_STATUS"].includes(message.type)) return;
+        const entry = { type: message.type, at: Date.now(), senderUrl: sender.url };
+        globalThis.popupCancellationTrace.push(entry);
+        chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(active => {
+          entry.activeTabs = active.map(({ id, windowId, url }) => ({ id, windowId, url }));
+        }).catch(error => { entry.error = error.message; });
+      });
+      chrome.tabs.onCreated.addListener(tab => {
+        globalThis.popupCancellationTrace.push({ type: "tab-created", at: Date.now(), tabId: tab.id, windowId: tab.windowId, url: tab.pendingUrl || tab.url });
+      });
+      return { tabId: tab.id, windowId: tab.windowId };
+    });
+    trace.source = source;
+    const otherId = await run.worker.evaluate(async () => {
+      const other = await chrome.windows.create({ url: "http://127.0.0.1:4173/body", focused: false });
+      return other.id;
+    });
+    trace.otherWindowId = otherId;
+    popup = await openPopup(run, page);
+    popup.on("close", () => trace.events.push({ type: "popup-closed", at: Date.now() }));
+    const originWindowId = await popup.evaluate(async () => {
+      const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+      globalThis.popupMessageTrace = [];
+      // Observe the real native request and reply; never replace its result.
+      chrome.runtime.sendMessage = (...args) => {
+        const entry = { type: args[0]?.type, at: Date.now() };
+        globalThis.popupMessageTrace.push(entry);
+        const pending = original(...args);
+        return pending.then(reply => {
+          entry.reply = reply;
+          entry.finishedAt = Date.now();
+          if (entry.type === "WINSHOT_CANCEL_CAPTURE") globalThis.stopReply = reply;
+          return reply;
+        }, error => { entry.error = error.message; throw error; });
+      };
+      return (await chrome.windows.getCurrent()).id;
+    });
+    trace.originWindowId = originWindowId;
+    expect(originWindowId).toBe(source.windowId);
+    expect(otherId).not.toBe(source.windowId);
+    await run.worker.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_PROGRESS", windowId, state: "capturing", message: "Other window" }), otherId);
+    expect(await popup.$eval("body", node => node.dataset.busy)).toBe("false");
+    await popup.$eval("details", node => { node.open = true; });
+    // This test checks cancellation, not countdown accuracy. Leave enough time
+    // for physical-window focus and CDP round trips on a loaded Windows runner.
+    await popup.select("#capture-delay", "30000");
+    await popup.click("[data-mode='visible']");
+    await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    let pendingStatus;
+    await expect.poll(async () => {
+      pendingStatus = await popup.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS", windowId }), source.windowId);
+      return pendingStatus;
+    }).toMatchObject({ busy: true, message: expect.stringContaining("Waiting to capture") });
+    const beforeStop = {
+      activeTabs: await run.worker.evaluate(async sourceWindowId => (await chrome.tabs.query({ active: true, windowId: sourceWindowId })).map(({ id, windowId }) => ({ id, windowId })), source.windowId),
+      status: pendingStatus
+    };
+    trace.beforeStop = beforeStop;
+    expect(beforeStop.activeTabs).toEqual([{ id: source.tabId, windowId: source.windowId }]);
+    expect(beforeStop.status).toMatchObject({ busy: true });
+    expect(beforeStop.status.message).toContain("Waiting to capture");
+    await run.worker.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_PROGRESS", windowId, state: "complete", message: "Other complete" }), otherId);
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(true);
+    await popup.click("#cancel");
+    await popup.waitForFunction(() => Boolean(globalThis.stopReply));
+    expect(await popup.evaluate(() => globalThis.stopReply)).toEqual({ cancelled: true });
+    await expect.poll(() => popup.$eval("body", node => node.dataset.busy)).toBe("false");
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(false);
+    await expect.poll(() => popup.evaluate(async windowId => (await chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS", windowId })).busy, source.windowId)).toBe(false);
+    expect(run.browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
+    // Read storage through the still-open popup so the assertion does not itself
+    // create a tab and close the native action popup.
+    expect(await popup.evaluate(async () => (await (await import("./store.js")).listRecords()).length)).toBe(0);
+  } finally {
+    trace.events.push({ type: "finished", at: Date.now(), popupClosed: popup?.isClosed() });
+    trace.worker = await run.worker.evaluate(() => globalThis.popupCancellationTrace).catch(error => ({ error: error.message }));
+    if (popup && !popup.isClosed()) trace.popup = await popup.evaluate(() => globalThis.popupMessageTrace).catch(error => ({ error: error.message }));
+    const tracePath = test.info().outputPath("cross-window-cancellation-trace.json");
+    fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+    fs.writeFileSync(tracePath, JSON.stringify(trace, null, 2));
+    await test.info().attach("cross-window-cancellation-trace", { path: tracePath, contentType: "application/json" });
+    await closeExactExtension(run);
+  }
+});
+
+test("last-used hotkey starts in an idle window while another window is counting down", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    const popup = await openPopup(run, page);
+    await popup.$eval("details", node => { node.open = true; });
+    await popup.select("#capture-delay", "5000");
+    await popup.click("[data-mode='visible']");
+    await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
+    const second = await run.worker.evaluate(async () => {
+      const other = await chrome.windows.create({ url: "http://127.0.0.1:4173/body", focused: true });
+      await chrome.storage.local.set({ "winshot:capture-settings": { lastMode: "visible", delayMs: 0 } });
+      return other.tabs[0].id;
+    });
+    const secondPage = await (await run.browser.waitForTarget(target => target.type() === "page" && target.url().endsWith("/body") && target !== page.target())).asPage();
+    await secondPage.waitForFunction(() => document.readyState === "complete");
+    const waiting = editorTarget(run);
+    await run.worker.evaluate(() => globalThis.__winshotTest.handleCommand("last-used-action"));
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state, record.error).toBe("complete");
+    expect(record.tabId).toBe(second);
+    await run.worker.evaluate(() => globalThis.__winshotTest.cancelActiveCapture({ global: true }));
+  } finally { await closeExactExtension(run); }
+});
 
 // A minimal but complete record shape matching contract.js createSession output,
 // so history.js and editor.js render it exactly as they would a real capture.
@@ -171,6 +357,35 @@ async function seedRecords(page, overridesList) {
     }
   }, overridesList);
 }
+
+test("capture controls stay disabled until delayed settings and handlers are ready", async () => {
+  const run = await launchExactExtension();
+  try {
+    const source = await run.browser.newPage();
+    await source.goto("http://127.0.0.1:4173/body", { waitUntil: "networkidle0" });
+    const popup = await run.browser.newPage();
+    await popup.evaluateOnNewDocument(() => {
+      const get = chrome.storage.local.get.bind(chrome.storage.local);
+      chrome.storage.local.get = async (...args) => { await new Promise(resolve => setTimeout(resolve, 1800)); return get(...args); };
+    });
+    const loading = popup.goto(`chrome-extension://${run.extension.id}/src/popup.html`, { waitUntil: "domcontentloaded" });
+    loading.catch(() => {});
+    await popup.waitForSelector("[data-mode='visible']");
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(true);
+    expect(await popup.$eval("#cancel", node => node.disabled)).toBe(true);
+    await popup.waitForSelector("body[data-ready='true']", { timeout: 5000 });
+    await loading;
+    expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(false);
+    expect(await popup.$eval("main", node => node.inert)).toBe(false);
+    await source.bringToFront();
+    const waiting = editorTarget(run);
+    // Use the same initialized handler with the source still the active tab.
+    await popup.$eval("[data-mode='visible']", node => node.click());
+    const { record } = await recordFromEditorTarget(await waiting);
+    expect(record.state).toBe("complete");
+    expect(record.sourceUrl).toBe("http://127.0.0.1:4173/body");
+  } finally { await closeExactExtension(run); }
+});
 
 test("direct-storage garbage settings are clamped on load and the popup repeat row follows lastMode", async () => {
   const run = await launchExactExtension();

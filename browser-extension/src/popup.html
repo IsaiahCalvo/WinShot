@@ -4,23 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>WinShot Capture</title>
+  <link rel="icon" href="../icons/32.png">
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
+<body data-ready="false" aria-busy="true">
   <header>
-    <span class="mark" aria-hidden="true"></span>
+    <img class="mark" src="../icons/32.png" alt="" width="32" height="32">
     <div><strong>WinShot</strong><small>Browser capture</small></div>
   </header>
-  <main>
-    <button id="repeat-last"><span>Repeat last capture</span><kbd>Ctrl Shift S</kbd><small id="repeat-label"></small></button>
-    <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift 1</kbd></button>
-    <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift 3</kbd></button>
-    <button id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
-    <button data-picker="region"><span>Drag a selection</span><kbd>Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
-    <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
-    <button data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
+  <main inert>
+    <button disabled id="repeat-last"><span>Repeat last capture</span><kbd>Ctrl Shift S</kbd><small id="repeat-label"></small></button>
+    <button disabled data-mode="full-page"><span>Entire page</span><kbd>Alt Shift 1</kbd></button>
+    <button disabled data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift 3</kbd></button>
+    <button disabled id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
+    <button disabled data-picker="region"><span>Drag a selection</span><kbd>Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
+    <button disabled data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
+    <button disabled data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
     <details>
       <summary>Capture settings</summary>
+      <label for="capture-action-mode">Remember action for</label>
+      <select id="capture-action-mode"><option value="full-page">Entire page</option><option value="visible">Visible viewport</option><option value="region">Selection</option><option value="element">Element / scrolling frame</option></select>
+      <label for="capture-action-output">After a complete capture</label>
+      <select id="capture-action-output"><option value="editor">Open editor</option><option value="png">Save PNG and open editor</option><option value="jpeg">Save JPEG and open editor</option><option value="webp">Save WebP and open editor</option><option value="pdf">Save PDF and open editor</option><option value="gif">Save GIF and open editor</option><option value="bmp">Save BMP and open editor</option></select>
+      <small>Each mode remembers its action. Partial captures always open for review.</small>
       <label for="capture-delay">Delay before capture</label>
       <select id="capture-delay">
         <option value="0">No delay</option>
@@ -40,7 +46,7 @@
       <input id="capture-tiles" type="number" min="1" max="2000" step="1">
       <label for="filename-template">Filename template</label>
       <input id="filename-template" maxlength="160" placeholder="{title}-{date}-{time}">
-      <label for="history-retention">Keep history for</label>
+      <label for="history-retention">Keep screenshot history for</label>
       <select id="history-retention">
         <option value="7">1 week</option>
         <option value="30">30 days</option>
@@ -52,20 +58,38 @@
       <label class="check"><input id="context-menu" type="checkbox"> Right-click menu: repeat last capture</label>
       <small>Safety limits prevent a runaway page from exhausting memory. Filename fields: {title}, {host}, {date}, {time}, {mode}, {counter} — or FireShot-style %t %e %n %y-%m-%d %H:%M:%S</small>
     </details>
+    <label for="batch-scope">Tabs to capture</label>
+    <select id="batch-scope"><option value="current-window">This window</option><option value="selected-tabs">Selected tabs in this window</option><option value="all-windows">All windows</option></select>
+    <label for="batch-output">Batch result</label>
+    <select id="batch-output"><option value="report">Open results</option><option value="png">Save PNG files</option><option value="jpeg">Save JPEG files</option><option value="webp">Save WebP files</option><option value="pdf">Save individual PDFs</option><option value="gif">Save GIF files</option><option value="bmp">Save BMP files</option><option value="combined-pdf">Save one combined PDF</option></select>
     <label for="batch-mode">Batch capture area</label>
     <select id="batch-mode">
       <option value="full-page">Entire page</option>
       <option value="visible">Visible viewport</option>
     </select>
-    <button id="all-tabs"><span>Capture all web tabs</span><small>Maximum 20 tabs</small></button>
-    <button id="all-tabs-pdf"><span>All tabs to one PDF</span><small>Captures and downloads one searchable PDF</small></button>
+    <button disabled id="all-tabs"><span>Capture all web tabs</span><small>Maximum 20 tabs</small></button>
+    <button disabled id="all-tabs-pdf"><span>All tabs to one PDF</span><small>Captures and downloads one searchable PDF</small></button>
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
-    <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
-    <button id="cancel"><span>Cancel active capture</span><kbd>Ctrl Shift S</kbd><small>Restores the page and discards the result</small></button>
+    <button disabled id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
+    <details id="automation-settings">
+      <summary>Website automation</summary>
+      <label class="check"><input id="automation-enabled" type="checkbox"> Allow listed websites to request captures</label>
+      <label for="automation-origins">Allowed website origins, one per line</label>
+      <textarea id="automation-origins" rows="3" placeholder="https://example.com"></textarea>
+      <small>Only these exact websites may capture their own active tab and cancel their own requests. Results open in WinShot; image bytes are never returned to the website. Turn off to revoke access and stop its requests.</small>
+      <button id="automation-use-site" type="button">Add this website</button>
+      <button id="automation-save" type="button">Apply website access</button>
+      <a href="../docs/page-automation.md" target="_blank">Website API instructions</a>
+    </details>
+    <button disabled id="open-library"><span>Open image or project</span><small>Edit a saved image or WinShot project in Chrome</small></button>
+    <button disabled id="open-video-studio"><span>Record &amp; edit video</span><small>Opens WinShot video studio in a Chrome tab</small></button>
     <a id="open-history" href="#">Capture history…</a>
   </main>
-  <p id="status" role="status">Captures stay on this device.</p>
+  <footer>
+    <p id="status" role="status">Loading WinShot…</p>
+    <button disabled id="cancel" title="Stop capture and restore the page (Ctrl+Shift+S)">Stop</button>
+  </footer>
   <script type="module" src="popup.js"></script>
 </body>
 </html>

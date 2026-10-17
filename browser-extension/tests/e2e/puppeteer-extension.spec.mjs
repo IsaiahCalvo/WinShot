@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -7,7 +7,7 @@ import os from "node:os";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 function pdfUtf16Hex(value) {
   return [...value].map((character) => {
@@ -57,14 +57,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension() {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-extension-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -103,7 +96,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -377,12 +370,12 @@ test("URL-list batch closes its disposable fixture tabs", async () => {
       return (await chrome.storage.local.get(`batch:${id}`))[`batch:${id}`];
     });
     expect(urlBatch.results).toHaveLength(2);
-    expect(urlBatch.results.every((item) => item.state === "complete")).toBe(true);
     expect(urlBatch.mode).toBe("full-page");
     const urlRecords = await urlSummary.evaluate(async (results) => {
       const store = await import(chrome.runtime.getURL("src/store.js"));
       return await Promise.all(results.map((item) => store.getRecord(item.captureId)));
     }, urlBatch.results);
+    expect(urlBatch.results.every((item) => item.state === "complete"), JSON.stringify(urlRecords.map((record) => record?.report))).toBe(true);
     expect(urlRecords.every((record) => record.report.mode === "full-page" && record.report.tileCount > 1)).toBe(true);
     const remainingFixturePages = (await run.browser.pages()).filter((page) => /^http:\/\/127\.0\.0\.1:4173\/(frame|sticky)$/.test(page.url()));
     expect(remainingFixturePages).toHaveLength(0);
@@ -835,12 +828,26 @@ test("service-worker termination triggers page watchdog cleanup and restart reco
     const page = await run.browser.newPage();
     monitorPage(page, run.errors);
     await page.goto("http://127.0.0.1:4173/long", { waitUntil: "networkidle0" });
-    await page.evaluate(() => scrollTo(0, 720));
+    const originalStyles = await page.evaluate(() => {
+      // Keep real MAIN-world function references: isolated DOM cleanup alone
+      // cannot prove the separate page-effects watchdog restored its proxies.
+      window.workerLossOriginalMediaMethods = {
+        play: HTMLMediaElement.prototype.play,
+        pause: HTMLMediaElement.prototype.pause
+      };
+      scrollTo(0, 720);
+      return { html: document.documentElement.style.cssText, body: document.body.style.cssText };
+    });
     const popup = await openPopup(run, page);
     await popup.click("[data-mode='full-page']");
     await page.waitForSelector("[data-winshot-capture]", { timeout: 10_000 });
+    await page.waitForFunction(() => HTMLMediaElement.prototype.play !== window.workerLossOriginalMediaMethods.play &&
+      HTMLMediaElement.prototype.pause !== window.workerLossOriginalMediaMethods.pause, { timeout: 3000 });
     await run.worker.close();
-    await page.waitForFunction(() => !document.querySelector("[data-winshot-capture]") && scrollY === 720, { timeout: 15_000 });
+    await page.waitForFunction(() => !document.querySelector("[data-winshot-capture]") && scrollY === 720 &&
+      HTMLMediaElement.prototype.play === window.workerLossOriginalMediaMethods.play &&
+      HTMLMediaElement.prototype.pause === window.workerLossOriginalMediaMethods.pause, { timeout: 15_000 });
+    expect(await page.evaluate(() => ({ html: document.documentElement.style.cssText, body: document.body.style.cssText }))).toEqual(originalStyles);
     await popup.close().catch(() => {});
 
     const newWorkerTarget = run.browser.waitForTarget(
@@ -1098,6 +1105,15 @@ test("dynamic, horizontal, frame, and pixel-surface fixtures report honest resul
     expect(frames.record.report.warnings.join(" ")).toMatch(/cross-origin frame/i);
 
     await page.goto("http://127.0.0.1:4173/media", { waitUntil: "networkidle0" });
+    const webGlState = await page.$eval("#gl", (canvas) => {
+      const context = canvas.getContext("webgl");
+      if (!context) return { available: false };
+      const pixel = new Uint8Array(4);
+      context.readPixels(100, 100, 1, 1, context.RGBA, context.UNSIGNED_BYTE, pixel);
+      return { available: true, lost: context.isContextLost(), retained: context.getContextAttributes().preserveDrawingBuffer, pixel: [...pixel] };
+    });
+    expect(webGlState, JSON.stringify({ webGlState, errors: run.errors })).toMatchObject({ available: true, lost: false, retained: true });
+    expect(webGlState.pixel[1], "The fixture must render green pixels before capture starts.").toBeGreaterThan(140);
     const media = await captureFromPopup(run, page, "[data-mode='full-page']");
     expect(media.record.state).toBe("complete");
     expect(media.record.report.warnings.join(" ")).toMatch(/Canvas\/WebGL/);
@@ -1127,7 +1143,7 @@ test("dynamic, horizontal, frame, and pixel-surface fixtures report honest resul
       return { blueCanvas, greenWebGl };
     });
     expect(surfacePixels.blueCanvas).toBeGreaterThan(100);
-    expect(surfacePixels.greenWebGl).toBeGreaterThan(100);
+    expect(surfacePixels.greenWebGl, JSON.stringify({ surfacePixels, webGlState, errors: run.errors })).toBeGreaterThan(100);
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);

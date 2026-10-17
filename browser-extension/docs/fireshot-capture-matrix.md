@@ -8,7 +8,7 @@ Checked against FireShot's official [edition comparison](https://getfireshot.com
 | Capture visible area | Implemented | Popup and registered-command tests |
 | Capture selected area | Implemented | Drag, edge-scroll, Ctrl-square, and Alt-full-width tests; adversarial tests cover efficient tiling of a region released off-screen, document anchoring on pre-scrolled pages, long-drag (>9s) stability, and no event leakage through the modal overlay |
 | Capture page element | Implemented | Ctrl-hover exact-element test; adversarial tests cover elements inside open shadow roots and position:fixed elements (captured in place, no scroll) |
-| Capture independently scrolling area | Implemented | Nested scrolling-element test; transform-scaled scroll containers are honestly reported partial (known limitation) |
+| Capture independently scrolling area | Implemented | Nested panels, open-shadow-root picker ancestry, scaled 2D panels at 0.5×/1.25×, and automatic large central-panel detection on app-shell pages |
 | Handle sticky/floating page elements | Implemented | Captured-pixel test proves header/footer appear exactly once, including across growth passes on growing pages (stale-footer-band regression test) |
 | Capture frames, iframes, and scrolling DIVs | Implemented | Same-origin, cross-origin, nested, duplicate-frame, and shadow-hosted-iframe tests |
 | Capture all open tabs | Implemented in visible or full-page mode | Multi-tab batch test; adversarial tests cover honest per-tab skip reasons for restricted tabs and refusal to start while a capture is running |
@@ -25,11 +25,14 @@ Checked against FireShot's official [edition comparison](https://getfireshot.com
 | Custom PDF page size | Implemented: Auto, A4, Letter, Legal, or custom | Custom MediaBox test; adversarial test verifies clamping (0.1in floors to 1in, 100in max) and honest {pages} pagination |
 | Custom PDF headers, footers, and watermarks | Implemented | PDF template test; injection-proof against hostile titles, and watermarks at the string-escape boundary no longer corrupt the content stream |
 | All tabs to one PDF in one click | Implemented | Packaged extension download test |
-| HiDPI/browser zoom | Browser zoom implemented; DPR above 1 has an open bug | Browser zoom is e2e-tested at 125%; the DPR-2 e2e test fails (output is 1x, not 2x) — the project's known open DPI bug, needs live HiDPI investigation |
+| HiDPI/browser zoom | Implemented in the test browser | Browser zoom at 125% and a real window at DPR 2 are e2e-tested. The harness resizes the physical window rather than emulating a viewport that captureVisibleTab does not honor. Physical Windows display testing remains separate. |
 | Configurable filename template | Implemented | Delayed capture/filename test; hostile-title tests verify %-tokens inside page titles are not expanded and long names never end in an illegal trailing dot |
 
-Verification status last reconciled against the 2026-08-20 adversarial QA pass (five adversarial-*.spec.mjs suites, 79 tests total, 78 passing); full findings in `.claudehelper/extension-qa-report.md` at the repo root.
+The previous August QA counts and untracked `.claudehelper` report do not establish
+the current build's status. Re-run `npm run test:e2e -- --project=extension-puppeteer`
+for the packaged extension, including the reliability suite, and use
+`npm run test:live -- <URLs>` for bounded public-site capture/export checks.
 
 ## Scope decision
 
-This matrix covers the browser-native capture and PDF feature union shown across FireShot Lite, Standard, and Pro. Browser-window capture is supplied by WinShot desktop, but the extension-to-desktop launch is not yet a dependable acknowledged bridge. Annotation editing, upload destinations, email/printing, and store packaging are intentionally outside this capture-engine milestone. FireShot's optional webpage JavaScript API is also tracked as future automation/integration rather than a missing capture mode.
+This matrix covers the browser-native capture and PDF feature union shown across FireShot Lite, Standard, and Pro. Browser-window capture is supplied by WinShot desktop, but the optional extension-to-desktop launch is not yet an acknowledged bridge. Browser annotation editing, local projects and video studio run independently in extension tabs; see [browser-editing.md](browser-editing.md). Printing is available in the browser editor. Upload destinations, email and store packaging are separate from this capture matrix. An opt-in exact-origin webpage API is implemented for visible/full-page capture with request-scoped cancellation; see [page automation](page-automation.md).

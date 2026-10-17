@@ -6,7 +6,7 @@
 // Fixtures reuse the existing server on 127.0.0.1:4173; hostile DOM/titles are
 // injected into /body at runtime so no fixture-server changes are required.
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -14,7 +14,7 @@ import os from "node:os";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 function pdfUtf16Hex(value) {
   return [...value].map((character) => {
@@ -64,14 +64,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension() {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -107,7 +100,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -411,8 +404,19 @@ test("giant capture: JPEG and WebP refuse gracefully with guidance and leave the
         await editor.waitForSelector(`${selector}:not([disabled])`);
         await editor.click(selector);
         // The single-canvas guard must fail fast with actionable guidance, not hang or crash.
-        await editor.waitForFunction(() =>
-          /very large captures/i.test(document.querySelector("#toast")?.textContent || ""), { timeout: 15_000 });
+        try {
+          await editor.waitForFunction(() =>
+            /very large captures/i.test(document.querySelector("#toast")?.textContent || ""), { timeout: 15_000 });
+        } catch (error) {
+          await test.info().attach("large-export-ui", { contentType: "application/json", body: JSON.stringify(await editor.evaluate(() => ({
+            ready: document.body.dataset.ready,
+            state: document.querySelector("#state")?.textContent,
+            toast: document.querySelector("#toast")?.textContent,
+            buttons: [...document.querySelectorAll("header button")].map(node => ({ id: node.id, disabled: node.disabled, text: node.textContent })),
+          })), null, 2) });
+          await test.info().attach("large-export-screen", { contentType: "image/png", body: await editor.screenshot() });
+          throw error;
+        }
         expect(fs.readdirSync(downloadRoot).filter((name) => name.endsWith(extension))).toHaveLength(0);
       }
       // Buttons must be re-enabled after a failed export so PNG/PDF stay available.

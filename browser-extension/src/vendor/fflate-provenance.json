@@ -1,0 +1,12 @@
+{
+  "project": "fflate",
+  "version": "0.8.2",
+  "license": "MIT",
+  "upstream": "https://github.com/101arrowz/fflate",
+  "sourceTarball": "https://registry.npmjs.org/fflate/-/fflate-0.8.2.tgz",
+  "npmTarballIntegrity": "sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==",
+  "integrityVerified": true,
+  "distributionFile": "package/esm/browser.js",
+  "vendoredSha256": "8cc1f687e0159e977addb6b85e274dbd11e622cf151f4fcb7b85d49622ea43e7",
+  "modifications": "None"
+}

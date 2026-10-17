@@ -1,3 +1,4 @@
+import { cancelAutomationForNavigation, handleAutomationRequest, installAutomationBridge, refreshAutomationBridge } from "./automation-service.js";
 import {
   CaptureMode,
   SessionState,
@@ -7,15 +8,19 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
-import { deleteCapture, getTiles, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
+import { clearCaptureTiles, deleteCapture, getRecord, getTile, promoteCaptureTiles, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
 import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
 const activeCaptures = new Map();     // keyed by tabId
 const activeWindowLocks = new Set();  // captureVisibleTab is window-scoped — one capture per window
 const pickerFrames = new Map();
+const pickerTokens = new Map();
 const pickerSettings = new Map();
+const pickerModes = new Map();
+const pendingCaptures = new Map();
 let activeBatch = null;
-let lastScreenshotAt = 0;
+let lastScreenshotAt = -Infinity;
+let screenshotQueue = Promise.resolve();
 
 const MODE_LABELS = {
   "visible": "Capture visible part",
@@ -43,8 +48,9 @@ function captureId() {
   return `${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
 
-async function activeTab() {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+async function activeTab(windowId = null) {
+  if (windowId !== null && (!Number.isInteger(windowId) || windowId <= 0 || windowId > 0x7fffffff)) throw new Error("Invalid source browser window.");
+  const [tab] = await chrome.tabs.query(windowId === null ? { active: true, lastFocusedWindow: true } : { active: true, windowId });
   if (!tab?.id) throw new Error("No active browser tab was found.");
   return tab;
 }
@@ -55,11 +61,25 @@ async function sendToTab(tabId, message, frameId = 0) {
   return response;
 }
 
-async function injectCaptureScript(tabId, frameId = 0, allFrames = false) {
+async function injectCaptureScript(tabId, frameId = 0) {
+  await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [frameId] }, world: "MAIN", injectImmediately: true,
+    files: ["src/page-effects.js"]
+  });
   return await chrome.scripting.executeScript({
-    target: allFrames ? { tabId, allFrames: true } : { tabId, frameIds: [frameId] },
+    target: { tabId, frameIds: [frameId] },
+    injectImmediately: true,
     files: ["src/content.js"]
   });
+}
+
+async function boundedPickerCall(promise) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("The embedded frame did not respond.")), 2000);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 function screenshotMetrics(metrics, frameHost) {
@@ -77,7 +97,7 @@ function screenshotMetrics(metrics, frameHost) {
   };
 }
 
-async function locateFrameChain(session) {
+async function locateFrameChain(session, preparedFrameIds = []) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId: session.tabId });
   const byId = new Map(frames.map((frame) => [frame.frameId, frame]));
   const edges = [];
@@ -92,26 +112,22 @@ async function locateFrameChain(session) {
   let left = 0;
   let top = 0;
   let topViewport = null;
-  const preparedFrameIds = [];
-  try {
-    for (const edge of edges) {
-      await injectCaptureScript(session.tabId, edge.parentFrameId);
-      await injectCaptureScript(session.tabId, edge.child.frameId);
-      const frameToken = crypto.randomUUID();
-      await sendToTab(session.tabId, { type: "WINSHOT_ANNOUNCE_FRAME", frameToken }, edge.child.frameId);
-      const located = await sendToTab(session.tabId, {
-        type: "WINSHOT_LOCATE_FRAME",
-        sessionId: session.id,
-        frameToken
-      }, edge.parentFrameId);
-      preparedFrameIds.push(edge.parentFrameId);
-      left += located.left;
-      top += located.top;
-      topViewport ||= located.topViewport;
-    }
-  } catch (error) {
-    await restoreFrameChain(session, preparedFrameIds);
-    throw error;
+  // The caller owns this shared list and stops heartbeats before restoring it,
+  // including when a later parent cannot be located.
+  for (const edge of edges) {
+    await injectCaptureScript(session.tabId, edge.parentFrameId);
+    await injectCaptureScript(session.tabId, edge.child.frameId);
+    const frameToken = crypto.randomUUID();
+    await sendToTab(session.tabId, { type: "WINSHOT_ANNOUNCE_FRAME", frameToken }, edge.child.frameId);
+    const located = await sendToTab(session.tabId, {
+      type: "WINSHOT_LOCATE_FRAME",
+      sessionId: session.id,
+      frameToken
+    }, edge.parentFrameId);
+    preparedFrameIds.push(edge.parentFrameId);
+    left += located.left;
+    top += located.top;
+    topViewport ||= located.topViewport;
   }
   return { located: true, left, top, topViewport, preparedFrameIds };
 }
@@ -128,13 +144,51 @@ async function heartbeatFrameChain(session, preparedFrameIds) {
     sendToTab(session.tabId, { type: "WINSHOT_HEARTBEAT_FRAME_HOST", sessionId: session.id }, frameId)));
 }
 
+function startCaptureHeartbeat(session, controller, startTime, frameHostIds) {
+  const deadline = startTime + session.limits.maxDurationMs;
+  let stopped = false;
+  let pending = false;
+  let timer;
+  const stop = () => {
+    stopped = true;
+    clearInterval(timer);
+    controller.signal.removeEventListener("abort", stop);
+  };
+  const live = () => !stopped && !controller.signal.aborted &&
+    activeCaptures.get(session.tabId)?.session === session && performance.now() < deadline;
+  const tick = async () => {
+    if (!live()) { stop(); return; }
+    if (pending) return;
+    pending = true;
+    try {
+      const replies = await Promise.allSettled([
+        sendToTab(session.tabId, { type: "WINSHOT_HEARTBEAT", sessionId: session.id }, session.frameId),
+        ...frameHostIds().map(frameId => sendToTab(session.tabId,
+          { type: "WINSHOT_HEARTBEAT_FRAME_HOST", sessionId: session.id }, frameId))
+      ]);
+      // Layout retries reuse the session ID. A stopped attempt must not fail the
+      // next attempt when an old heartbeat finally returns.
+      if (!live()) { stop(); return; }
+      if (replies.some(reply => reply.status === "fulfilled" &&
+          (reply.value?.alive === false || reply.value?.effectsAlive === false))) {
+        const active = activeCaptures.get(session.tabId);
+        active.failureReason ||= "The page capture session expired and was restored before capture finished.";
+        controller.abort();
+      }
+      // A delayed transport/bridge acknowledgement is not proof of expiry.
+      // Existing watchdog and per-scroll checks still detect disconnected pages.
+    } finally { pending = false; }
+  };
+  timer = setInterval(tick, 1500);
+  controller.signal.addEventListener("abort", stop, { once: true });
+  if (!live()) stop();
+  return stop;
+}
+
 async function assertStillActive(session) {
   const [tab] = await chrome.tabs.query({ active: true, windowId: session.windowId });
   if (tab?.id !== session.tabId) {
     throw new Error("The active tab changed during capture. WinShot stopped to avoid capturing pixels from the wrong page.");
-  }
-  if (tab.url && session.sourceUrl && tab.url !== session.sourceUrl) {
-    throw new Error("The page navigated during capture. WinShot stopped and restored the old page state where possible.");
   }
 }
 
@@ -143,25 +197,56 @@ function throwIfAborted(signal) {
 }
 
 async function throttleCapture(minIntervalMs, signal) {
-  const remaining = minIntervalMs - (Date.now() - lastScreenshotAt);
-  if (remaining > 0) {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, remaining);
-      signal.addEventListener("abort", () => {
-        clearTimeout(timer);
-        reject(new DOMException("Capture cancelled.", "AbortError"));
-      }, { once: true });
-    });
-  }
+  const remaining = minIntervalMs - (performance.now() - lastScreenshotAt);
+  if (remaining > 0) await wait(remaining, signal);
 }
 
-async function screenshot(windowId, minIntervalMs, signal, session = null) {
-  await throttleCapture(minIntervalMs, signal);
+function wait(ms, signal) {
   throwIfAborted(signal);
-  const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
-  lastScreenshotAt = Date.now();
+  return new Promise((resolve, reject) => {
+    const finish = () => { signal.removeEventListener("abort", abort); resolve(); };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(new DOMException("Capture cancelled.", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function screenshot(windowId, minIntervalMs, signal, session = null) {
+  // Chrome's quota is shared across windows. Independent per-window captures
+  // must take turns, including their throttle wait, or both can fire at once.
+  const result = screenshotQueue.then(() => takeScreenshot(windowId, minIntervalMs, signal, session));
+  screenshotQueue = result.catch(() => {});
+  return result;
+}
+
+async function takeScreenshot(windowId, minIntervalMs, signal, session) {
+  let dataUrl;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await throttleCapture(minIntervalMs, signal);
+    throwIfAborted(signal);
+    if (session) await assertStillActive(session);
+    try {
+      // The quota limits API invocations, not completed image readbacks. Keep
+      // calls serialized, but let successful readback time count toward the
+      // next interval instead of adding another full wait after every image.
+      lastScreenshotAt = performance.now();
+      dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+      break;
+    } catch (error) {
+      lastScreenshotAt = performance.now();
+      // Chrome can temporarily reject readback while activating a background tab.
+      // A quota rejection also needs a full quiet second before the next attempt.
+      if (attempt || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|image readback failed|failed to capture tab/i.test(error.message)) throw error;
+      await wait(Math.max(1000, minIntervalMs), signal);
+    }
+  }
   // Verify the intended tab was still active when the pixels were taken — a tab
   // switch in the throttle gap would silently stitch another site's pixels.
+  throwIfAborted(signal);
   if (session) await assertStillActive(session);
   return await (await fetch(dataUrl)).blob();
 }
@@ -169,8 +254,11 @@ async function screenshot(windowId, minIntervalMs, signal, session = null) {
 async function cropScreenshot(blob, metrics) {
   const bitmap = await createImageBitmap(blob);
   try {
-    const scaleX = bitmap.width / metrics.viewport.width;
-    const scaleY = bitmap.height / metrics.viewport.height;
+    // Screenshots include the scrollbar gutter; visualViewport excludes it.
+    // Scaling by the latter stretches the image and contaminates every tile edge
+    // on Windows with classic scrollbars.
+    const scaleX = bitmap.width / (metrics.viewport.rasterWidth || metrics.viewport.width);
+    const scaleY = bitmap.height / (metrics.viewport.rasterHeight || metrics.viewport.height);
     if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) {
       throw new Error("The browser returned an invalid screenshot scale.");
     }
@@ -192,12 +280,12 @@ async function cropScreenshot(blob, metrics) {
   }
 }
 
-async function seamScore(previous, current) {
+async function seamScore(previous, current, allowTiny = false) {
   const left = Math.max(previous.destXPx, current.destXPx);
   const top = Math.max(previous.destYPx, current.destYPx);
   const right = Math.min(previous.destXPx + previous.widthPx, current.destXPx + current.widthPx);
   const bottom = Math.min(previous.destYPx + previous.heightPx, current.destYPx + current.heightPx);
-  if (right - left < 8 || bottom - top < 4) return null;
+  if (right - left < (allowTiny ? 1 : 8) || bottom - top < (allowTiny ? 1 : 4)) return null;
 
   const sampleWidth = Math.min(256, right - left);
   const sampleHeight = Math.min(64, bottom - top);
@@ -228,10 +316,47 @@ async function seamScore(previous, current) {
   }
 }
 
+async function preserveFloatingOverlap(previous, current) {
+  const areas = (previous.floatingRectsPx || []).flatMap(rect => {
+    const left = Math.max(rect.left, current.destXPx, previous.destXPx);
+    const top = Math.max(rect.top, current.destYPx, previous.destYPx);
+    const right = Math.min(rect.right, current.destXPx + current.widthPx, previous.destXPx + previous.widthPx);
+    const bottom = Math.min(rect.bottom, current.destYPx + current.heightPx, previous.destYPx + previous.heightPx);
+    return right > left && bottom > top ? [{ left, top, right, bottom }] : [];
+  });
+  if (!areas.length) return;
+  const [before, after] = await Promise.all([createImageBitmap(previous.blob), createImageBitmap(current.blob)]);
+  try {
+    const canvas = new OffscreenCanvas(current.widthPx, current.heightPx);
+    const context = canvas.getContext("2d", { alpha: false });
+    context.drawImage(after, 0, 0);
+    // Later tiles normally paint over earlier ones. Preserve the already-captured
+    // fixed element's shared pixels, or a tall sidebar loses its bottom at a seam.
+    for (const rect of areas) {
+      const width = rect.right - rect.left, height = rect.bottom - rect.top;
+      context.drawImage(before, rect.left - previous.destXPx, rect.top - previous.destYPx, width, height,
+        rect.left - current.destXPx, rect.top - current.destYPx, width, height);
+    }
+    // A newly shown footer belongs to this tile and keeps normal paint priority
+    // if its own rectangle overlaps a retained piece of an earlier overlay.
+    for (const rect of current.floatingRectsPx) {
+      const x = rect.left - current.destXPx, y = rect.top - current.destYPx;
+      const width = rect.right - rect.left, height = rect.bottom - rect.top;
+      if (width > 0 && height > 0) context.drawImage(after, x, y, width, height, x, y, width, height);
+    }
+    current.blob = await canvas.convertToBlob({ type: "image/png" });
+    const keys = new Set(current.floatingRectsPx.map(rect => JSON.stringify(rect)));
+    for (const rect of areas) if (!keys.has(JSON.stringify(rect))) { current.floatingRectsPx.push(rect); keys.add(JSON.stringify(rect)); }
+  } finally { before.close(); after.close(); }
+}
+
 function progress(session, message) {
   chrome.runtime.sendMessage({
     type: "WINSHOT_PROGRESS",
     captureId: session.id,
+    windowId: session.windowId,
+    global: Boolean(activeBatch),
+    busy: Boolean(activeBatch) || session.state === SessionState.PREPARING || session.state === SessionState.CAPTURING,
     state: session.state,
     tileCount: session.report.tileCount,
     message
@@ -241,7 +366,7 @@ function progress(session, message) {
 
 // Toolbar badge is the progress surface that can never contaminate captured pixels.
 function updateBadge(text = "…") {
-  const busy = activeCaptures.size > 0 || Boolean(activeBatch);
+  const busy = activeCaptures.size > 0 || pendingCaptures.size > 0 || Boolean(activeBatch);
   chrome.action.setBadgeText({ text: busy ? text : "" }).catch(() => {});
   if (busy) chrome.action.setBadgeBackgroundColor({ color: "#0A84FF" }).catch(() => {});
 }
@@ -295,7 +420,7 @@ async function storeVisibleCapture(session, controller) {
   session.state = SessionState.COMPLETE;
 }
 
-async function storeScrollingCapture(session, controller) {
+async function storeScrollingCapture(session, controller, retryAttempt = 0, tileCaptureId = session.id) {
   let prepared = false;
   let restored = false;
   const tileMetadata = [];
@@ -306,12 +431,16 @@ async function storeScrollingCapture(session, controller) {
   const semanticTextKeys = new Set();
   const semanticLinkKeys = new Set();
   const capturedPositions = new Set();
-  const startTime = Date.now();
+  const startTime = performance.now();
   let expectedScale = null;
   let frameHost = null;
   let frameHostPrepared = [];
+  let stopHeartbeat = () => {};
   let extent;
   let viewportSize;
+  let allTilesStable = true;
+  let canRetryLayout = false;
+  let layoutShrank = false;
 
   try {
     await injectCaptureScript(session.tabId, session.frameId);
@@ -322,9 +451,11 @@ async function storeScrollingCapture(session, controller) {
       target: session.target
     }, session.frameId);
     prepared = true;
+    stopHeartbeat = startCaptureHeartbeat(session, controller, startTime, () => frameHostPrepared);
     let captureMetrics = prep.metrics;
+    const documentToken = prep.metrics.documentToken;
     if (session.frameId) {
-      frameHost = await locateFrameChain(session);
+      frameHost = await locateFrameChain(session, frameHostPrepared);
       frameHostPrepared = frameHost.preparedFrameIds;
       captureMetrics = await sendToTab(session.tabId, { type: "WINSHOT_METRICS", sessionId: session.id }, session.frameId);
     }
@@ -347,7 +478,7 @@ async function storeScrollingCapture(session, controller) {
     session.report.dimensionsCss = { ...extent };
     session.report.target = captureMetrics.kind;
     session.state = SessionState.CAPTURING;
-    if (!(await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
+    if (!(retryAttempt ? await getRecord(session.id) : await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
 
     let safetyStopReason = null;
     if (extent.width > session.limits.maxWidthCss || extent.height > session.limits.maxHeightCss) {
@@ -377,7 +508,7 @@ async function storeScrollingCapture(session, controller) {
           safetyStopReason = `Capture stopped at the configured ${session.limits.maxTiles}-tile limit.`;
           break captureLoop;
         }
-        if (Date.now() - startTime >= session.limits.maxDurationMs) {
+        if (performance.now() - startTime >= session.limits.maxDurationMs) {
           safetyStopReason = "Capture stopped at the configured time limit.";
           break captureLoop;
         }
@@ -385,7 +516,7 @@ async function storeScrollingCapture(session, controller) {
         if (frameHostPrepared.length) await heartbeatFrameChain(session, frameHostPrepared);
 
         progress(session, `Capturing tile ${index + 1}…`);
-        const result = await sendToTab(session.tabId, {
+        const scrollRequest = {
           type: "WINSHOT_SCROLL",
           sessionId: session.id,
           x: position.x,
@@ -393,9 +524,54 @@ async function storeScrollingCapture(session, controller) {
           extent,
           viewport: viewportSize,
           settleTimeoutMs: session.limits.settleTimeoutMs
-        }, session.frameId);
-        if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) throw new Error("The page navigated during capture.");
-        if (!result.stable) session.report.warnings.push(`Tile ${index + 1} did not reach full layout stability before capture.`);
+        };
+        let result = await sendToTab(session.tabId, scrollRequest, session.frameId);
+        let cropped;
+        let initialPaintConfirmed = index !== 0;
+        let previousPaint = null;
+        // On Windows Chrome can return the pre-scroll compositor surface even
+        // after DOM/rAF readiness. Confirm two consecutive first-tile readbacks;
+        // one additional bounded read recovers a stale initial surface.
+        for (let read = 0; read < (index === 0 ? 3 : 1); read++) {
+          if (read) result = await sendToTab(session.tabId, scrollRequest, session.frameId);
+          if (result.metrics.documentToken !== documentToken) throw new Error("The document changed during capture.");
+          const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal, session);
+          cropped = await cropScreenshot(source, screenshotMetrics(result.metrics, frameHost));
+          const paint = { blob: cropped.blob, destXPx: 0, destYPx: 0, widthPx: cropped.width, heightPx: cropped.height };
+          if (index === 0) session.report.initialPaint = { readbacks: read + 1, confirmed: false, confidence: null };
+          if (previousPaint && previousPaint.widthPx === paint.widthPx && previousPaint.heightPx === paint.heightPx &&
+              previousPaint.reachedX === result.metrics.reachedX && previousPaint.reachedY === result.metrics.reachedY) {
+            const score = await seamScore(previousPaint, paint, true);
+            session.report.initialPaint.confidence = score;
+            if (score >= 0.999) {
+              initialPaintConfirmed = true;
+              session.report.initialPaint.confirmed = true;
+              break;
+            }
+          }
+          previousPaint = { ...paint, reachedX: result.metrics.reachedX, reachedY: result.metrics.reachedY };
+        }
+        if (!initialPaintConfirmed) {
+          allTilesStable = false;
+          session.report.warnings.push("The initial viewport pixels did not settle across browser readbacks; the result is marked partial.");
+        }
+        if (result.metrics.documentToken !== documentToken) throw new Error("The document changed during capture.");
+        if (index === 0 && ["document", "self-scroller"].includes(result.metrics.kind)) {
+          // Images and ad placeholders can collapse while the first paint settles.
+          // No stored pixels precede this tile, so use the now-current extent.
+          extent.width = Math.min(result.metrics.width, session.limits.maxWidthCss);
+          extent.height = Math.min(result.metrics.height, session.limits.maxHeightCss);
+        }
+        if (index > 0 && (result.metrics.width < extent.width - 8 || result.metrics.height < extent.height - 8)) layoutShrank = true;
+        if (result.metrics.url !== (session.frameUrl || session.sourceUrl)) {
+          const warning = "The page updated its URL during scrolling; document identity was verified for every tile.";
+          if (!session.report.warnings.includes(warning)) session.report.warnings.push(warning);
+        }
+        if (!result.stable) {
+          allTilesStable = false;
+          session.report.warnings.push(`Tile ${index + 1} still had changing layout, loading images, or an unstabilized animation at the capture deadline.`);
+          for (const warning of result.warnings || []) if (!session.report.warnings.includes(warning)) session.report.warnings.push(warning);
+        }
         for (const entry of result.semantics?.text || []) {
           const key = `${entry.text}|${entry.x.toFixed(1)}|${entry.y.toFixed(1)}`;
           if (!semanticTextKeys.has(key) && semanticText.length < 50000) {
@@ -411,8 +587,6 @@ async function storeScrollingCapture(session, controller) {
           }
         }
 
-        const source = await screenshot(session.windowId, session.limits.minCaptureIntervalMs, controller.signal, session);
-        const cropped = await cropScreenshot(source, screenshotMetrics(result.metrics, frameHost));
         const scale = (cropped.scaleX + cropped.scaleY) / 2;
         if (expectedScale === null) expectedScale = scale;
         else if (Math.abs(scale - expectedScale) / expectedScale > 0.02) {
@@ -420,7 +594,7 @@ async function storeScrollingCapture(session, controller) {
         }
 
         const tile = {
-          captureId: session.id,
+          captureId: tileCaptureId,
           index,
           planKey: key,
           blob: cropped.blob,
@@ -439,6 +613,12 @@ async function storeScrollingCapture(session, controller) {
           reachedY: result.metrics.reachedY,
           seamScore: null
         };
+        tile.floatingRectsPx = (result.metrics.floatingRects || []).map(rect => ({
+          left: tile.destXPx + Math.max(0, Math.round(rect.left * cropped.scaleX)),
+          top: tile.destYPx + Math.max(0, Math.round(rect.top * cropped.scaleY)),
+          right: tile.destXPx + Math.min(tile.widthPx, Math.round((rect.left + rect.width) * cropped.scaleX)),
+          bottom: tile.destYPx + Math.min(tile.heightPx, Math.round((rect.top + rect.height) * cropped.scaleY))
+        }));
 
         // A 2D tile can have both a left and an upper seam — score EVERY overlapping
         // neighbor and keep the worst, so "minimum seam confidence" means what it says.
@@ -446,7 +626,12 @@ async function storeScrollingCapture(session, controller) {
           candidate.destXPx < tile.destXPx + tile.widthPx && candidate.destXPx + candidate.widthPx > tile.destXPx &&
           candidate.destYPx < tile.destYPx + tile.heightPx && candidate.destYPx + candidate.heightPx > tile.destYPx);
         for (const neighbor of neighbors) {
-          const score = await seamScore(neighbor, tile);
+          // IndexedDB owns the raster history. Keep placement metadata in memory
+          // and decode only an overlapping neighbor, even on a 400-tile capture.
+          const raster = await getTile(tileCaptureId, neighbor.index);
+          if (!raster) throw new DOMException("This capture was deleted from history.", "AbortError");
+          await preserveFloatingOverlap(raster, tile);
+          const score = await seamScore(raster, tile);
           if (score === null) continue;
           tile.seamScore = tile.seamScore === null || tile.seamScore === undefined ? score : Math.min(tile.seamScore, score);
           seamScores.push(score);
@@ -454,8 +639,9 @@ async function storeScrollingCapture(session, controller) {
         tile.seamScore ??= null;
 
         await putTile(tile);
-        workingTiles.push(tile);
-        tileMetadata.push({ ...tile, blob: undefined });
+        const metadata = { ...tile, blob: undefined };
+        workingTiles.push(metadata);
+        tileMetadata.push(metadata);
         capturedPositions.add(key);
         index++;
         capturedThisPass++;
@@ -463,7 +649,7 @@ async function storeScrollingCapture(session, controller) {
         session.report.dimensionsCss = { ...extent };
         // A record the user deleted from History mid-run must stay deleted — never
         // resurrect it as a "complete" capture missing its earlier tiles.
-        if (!(await updateRecord({ ...session, tiles: tileMetadata }))) {
+        if (!(retryAttempt ? await getRecord(session.id) : await updateRecord({ ...session, tiles: tileMetadata }))) {
           throw new DOMException("This capture was deleted from history.", "AbortError");
         }
 
@@ -529,10 +715,13 @@ async function storeScrollingCapture(session, controller) {
     session.semantics = { text: semanticText, links: semanticLinks };
     if (minimum < 0.7) session.report.warnings.push("One or more overlaps changed substantially; the result is marked partial rather than silently accepted.");
     if (!coverage.complete) session.report.warnings.push(...coverage.gaps);
-    session.state = coverage.complete && minimum >= 0.7 && !safetyStopReason
+    if (layoutShrank) session.report.warnings.push("The page became smaller while scrolling; the captured coordinate layout changed.");
+    session.state = coverage.complete && minimum >= 0.7 && allTilesStable && !safetyStopReason && !layoutShrank
       ? SessionState.COMPLETE
       : SessionState.PARTIAL;
+    canRetryLayout = (minimum < 0.7 || layoutShrank) && allTilesStable && !safetyStopReason;
   } finally {
+    stopHeartbeat();
     if (prepared) {
       let failures = null;
       try {
@@ -550,11 +739,52 @@ async function storeScrollingCapture(session, controller) {
     }
     if (frameHostPrepared.length) await restoreFrameChain(session, frameHostPrepared);
   }
+  const elapsed = performance.now() - startTime;
+  const remaining = session.limits.maxDurationMs - elapsed;
+  const remainingTiles = session.limits.maxTiles - tileMetadata.length;
+  if (!retryAttempt && canRetryLayout && session.mode === CaptureMode.FULL_PAGE &&
+      session.report.restoration === "verified by read-back" && remainingTiles > tileMetadata.length && remaining > Math.max(5000, elapsed * 0.75)) {
+    throwIfAborted(controller.signal);
+    const previous = { report: session.report, state: session.state, semantics: session.semantics, tiles: session.tiles };
+    if (!(await updateRecord(session))) throw new DOMException("This capture was deleted from history.", "AbortError");
+    const stagedId = session.id + "-retry-" + crypto.randomUUID();
+    const previousMinimum = previous.report.seamConfidence.minimum;
+    session.semantics = { text: [], links: [] };
+    session.state = SessionState.PREPARING;
+    session.report = { target: session.mode, mode: session.mode, dimensionsCss: null, dimensionsPx: null,
+      tileCount: 0, seamConfidence: null, coverage: null, restoration: "pending", fallbackUsed: null,
+      warnings: ["The page layout changed during capture. WinShot recaptured it once after stabilization."],
+      layoutRetry: { attempt: 1, previousMinimum, previousTileCount: tileMetadata.length } };
+    const keepPrevious = reason => {
+      const restoration = session.report.restoration;
+      Object.assign(session, previous);
+      session.report.layoutRetry = { attempt: 1, previousMinimum, previousTileCount: tileMetadata.length, keptOriginal: true };
+      session.report.warnings.push(reason + " The original partial capture was kept.");
+      if (restoration !== "verified by read-back") session.report.restoration = "partial — recapture cleanup: " + restoration;
+    };
+    const limits = session.limits;
+    session.limits = { ...limits, maxDurationMs: remaining, maxTiles: remainingTiles };
+    progress(session, "Page layout changed. Rechecking the capture once…");
+    try {
+      await storeScrollingCapture(session, controller, 1, stagedId);
+      throwIfAborted(controller.signal);
+      if (session.state === SessionState.COMPLETE) {
+        if (!(await promoteCaptureTiles(session.id, stagedId))) throw new DOMException("This capture was deleted from history.", "AbortError");
+      } else keepPrevious("The recapture did not produce a complete image.");
+    } catch (error) {
+      if (controller.signal.aborted || error.name === "AbortError") throw error;
+      keepPrevious("The recapture failed: " + friendlyError(error) + ".");
+    } finally {
+      session.limits = limits;
+      await clearCaptureTiles(stagedId).catch(() => { session.report.warnings.push("Temporary recapture tiles could not be removed; history retention will clean them up."); });
+    }
+  }
 }
 
 async function runCapture(mode, target = null, tabOverride = null, options = {}) {
   const tab = tabOverride || await activeTab();
   if (!tab.id) throw new Error("No active tab.");
+  if (activeBatch && !options.batch) throw new Error("A WinShot batch is already running. Press Stop before starting another capture.");
   // A capture started while a picker overlay is open (hotkey, context menu) would
   // burn the overlay into the pixels and strand its modal event shield — dismiss it.
   if (pickerFrames.has(tab.id)) {
@@ -568,7 +798,7 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   activeWindowLocks.add(tab.windowId);
 
   let session;
-  const controller = new AbortController();
+  const controller = options.controller || new AbortController();
   try {
     const settings = normalizeSettings(options.settings || await loadSettings());
     session = createSession({ id: captureId(), mode, tab, target, limits: options.limits || captureLimits(settings) });
@@ -587,9 +817,12 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
 
   try {
     await putRecord(session);
+    throwIfAborted(controller.signal);
     if (mode === CaptureMode.VISIBLE) await storeVisibleCapture(session, controller);
     else await storeScrollingCapture(session, controller);
+    throwIfAborted(controller.signal);
     await attachThumbnail(session);
+    throwIfAborted(controller.signal);
   } catch (error) {
     if (activeEntry.failureReason) {
       session.state = SessionState.FAILED;
@@ -610,15 +843,26 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     session.finishedAt = new Date().toISOString();
     // Never resurrect a record the user deleted from History mid-capture; sweep any
     // tiles written after the delete.
-    if (!(await updateRecord(session))) await deleteCapture(session.id).catch(() => {});
-    activeCaptures.delete(tab.id);
-    activeWindowLocks.delete(tab.windowId);
-    refreshContextMenu().catch(() => {});
-    updateBadge();
+    try {
+      if (!(await updateRecord(session))) await deleteCapture(session.id).catch(() => {});
+    } catch (error) {
+      session.state = SessionState.FAILED;
+      session.error = friendlyError(error);
+      throw error;
+    } finally {
+      // Storage failures must never strand the window lock or disable future captures.
+      activeCaptures.delete(tab.id);
+      activeWindowLocks.delete(tab.windowId);
+      refreshContextMenu().catch(() => {});
+      updateBadge();
+      progress(session, session.error || `Capture ${session.state}.`);
+    }
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
-    await chrome.tabs.create({ url: chrome.runtime.getURL(`src/editor.html?id=${encodeURIComponent(session.id)}`) });
+    const action = session.state === SessionState.COMPLETE ? normalizeSettings(options.settings).captureActions[session.mode] : "editor";
+    const query = action && action !== "editor" ? `&action=${encodeURIComponent(action)}` : "";
+    await chrome.tabs.create({ windowId: session.windowId, url: chrome.runtime.getURL(`src/editor.html?id=${encodeURIComponent(session.id)}${query}`) });
   }
   return { captureId: session.id, state: session.state, error: session.error };
 }
@@ -628,48 +872,101 @@ function supportedBatchUrl(url) {
 }
 
 async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
-  const current = await chrome.tabs.get(tabId);
-  if (current.status === "complete") return current;
+  throwIfAborted(signal);
   return await new Promise((resolve, reject) => {
+    let settled = false;
+    const usable = tab => supportedBatchUrl(tab.url) && !tab.discarded && !tab.pendingUrl;
+    let probing = false;
+    let inspectAgain = false;
+    const inspect = async tab => {
+      if (settled || !usable(tab)) return;
+      if (tab.status === "complete") return finish(null, tab);
+      if (probing) { inspectAgain = true; return; }
+      probing = true;
+      try {
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [0] }, injectImmediately: true,
+          func: () => ({ ready: document.readyState !== "loading" && Boolean(document.body), url: location.href })
+        });
+        const latest = await chrome.tabs.get(tabId);
+        if (result?.result?.ready && usable(latest) && result.result.url === latest.url) finish(null, latest);
+      } catch { /* A provisional navigation can temporarily reject scripting. */ }
+      finally {
+        probing = false;
+        if (inspectAgain && !settled) { inspectAgain = false; chrome.tabs.get(tabId).then(inspect, finish); }
+      }
+    };
     const timeout = setTimeout(() => finish(new Error("The page did not finish loading within 30 seconds.")), timeoutMs);
     const onUpdated = (updatedId, info, tab) => {
-      if (updatedId === tabId && info.status === "complete") finish(null, tab);
+      if (updatedId === tabId) inspect(tab);
     };
+    const onDomReady = details => { if (details.tabId === tabId && details.frameId === 0) chrome.tabs.get(tabId).then(inspect, finish); };
+    const onRemoved = (removedId) => { if (removedId === tabId) finish(new Error("The tab was closed before loading finished.")); };
     const onAbort = () => finish(new DOMException("Batch capture cancelled.", "AbortError"));
     const finish = (error, tab) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      chrome.webNavigation.onDOMContentLoaded.removeListener(onDomReady);
       signal.removeEventListener("abort", onAbort);
       if (error) reject(error); else resolve(tab);
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    chrome.webNavigation.onDOMContentLoaded.addListener(onDomReady);
     signal.addEventListener("abort", onAbort, { once: true });
+    // Subscribe before reading: completion can otherwise fall into the gap
+    // between tabs.get and addListener, leaving an already loaded tab waiting.
+    chrome.tabs.get(tabId).then(inspect, finish);
   });
 }
 
 async function captureBatchTab(tab, controller, mode, settings) {
   throwIfAborted(controller.signal);
+  await chrome.windows.update(tab.windowId, { focused: true });
   await chrome.tabs.update(tab.id, { active: true });
-  const ready = await waitForTabComplete(tab.id, controller.signal);
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await waitForTabComplete(tab.id, controller.signal);
+  await wait(250, controller.signal);
   throwIfAborted(controller.signal);
-  const result = await runCapture(mode, null, ready, { openEditor: false, settings, limits: captureLimits(settings) });
+  // Discarded tabs can begin reloading just after activation; never use the
+  // pre-activation URL/status snapshot as the capture session's identity.
+  const ready = await waitForTabComplete(tab.id, controller.signal);
+  const result = await runCapture(mode, null, ready, { batch: true, openEditor: false, settings, limits: captureLimits(settings) });
   return { tabId: tab.id, title: ready.title || tab.title || ready.url, url: ready.url, ...result };
+}
+
+async function openBatchReport(original, url, active) {
+  const samePrivacyContext = window => Boolean(window.incognito) === Boolean(original.incognito);
+  // Prefer the source, but it may close while another window is being captured.
+  // Never let an unscoped tabs.create choose a different privacy context.
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const targets = [...windows.filter(window => window.id === original.windowId), ...windows.filter(window => window.id !== original.windowId)].filter(samePrivacyContext);
+  for (const window of targets) {
+    try { return await chrome.tabs.create({ windowId: window.id, active, url }); }
+    catch { /* A window can close between enumeration and creating the report. */ }
+  }
+  // No surviving window in this context: create one deliberately instead of
+  // opening regular results in a private window, or private results in regular.
+  const created = await chrome.windows.create({ url, incognito: Boolean(original.incognito), focused: active });
+  return created.tabs?.[0] || null;
 }
 
 async function runBatch(kind, urls = [], batchOptions = {}) {
   if (activeBatch) throw new Error("A WinShot batch is already running.");
   // captureBatchTab activates other tabs, which would make a running capture's
   // assertStillActive throw and destroy it — refuse instead of wrecking it.
-  if (activeCaptures.size > 0 || activeWindowLocks.size > 0) {
+  if (activeCaptures.size > 0 || pendingCaptures.size > 0 || activeWindowLocks.size > 0) {
     throw new Error("A WinShot capture is already running. Wait for it to finish or press Stop before starting a batch.");
   }
-  const original = await activeTab();
+  const original = await activeTab(batchOptions.windowId ?? null);
   const controller = new AbortController();
   const createdTabIds = [];
   const batchId = captureId();
   const results = [];
   const skipped = [];
+  let cancelled = false;
   const settings = normalizeSettings(batchOptions.settings || await loadSettings());
   const mode = settings.batchMode;
   activeBatch = { id: batchId, controller, currentTabId: null };
@@ -679,7 +976,11 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   try {
     let tabs;
     if (kind === "all-tabs") {
-      const candidates = await chrome.tabs.query({ windowId: original.windowId });
+      const query = settings.batchScope === "all-windows" ? {} : { windowId: original.windowId, ...(settings.batchScope === "selected-tabs" ? { highlighted: true } : {}) };
+      // A spanning extension can enumerate both regular and private tabs when
+      // enabled in incognito. Exclude the other context before reading URLs or
+      // adding skipped metadata, not merely before taking its screenshot.
+      const candidates = (await chrome.tabs.query(query)).filter(tab => Boolean(tab.incognito) === Boolean(original.incognito));
       const supported = candidates.filter((tab) => supportedBatchUrl(tab.url));
       tabs = supported.slice(0, 20);
       for (const tab of candidates.filter((tab) => !supportedBatchUrl(tab.url))) {
@@ -719,19 +1020,24 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
         results.push({ tabId: tab.id, title: tab.title || tab.url, url: tab.url, state: SessionState.FAILED, error: friendlyError(error) });
       }
     }
+  } catch (error) {
+    if (error?.name !== "AbortError") throw error;
+    cancelled = true;
   } finally {
     for (const tabId of createdTabIds) {
       try { await chrome.tabs.remove(tabId); } catch { /* The page may already be closed. */ }
     }
-    try { await chrome.tabs.update(original.id, { active: true }); } catch { /* The original tab may be gone. */ }
+    try { await chrome.tabs.update(original.id, { active: true }); await chrome.windows.update(original.windowId, { focused: true }); } catch { /* The original tab may be gone. */ }
     activeBatch = null;
+    chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", global: true, busy: false,
+      message: controller.signal.aborted ? "Batch cancelled." : "Batch finished." }).catch(() => {});
     refreshContextMenu().catch(() => {});
     updateBadge();
   }
 
-  const summary = { id: batchId, kind, mode, combinePdf: Boolean(batchOptions.combinePdf), createdAt: new Date().toISOString(), results, skipped };
+  const summary = { id: batchId, kind, mode, cancelled: cancelled || controller.signal.aborted, scope: settings.batchScope, output: settings.batchOutput, combinePdf: Boolean(batchOptions.combinePdf || settings.batchOutput === "combined-pdf"), createdAt: new Date().toISOString(), results, skipped };
   await chrome.storage.local.set({ [`batch:${batchId}`]: summary });
-  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
+  await openBatchReport(original, chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`), !controller.signal.aborted);
   return {
     batchId,
     complete: results.filter((item) => item.state === SessionState.COMPLETE).length,
@@ -740,25 +1046,44 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   };
 }
 
-async function waitCaptureDelay(tab, delayMs) {
-  if (!delayMs) return;
+async function withCaptureReservation(tab, delayMs, start, suppliedController = null) {
+  if (pendingCaptures.has(tab.id) || [...pendingCaptures.values()].some((entry) => entry.windowId === tab.windowId)) {
+    throw new Error("A WinShot capture is already waiting in this browser window. Press Stop to cancel it.");
+  }
+  if (activeWindowLocks.has(tab.windowId) || activeBatch) throw new Error("A WinShot capture is already running in this browser window.");
   // Ping an extension API every few seconds so the service worker's 30s idle timer
   // cannot fire in the middle of a long capture delay.
-  const deadline = Date.now() + delayMs;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, Math.min(5000, deadline - Date.now())));
-    await chrome.storage.session.set({ "winshot:delay-keepalive": Date.now() }).catch(() => {});
+  const controller = suppliedController || new AbortController();
+  pendingCaptures.set(tab.id, { controller, windowId: tab.windowId });
+  updateBadge();
+  refreshContextMenu().catch(() => {});
+  try {
+    const deadline = performance.now() + delayMs;
+    while (performance.now() < deadline) {
+      chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", windowId: tab.windowId, busy: true, message: `Capture starts in ${Math.ceil((deadline - performance.now()) / 1000)} seconds...` }).catch(() => {});
+      await wait(Math.min(1000, Math.max(0, deadline - performance.now())), controller.signal);
+      await chrome.storage.session.set({ "winshot:delay-keepalive": Date.now() }).catch(() => {});
+    }
+    throwIfAborted(controller.signal);
+    const current = await chrome.tabs.get(tab.id);
+    throwIfAborted(controller.signal);
+    if (!current?.id) throw new Error("The page closed during the capture delay.");
+    // Keep the reservation and its controller through asynchronous startup.
+    // Stop must still abort while settings, storage or picker setup is waiting.
+    return await start(current, controller);
+  } finally {
+    pendingCaptures.delete(tab.id);
+    updateBadge();
+    refreshContextMenu().catch(() => {});
+    if (controller.signal.aborted) chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", windowId: tab.windowId, busy: false, message: "Capture cancelled." }).catch(() => {});
   }
-  const current = await chrome.tabs.get(tab.id);
-  if (!current?.id || current.url !== tab.url) throw new Error("The page changed during the capture delay.");
 }
 
 // Small preview stored on the record so History can render without loading full tiles.
 async function attachThumbnail(session) {
   try {
-    const tiles = await getTiles(session.id);
-    if (!tiles.length) return;
-    const first = tiles.find((tile) => tile.destYPx === 0 && tile.destXPx === 0) || tiles[0];
+    const first = await getTile(session.id, 0);
+    if (!first) return;
     const bitmap = await createImageBitmap(first.blob);
     const scale = Math.min(1, 240 / bitmap.width);
     const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(Math.min(bitmap.height, bitmap.width) * scale)));
@@ -775,7 +1100,7 @@ async function refreshContextMenu() {
   const settings = await loadSettings();
   await chrome.contextMenus.removeAll();
   if (!settings.contextMenu) return;
-  const capturing = activeCaptures.size > 0 || activeBatch;
+  const capturing = activeCaptures.size > 0 || pendingCaptures.size > 0 || activeBatch;
   chrome.contextMenus.create({
     id: capturing ? "winshot-stop" : "winshot-last",
     title: capturing ? "Stop WinShot capture" : `WinShot: ${MODE_LABELS[settings.lastMode] || MODE_LABELS["full-page"]}`,
@@ -793,59 +1118,104 @@ async function pruneHistory() {
   const settings = await loadSettings();
   if (!settings.historyRetentionDays) return;
   const cutoff = new Date(Date.now() - settings.historyRetentionDays * 864e5).toISOString();
-  await pruneOlderThan(cutoff);
+  await pruneOlderThan(cutoff, [...activeCaptures.values()].map(entry => entry.session.id));
 }
 
-async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null) {
+async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null, suppliedController = null) {
   const tab = tabOverride || await activeTab();
   const settings = normalizeSettings(suppliedSettings || await loadSettings());
-  await waitCaptureDelay(tab, settings.delayMs);
-  return await runCapture(mode, target, tab, { settings, limits: captureLimits(settings) });
+  return await withCaptureReservation(tab, settings.delayMs, (current, controller) =>
+    runCapture(mode, target, current, { settings, limits: captureLimits(settings), controller }), suppliedController);
 }
 
 async function startPicker(mode, tabOverride = null, suppliedSettings = null) {
   const tab = tabOverride || await activeTab();
   const settings = normalizeSettings(suppliedSettings || await loadSettings());
-  await waitCaptureDelay(tab, settings.delayMs);
+  return await withCaptureReservation(tab, settings.delayMs, (current, controller) =>
+    beginConfiguredPicker(mode, current, settings, controller));
+}
+
+async function attachChildPicker(tabId, frame, pickerId) {
+  const frameIds = pickerFrames.get(tabId);
+  if (!frameIds || pickerTokens.get(tabId) !== pickerId || !frame.frameId) return;
   try {
-    const injected = await injectCaptureScript(tab.id, 0, true);
-    const frameIds = [...new Set(injected.map((result) => result.frameId))];
-    let frameInfo = null;
+    const injections = await boundedPickerCall(injectCaptureScript(tabId, frame.frameId));
+    if (pickerFrames.get(tabId) !== frameIds) return;
+    const documentId = injections[0]?.documentId;
+    const response = await boundedPickerCall(chrome.tabs.sendMessage(tabId, {
+      type: "WINSHOT_START_PICKER", mode: pickerModes.get(tabId), pickerId
+    }, documentId ? { documentId } : { frameId: frame.frameId }));
+    if (response?.error || !response?.started) throw new Error(response?.error || "Frame picker did not start.");
+    if (pickerFrames.get(tabId) === frameIds) {
+      if (!frameIds.includes(frame.frameId)) frameIds.push(frame.frameId);
+    } else sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frame.frameId).catch(() => {});
+  } catch {
+    sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frame.frameId).catch(() => {});
+  }
+}
+
+async function beginConfiguredPicker(mode, tab, settings, controller) {
+  throwIfAborted(controller.signal);
+  await stopPickers(tab.id);
+  throwIfAborted(controller.signal);
+  const frameIds = [0];
+  const pickerId = captureId();
+  pickerFrames.set(tab.id, frameIds);
+  pickerTokens.set(tab.id, pickerId);
+  pickerSettings.set(tab.id, settings);
+  pickerModes.set(tab.id, mode);
+  const cancel = () => { pickerSettings.delete(tab.id); stopPickers(tab.id, null, pickerId).catch(() => {}); };
+  controller.signal.addEventListener("abort", cancel, { once: true });
+  try {
+    await boundedPickerCall(injectCaptureScript(tab.id));
+    if (pickerTokens.get(tab.id) !== pickerId) return { started: false, cancelled: true };
+    const allFrames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
+    // A slow/loading ad or embedded demo must not hold the top-page picker hostage.
+    if (mode !== "frame") await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, pickerId }, 0));
+    // The top-page region input plane spans iframes. Child overlays would only
+    // compete for drag events and risk being included in the selected pixels.
+    if (mode === "region") return { started: true, frameCount: 1 };
+    await Promise.allSettled(allFrames.map(frame => attachChildPicker(tab.id, frame, pickerId)));
+    if (pickerFrames.get(tab.id) !== frameIds) return { started: false, cancelled: true };
     if (mode === "frame") {
-      if (frameIds.length <= 1) {
+      const inventory = await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_FRAME_INVENTORY" }, 0));
+      if (frameIds.length === 1 && !inventory.count) {
         const error = new Error("No capturable frames were found on this page. Cross-origin frames need site access, and scrolling areas are captured with Select an element.");
         error.winshotFriendly = true;
         throw error;
       }
-      const allFrames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => null);
-      const inaccessible = allFrames ? Math.max(0, allFrames.length - frameIds.length) : 0;
-      frameInfo = { accessible: frameIds.length - 1, inaccessible };
+      const inaccessible = Math.max(0, allFrames.length - frameIds.length, inventory.count - (frameIds.length - 1));
+      const frameInfo = { accessible: frameIds.length - 1, inaccessible };
+      await boundedPickerCall(sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo, pickerId }, 0));
     }
-    pickerFrames.set(tab.id, frameIds);
-    pickerSettings.set(tab.id, settings);
-    const started = await Promise.allSettled(frameIds.map((frameId) =>
-      sendToTab(tab.id, { type: "WINSHOT_START_PICKER", mode, frameInfo }, frameId)));
-    if (!started.some((result) => result.status === "fulfilled")) throw new Error("The picker could not start in any accessible frame.");
     return { started: true, frameCount: frameIds.length };
   } catch (error) {
-    pickerFrames.delete(tab.id);
-    pickerSettings.delete(tab.id);
+    await stopPickers(tab.id, null, pickerId);
+    if (!pickerTokens.has(tab.id)) pickerSettings.delete(tab.id);
     if (error?.winshotFriendly) throw error;
     throw new Error(`${restrictedPageReason(tab.url)} (${friendlyError(error)})`);
-  }
+  } finally { controller.signal.removeEventListener("abort", cancel); }
 }
 
-async function stopPickers(tabId, keepFrameId = null) {
+async function stopPickers(tabId, keepFrameId = null, expectedPickerId = null) {
+  const pickerId = pickerTokens.get(tabId);
+  if (expectedPickerId && expectedPickerId !== pickerId) return;
   const frameIds = pickerFrames.get(tabId) || [];
   pickerFrames.delete(tabId);
+  pickerTokens.delete(tabId);
+  pickerModes.delete(tabId);
   await Promise.allSettled(frameIds.filter((frameId) => frameId !== keepFrameId).map((frameId) =>
-    sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER" }, frameId)));
+    boundedPickerCall(sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frameId))));
 }
 
-async function cancelActiveCapture() {
-  const tab = await activeTab();
-  const active = activeCaptures.get(tab.id);
+async function cancelActiveCapture({ global = false, windowId = null } = {}) {
+  const tab = await activeTab(windowId);
+  const active = [...activeCaptures.values()].find((entry) => entry.session.windowId === tab.windowId) ||
+    (global ? activeCaptures.values().next().value : null);
   active?.controller.abort();
+  const pending = [...pendingCaptures.values()].find((entry) => entry.windowId === tab.windowId) ||
+    (global ? pendingCaptures.values().next().value : null);
+  pending?.controller.abort();
   if (activeBatch) {
     activeBatch.controller.abort();
     activeCaptures.get(activeBatch.currentTabId)?.controller.abort();
@@ -857,26 +1227,41 @@ async function cancelActiveCapture() {
     await stopPickers(tab.id);
   }
   refreshContextMenu().catch(() => {});
-  return { cancelled: Boolean(active || activeBatch || hadPicker) };
+  return { cancelled: Boolean(active || pending || activeBatch || hadPicker) };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
+    if (message.type === "WINSHOT_AUTOMATION_REQUEST") return await handleAutomationRequest(message, sender, (tab, mode, controller, settings) => runConfiguredCapture(mode, null, tab, { ...settings, delayMs: 0, captureActions: {} }, controller));
+    if (message.type === "WINSHOT_REFRESH_AUTOMATION") {
+      if (sender.tab || !sender.url?.startsWith(chrome.runtime.getURL("src/"))) throw new Error("Change website access from the WinShot popup.");
+      return await refreshAutomationBridge({ revoke: true });
+    }
+    if (message.type === "WINSHOT_GET_CAPTURE_STATUS") {
+      const tab = await activeTab(message.windowId ?? null);
+      const active = [...activeCaptures.values()].find((entry) => entry.session.windowId === tab.windowId);
+      const pending = [...pendingCaptures.values()].some((entry) => entry.windowId === tab.windowId);
+      return {
+        busy: Boolean(active || pending || activeBatch),
+        message: pending ? "Waiting to capture. Press Stop to cancel." : active ? `Capturing tile ${active.session.report.tileCount + 1}…` : activeBatch ? "Batch capture running…" : "Captures stay on this device."
+      };
+    }
     if (message.type === "WINSHOT_START_CAPTURE") {
       await rememberMode(message.mode);
-      return await runConfiguredCapture(message.mode, message.target || null, null, message.settings);
+      return await runConfiguredCapture(message.mode, message.target || null, message.windowId === undefined ? null : await activeTab(message.windowId), message.settings);
     }
     if (message.type === "WINSHOT_START_PICKER") {
       await rememberMode(message.mode === "region" ? CaptureMode.REGION : CaptureMode.ELEMENT);
-      return await startPicker(message.mode, null, message.settings);
+      return await startPicker(message.mode, message.windowId === undefined ? null : await activeTab(message.windowId), message.settings);
     }
-    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || [], { settings: message.settings, combinePdf: message.combinePdf });
+    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || [], { settings: message.settings, combinePdf: message.combinePdf, windowId: message.windowId });
     if (message.type === "WINSHOT_CANCEL_CAPTURE") {
-      return await cancelActiveCapture();
+      return await cancelActiveCapture({ windowId: message.windowId ?? null });
     }
     if (message.type === "WINSHOT_PICK_RESULT") {
       const tab = sender.tab;
       if (!tab?.id) throw new Error("The picker tab is no longer available.");
+      if (message.pickerId && pickerTokens.get(tab.id) !== message.pickerId) return { cancelled: true };
       const settings = pickerSettings.get(tab.id) || await loadSettings();
       pickerSettings.delete(tab.id);
       await stopPickers(tab.id, sender.frameId || 0);
@@ -888,8 +1273,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
       // A capture this picker superseded may still be unwinding and holding the
       // tab/window lock — wait briefly so the pick is not silently rejected.
-      const lockDeadline = Date.now() + 5000;
-      while ((activeCaptures.has(tab.id) || activeWindowLocks.has(tab.windowId)) && Date.now() < lockDeadline) {
+      const lockDeadline = performance.now() + 5000;
+      while ((activeCaptures.has(tab.id) || activeWindowLocks.has(tab.windowId)) && performance.now() < lockDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       runCapture(message.mode, target, tab, { settings, limits: captureLimits(settings) }).catch(() => {});
@@ -912,7 +1297,10 @@ async function handleCommand(command) {
   if (command === "capture-full-page") return await startByMode(CaptureMode.FULL_PAGE);
   if (command === "capture-region") return await startByMode(CaptureMode.REGION);
   if (command === "last-used-action") {
-    if (activeCaptures.size > 0 || activeBatch) return await cancelActiveCapture();
+    const tab = await activeTab();
+    const busyHere = [...activeCaptures.values()].some(entry => entry.session.windowId === tab.windowId) ||
+      [...pendingCaptures.values()].some(entry => entry.windowId === tab.windowId) || pickerFrames.has(tab.id);
+    if (busyHere || activeBatch) return await cancelActiveCapture();
     const settings = await loadSettings();
     return await startByMode(settings.lastMode);
   }
@@ -924,7 +1312,7 @@ chrome.commands.onCommand.addListener((command) => handleCommand(command).catch(
 
 chrome.contextMenus.onClicked.addListener((info) => {
   (async () => {
-    if (info.menuItemId === "winshot-stop") return await cancelActiveCapture();
+    if (info.menuItemId === "winshot-stop") return await cancelActiveCapture({ global: true });
     if (info.menuItemId === "winshot-last") {
       const settings = await loadSettings();
       return await startByMode(settings.lastMode);
@@ -945,17 +1333,38 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "winshot-prune-history") pruneHistory().catch(() => {});
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes["winshot:capture-settings"]) refreshContextMenu().catch(() => {});
+  if (area === "local" && changes["winshot:capture-settings"]) {
+    refreshContextMenu().catch(() => {});
+    const change = changes["winshot:capture-settings"];
+    if (JSON.stringify(change.oldValue?.automation) !== JSON.stringify(change.newValue?.automation)) refreshAutomationBridge({ revoke: true }).catch(() => {});
+  }
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.webNavigation.onBeforeNavigate.addListener(({ tabId, frameId }) => {
+  // tabs.onUpdated also reports History API changes and loading child frames.
+  // Only a real navigation of the captured document (or its top page) aborts.
+  if (frameId === 0) { pendingCaptures.get(tabId)?.controller.abort(); cancelAutomationForNavigation(tabId); }
+  if (frameId === 0 && pickerFrames.has(tabId)) {
+    pickerSettings.delete(tabId);
+    stopPickers(tabId).catch(() => {});
+  }
   const active = activeCaptures.get(tabId);
-  if (!active || (!changeInfo.url && changeInfo.status !== "loading")) return;
+  if (!active || (frameId !== 0 && frameId !== active.session.frameId)) return;
   active.failureReason = "The page navigated during capture. WinShot stopped without claiming a complete image.";
   active.controller.abort();
 });
 
+chrome.webNavigation.onDOMContentLoaded.addListener(details => {
+  if (details.frameId === 0) chrome.tabs.get(details.tabId).then(installAutomationBridge).catch(() => {});
+  const pickerId = pickerTokens.get(details.tabId);
+  if (details.frameId && pickerId && pickerModes.get(details.tabId) !== "region") {
+    attachChildPicker(details.tabId, details, pickerId).catch(() => {});
+  }
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
+  cancelAutomationForNavigation(tabId);
+  pendingCaptures.get(tabId)?.controller.abort();
   const active = activeCaptures.get(tabId);
   if (!active) return;
   active.failureReason = "The captured tab closed during capture. No complete image was claimed.";
@@ -967,3 +1376,4 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 globalThis.__winshotTest = Object.freeze({ runCapture, runBatch, startPicker, cancelActiveCapture, handleCommand });
 
 recoverInterruptedRecords().catch(() => {});
+refreshAutomationBridge().catch(() => {});

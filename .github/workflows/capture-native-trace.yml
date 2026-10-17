@@ -1,0 +1,56 @@
+name: capture-native-trace
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/capture-native-trace.yml'
+      - 'scripts/capture-native-trace.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  lenis-native-timeline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    # Isolated test browsers only. Use explicit software GL + CPU composition on
+    # both runners to match the configuration where the long restore was seen.
+    env:
+      WINSHOT_TEST_SOFTWARE_GL: '1'
+      WINSHOT_TEST_SOFTWARE_COMPOSITING: '1'
+      WINSHOT_NATIVE_TRACE_OUTPUT: output/capture-native-trace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Offline diagnostic integrity checks
+        run: node scripts/capture-native-trace.mjs --self-check
+      - name: Allow sandboxed test Chrome user namespaces
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          capture_chrome_path="$(node --input-type=module -e 'import puppeteer from "puppeteer"; console.log(await puppeteer.executablePath());')"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile winshot-native-trace "%s" flags=(unconfined) {\n  userns,\n}\n' "$capture_chrome_path" | sudo tee /etc/apparmor.d/winshot-native-trace > /dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/winshot-native-trace
+      - name: Build the exact current extension bytes
+        run: npm run build:extension
+      - name: One bounded real-popup Lenis native trace
+        run: node scripts/capture-native-trace.mjs
+      - name: Retain native trace and honest diagnostic status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-native-trace-${{ matrix.os }}
+          path: |
+            output/capture-native-trace
+            scripts/capture-native-trace.mjs
+          if-no-files-found: warn
+          retention-days: 14
