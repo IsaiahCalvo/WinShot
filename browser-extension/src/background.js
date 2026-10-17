@@ -112,25 +112,20 @@ async function locateFrameChain(session, preparedFrameIds = []) {
   let left = 0;
   let top = 0;
   let topViewport = null;
-  try {
-    for (const edge of edges) {
-      await injectCaptureScript(session.tabId, edge.parentFrameId);
-      await injectCaptureScript(session.tabId, edge.child.frameId);
-      const frameToken = crypto.randomUUID();
-      await sendToTab(session.tabId, { type: "WINSHOT_ANNOUNCE_FRAME", frameToken }, edge.child.frameId);
-      const located = await sendToTab(session.tabId, {
-        type: "WINSHOT_LOCATE_FRAME",
-        sessionId: session.id,
-        frameToken
-      }, edge.parentFrameId);
-      preparedFrameIds.push(edge.parentFrameId);
-      left += located.left;
-      top += located.top;
-      topViewport ||= located.topViewport;
-    }
-  } catch (error) {
-    await restoreFrameChain(session, preparedFrameIds);
-    throw error;
+  for (const edge of edges) {
+    await injectCaptureScript(session.tabId, edge.parentFrameId);
+    await injectCaptureScript(session.tabId, edge.child.frameId);
+    const frameToken = crypto.randomUUID();
+    await sendToTab(session.tabId, { type: "WINSHOT_ANNOUNCE_FRAME", frameToken }, edge.child.frameId);
+    const located = await sendToTab(session.tabId, {
+      type: "WINSHOT_LOCATE_FRAME",
+      sessionId: session.id,
+      frameToken
+    }, edge.parentFrameId);
+    preparedFrameIds.push(edge.parentFrameId);
+    left += located.left;
+    top += located.top;
+    topViewport ||= located.topViewport;
   }
   return { located: true, left, top, topViewport, preparedFrameIds };
 }
