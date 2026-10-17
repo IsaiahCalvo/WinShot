@@ -1,8 +1,9 @@
 import { getRecord, getTiles, updateRecord } from "./store.js";
-import { exportJpeg, exportPdf, exportPng, exportWebp } from "./exporters.js";
+import { exportJpeg, exportPdf, exportPng, exportWebp, exportBmp, exportGif } from "./exporters.js";
 import { loadSettings, saveSettings, normalizeSettings } from "./settings.js";
-import { ImageEditor } from "./image-editor.js";
-import { saveProject } from "./project-file.js";
+import { ImageEditor, renderEditedCapture } from "./image-editor.js";
+import { saveProject, saveEditablePng } from "./project-file.js";
+import { initializeSharing } from "./sharing.js";
 
 const params = new URLSearchParams(location.search);
 const id = params.get("id");
@@ -12,6 +13,13 @@ const report = document.querySelector("#report");
 const warnings = document.querySelector("#warnings");
 const preview = document.querySelector("#preview");
 const toast = document.querySelector("#toast");
+let formatAnchor = document.querySelector("#save-webp");
+for (const [id, text, tip] of [["save-bmp", "Save BMP", "Full-color still image; transparent areas become white"], ["save-gif", "Save GIF", "Still image with up to 256 colors; transparent areas become white"], ["save-editable-png", "Editable PNG", "Includes the ORIGINAL image and editable objects. Use Save PNG for a flattened image to share."]]) {
+  if (!document.getElementById(id)) {
+    const button = document.createElement("button"); button.id = id; button.textContent = text; button.title = tip;
+    formatAnchor.after(button); formatAnchor = button;
+  }
+}
 const buttons = [...document.querySelectorAll("header button")];
 let record;
 let tiles = [];
@@ -104,6 +112,10 @@ function renderRecord() {
       record.editorDocument = editorDocument;
     },
   });
+  initializeSharing({ getPayload: async () => {
+    const input = await imageEditor.exportInput();
+    return { blob: await exportPng(input.record, input.tiles), title: record.sourceTitle || "WinShot capture", fileName: `${record.fileName || "winshot-capture"}.png`, sourceUrl: record.sourceUrl || "" };
+  }, notify: showToast });
 }
 
 function download(blob, extension) {
@@ -155,6 +167,23 @@ document
   .addEventListener("click", (event) =>
     runExport(event.currentTarget, "WebP", "webp", exportWebp),
   );
+document.querySelector("#save-bmp").addEventListener("click", event => runExport(event.currentTarget, "BMP", "bmp", exportBmp));
+document.querySelector("#save-gif").addEventListener("click", event => runExport(event.currentTarget, "GIF", "gif", exportGif));
+document.querySelector("#save-editable-png").addEventListener("click", async event => {
+  const button = event.currentTarget, original = button.textContent;
+  buttons.forEach(item => item.disabled = true);
+  try {
+    const document = structuredClone(imageEditor.doc), revision = imageEditor.saveRevision;
+    await imageEditor.saveChain.catch(() => {});
+    button.textContent = "Saving editable PNG…";
+    const input = await renderEditedCapture(record, tiles, document);
+    const flattened = await exportPng(input.record, input.tiles);
+    download(await saveEditablePng(flattened, { ...record, editorDocument: document }, tiles), "editable.png");
+    imageEditor.projectRevision = revision;
+    showToast("Editable PNG saved. It includes your original image; use Save PNG for a flattened image to share.");
+  } catch (error) { showToast(`Editable PNG could not be saved: ${error.message}`); }
+  finally { button.textContent = original; buttons.forEach(item => item.disabled = false); }
+});
 
 document
   .querySelector("#copy-clipboard")
@@ -304,6 +333,14 @@ try {
     );
   tiles = await getTiles(id);
   renderRecord();
+  // Consume remembered output actions once; reloading the editor must not save
+  // another file. Partial/cancelled captures always require a deliberate export.
+  const action = params.get("action");
+  if (action) { params.delete("action"); history.replaceState(null, "", `${location.pathname}?${params}`); }
+  const actions = { png: ["PNG", "png", exportPng], jpeg: ["JPEG", "jpg", exportJpeg], webp: ["WebP", "webp", exportWebp], bmp: ["BMP", "bmp", exportBmp], gif: ["GIF", "gif", exportGif], pdf: ["PDF", "pdf", (capture, captureTiles, progress) => exportPdf(capture, captureTiles, progress, settings.pdf)] };
+  if (imageEditor && record.state === "complete" && record.report.coverage?.complete !== false && actions[action]) {
+    await runExport(document.querySelector(`#save-${action}`), ...actions[action]);
+  }
 } catch (error) {
   title.textContent = "Could not load capture";
   state.textContent = "failed";

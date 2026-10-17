@@ -1,3 +1,6 @@
+import { exportVideoFast, supportsFastVideoExport, getVideoExportInfo, releaseVideoExport, probeVideoExport, cleanupStaleVideoExports } from "./video-fast-export.js";
+import { videoGeometry, drawVideoFrame } from "./video-transforms.js";
+export { supportsFastVideoExport, getVideoExportInfo, releaseVideoExport, probeVideoExport, cleanupStaleVideoExports };
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 export function supportedRecordingType() {
   if (typeof MediaRecorder !== "function") return "";
@@ -60,8 +63,8 @@ export async function inspectVideo(blob, knownDuration) {
 
 // Chrome's built-in encoder processes the selected interval at playback speed.
 // This keeps the extension local and avoids shipping a large WASM codec bundle.
-export async function exportVideoClip(blob, {
-  start, end, width, height, fps = 30, quality = "balanced", mute = false, volume = 1, mono = false, signal, onProgress = () => {}
+export async function exportRealtimeVideoClip(blob, {
+  start, end, width, height, fps = 30, quality = "balanced", mute = false, volume = 1, mono = false, speed = 1, rotation = 0, flipH = false, flipV = false, crop, signal, onProgress = () => {}, onEngine = () => {}
 }) {
   const mimeType = supportedRecordingType();
   if (!mimeType || !HTMLCanvasElement.prototype.captureStream) throw new Error("This Chrome version cannot export WebM video. Save the original instead.");
@@ -92,13 +95,15 @@ export async function exportVideoClip(blob, {
     await ready;
     if (Number.isFinite(video.duration) && end > video.duration + .1) throw new Error("The selected end is beyond the video duration.");
     await seekVideo(video, start, localAbort.signal);
-    const outputWidth = Math.round(width || video.videoWidth), outputHeight = Math.round(height || video.videoHeight);
+    const geometry = videoGeometry(video.videoWidth, video.videoHeight, { width, height, fps, speed, rotation, flipH, flipV, crop });
+    const outputWidth = geometry.width, outputHeight = geometry.height;
+    video.playbackRate = geometry.speed; video.preservesPitch = false;
     if (outputWidth < 1 || outputHeight < 1 || outputWidth * outputHeight > 16_777_216) throw new Error("Choose an output size of 16 megapixels or smaller.");
     const canvas = document.createElement("canvas");
     canvas.width = outputWidth; canvas.height = outputHeight;
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("Video rendering is unavailable. Save the original and reload the editor.");
-    ctx.drawImage(video, 0, 0, outputWidth, outputHeight);
+    drawVideoFrame(ctx, video, geometry);
     canvasStream = canvas.captureStream(Math.min(60, Math.max(10, fps)));
     stream = new MediaStream(canvasStream.getVideoTracks());
     if (audio) {
@@ -126,6 +131,7 @@ export async function exportVideoClip(blob, {
     // Attach a handler immediately; an encoder error must never become an
     // unhandled rejection while the playback loop is still unwinding.
     stopPromise.catch(() => {});
+    onEngine({ engine: "realtime", format: "webm" });
     recorder.start(500);
     await bounded(video.play(), { signal: localAbort.signal, message: "Playback could not start for export. Try again or save the original." });
     let lastTime = video.currentTime, lastAdvance = performance.now();
@@ -139,7 +145,7 @@ export async function exportVideoClip(blob, {
         if (video.error) { clean(); reject(new Error("The source video could not be decoded during export.")); return; }
         if (video.currentTime > lastTime + .001) { lastTime = video.currentTime; lastAdvance = performance.now(); }
         if (performance.now() - lastAdvance > 15000) { clean(); reject(new Error("Playback stalled during export. Try a shorter clip or save the original.")); return; }
-        ctx.drawImage(video, 0, 0, outputWidth, outputHeight);
+        drawVideoFrame(ctx, video, geometry);
         onProgress(Math.max(0, Math.min(1, (video.currentTime - start) / (end - start))));
         if (video.currentTime >= end || video.ended) { clean(); resolve(); return; }
         frame = requestAnimationFrame(render);
@@ -167,4 +173,17 @@ export async function exportVideoClip(blob, {
     signal?.removeEventListener("abort", abort);
     document.removeEventListener("visibilitychange", hidden);
   }
+}
+
+export async function exportVideoClip(blob, options = {}) {
+  const format = options.format || "webm", engine = options.engine || "auto";
+  if (!["webm", "mp4"].includes(format) || !["auto", "fast", "realtime"].includes(engine)) throw new Error("Choose a supported video format and export engine.");
+  if (engine !== "realtime") {
+    try { return await exportVideoFast(blob, { ...options, format }); }
+    catch (error) {
+      if (options.signal?.aborted || error.name === "AbortError" || error.code !== "FAST_UNSUPPORTED" || engine === "fast" || format !== "webm") throw error;
+    }
+  }
+  if (format !== "webm") throw new Error("MP4 requires fast export codecs in Chrome. Choose WebM for compatibility export.");
+  return exportRealtimeVideoClip(blob, options);
 }

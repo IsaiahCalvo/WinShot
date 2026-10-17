@@ -18,12 +18,12 @@ the browser editor and is not counted as a missing browser editing step.
 | --- | --- | --- |
 | Capture | Visible/full-page/region/element/panels/frames, batches, PDF | Repeat the public failures on each candidate; GSAP stabilization, zero-size floating containers, transient layout recovery, canvas snapshots, and loading-only frame selection now have regression tests |
 | Desktop connection | Optional convenience external URL for browser-window capture | Optional acknowledged desktop integration and validation of actual window pixels; not required for browser editing |
-| Editing | Browser annotations, drawing, text, opaque redaction, crop, selection/move/delete, styles, undo/redo and locally saved editable projects; separate tabs support multiple documents | Resize, advanced native effects/shapes and full Windows-editor feature matching |
-| Video | Browser screen/window/tab recording, local video import, playback, trim, original download and clipped WebM export | Advanced native video effects, non-real-time encoding and broader output codecs |
-| Saving | PNG/JPEG/WebP, searchable linked unedited PDF, flattened edited PDF, clipboard, print, separate editable .winshot.json projects | GIF/BMP output, editable PNG metadata, email drafts and drag-file export |
-| Loading | Browser image/clipboard/project import plus video file import | Reopening editable PNG metadata and importing native Windows project files |
-| Options | Popup settings | Dedicated options/batch setup, render wait/speed, remembered per-mode output action |
-| Integration | Browser commands, history | Opt-in page API and OneNote handoff where the client is installed |
+| Editing | Browser annotations, drawing, text, opaque redaction, crop, resize, 90° rotation, flips, local blur, brightness/contrast/saturation/grayscale/sepia, undo/redo and locally saved editable projects | Full Windows-editor tool matching and additional specialized effects |
+| Video | Browser recording/import, frame-step trim, crop/rotate/flip/speed/audio, offline WebCodecs WebM/MP4 export and compatibility WebM | Multitrack editing and additional specialized effects/codecs; available MP4 codecs vary by machine |
+| Saving | PNG/JPEG/WebP/GIF/BMP, searchable linked unedited PDF, flattened edited PDF, clipboard, print, editable .winshot.json and PNG projects, attached-image email drafts and prepared file drag/share | Installed mail/share-sheet behavior varies by OS and application |
+| Loading | Browser image/clipboard/project import, reopening WinShot editable PNGs, restricted native Windows project subset and video files | Unsupported native annotation styles and other applications’ proprietary project metadata |
+| Options | Per-mode remembered editor/save action; selected/current/all-window batch scope; individual output ZIP or combined PDF | Dedicated options page and adjustable scrolling/render timing |
+| Integration | Browser commands, history, explicit-origin opt-in page API, OneNote image/HTML/text clipboard flow, offline image notes and system file sharing when supported | Direct cloud OneNote upload is not included; paste in OneNote after copying |
 | Installed-machine validation | Isolated Chrome on Linux/Windows CI | Actual installed Chrome profile and optional desktop/client integrations require a connection to that Windows machine; browser editing does not depend on them |
 
 Each completed claim requires an interaction/output check. External client

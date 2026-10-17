@@ -1,3 +1,4 @@
+import { cancelAutomationForNavigation, handleAutomationRequest, installAutomationBridge, refreshAutomationBridge } from "./automation-service.js";
 import {
   CaptureMode,
   SessionState,
@@ -47,8 +48,9 @@ function captureId() {
   return `${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
 
-async function activeTab() {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+async function activeTab(windowId = null) {
+  if (windowId !== null && (!Number.isInteger(windowId) || windowId <= 0 || windowId > 0x7fffffff)) throw new Error("Invalid source browser window.");
+  const [tab] = await chrome.tabs.query(windowId === null ? { active: true, lastFocusedWindow: true } : { active: true, windowId });
   if (!tab?.id) throw new Error("No active browser tab was found.");
   return tab;
 }
@@ -818,7 +820,9 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
-    await chrome.tabs.create({ windowId: session.windowId, url: chrome.runtime.getURL(`src/editor.html?id=${encodeURIComponent(session.id)}`) });
+    const action = session.state === SessionState.COMPLETE ? normalizeSettings(options.settings).captureActions[session.mode] : "editor";
+    const query = action && action !== "editor" ? `&action=${encodeURIComponent(action)}` : "";
+    await chrome.tabs.create({ windowId: session.windowId, url: chrome.runtime.getURL(`src/editor.html?id=${encodeURIComponent(session.id)}${query}`) });
   }
   return { captureId: session.id, state: session.state, error: session.error };
 }
@@ -881,6 +885,7 @@ async function waitForTabComplete(tabId, signal, timeoutMs = 30000) {
 
 async function captureBatchTab(tab, controller, mode, settings) {
   throwIfAborted(controller.signal);
+  await chrome.windows.update(tab.windowId, { focused: true });
   await chrome.tabs.update(tab.id, { active: true });
   await waitForTabComplete(tab.id, controller.signal);
   await wait(250, controller.signal);
@@ -899,12 +904,13 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   if (activeCaptures.size > 0 || pendingCaptures.size > 0 || activeWindowLocks.size > 0) {
     throw new Error("A WinShot capture is already running. Wait for it to finish or press Stop before starting a batch.");
   }
-  const original = await activeTab();
+  const original = await activeTab(batchOptions.windowId ?? null);
   const controller = new AbortController();
   const createdTabIds = [];
   const batchId = captureId();
   const results = [];
   const skipped = [];
+  let cancelled = false;
   const settings = normalizeSettings(batchOptions.settings || await loadSettings());
   const mode = settings.batchMode;
   activeBatch = { id: batchId, controller, currentTabId: null };
@@ -914,7 +920,8 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   try {
     let tabs;
     if (kind === "all-tabs") {
-      const candidates = await chrome.tabs.query({ windowId: original.windowId });
+      const query = settings.batchScope === "all-windows" ? {} : { windowId: original.windowId, ...(settings.batchScope === "selected-tabs" ? { highlighted: true } : {}) };
+      const candidates = await chrome.tabs.query(query);
       const supported = candidates.filter((tab) => supportedBatchUrl(tab.url));
       tabs = supported.slice(0, 20);
       for (const tab of candidates.filter((tab) => !supportedBatchUrl(tab.url))) {
@@ -954,11 +961,14 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
         results.push({ tabId: tab.id, title: tab.title || tab.url, url: tab.url, state: SessionState.FAILED, error: friendlyError(error) });
       }
     }
+  } catch (error) {
+    if (error?.name !== "AbortError") throw error;
+    cancelled = true;
   } finally {
     for (const tabId of createdTabIds) {
       try { await chrome.tabs.remove(tabId); } catch { /* The page may already be closed. */ }
     }
-    try { await chrome.tabs.update(original.id, { active: true }); } catch { /* The original tab may be gone. */ }
+    try { await chrome.tabs.update(original.id, { active: true }); await chrome.windows.update(original.windowId, { focused: true }); } catch { /* The original tab may be gone. */ }
     activeBatch = null;
     chrome.runtime.sendMessage({ type: "WINSHOT_CAPTURE_STATUS", global: true, busy: false,
       message: controller.signal.aborted ? "Batch cancelled." : "Batch finished." }).catch(() => {});
@@ -966,9 +976,9 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
     updateBadge();
   }
 
-  const summary = { id: batchId, kind, mode, combinePdf: Boolean(batchOptions.combinePdf), createdAt: new Date().toISOString(), results, skipped };
+  const summary = { id: batchId, kind, mode, cancelled: cancelled || controller.signal.aborted, scope: settings.batchScope, output: settings.batchOutput, combinePdf: Boolean(batchOptions.combinePdf || settings.batchOutput === "combined-pdf"), createdAt: new Date().toISOString(), results, skipped };
   await chrome.storage.local.set({ [`batch:${batchId}`]: summary });
-  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
+  await chrome.tabs.create({ windowId: original.windowId, active: !controller.signal.aborted, url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
   return {
     batchId,
     complete: results.filter((item) => item.state === SessionState.COMPLETE).length,
@@ -977,14 +987,14 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
   };
 }
 
-async function withCaptureReservation(tab, delayMs, start) {
+async function withCaptureReservation(tab, delayMs, start, suppliedController = null) {
   if (pendingCaptures.has(tab.id) || [...pendingCaptures.values()].some((entry) => entry.windowId === tab.windowId)) {
     throw new Error("A WinShot capture is already waiting in this browser window. Press Stop to cancel it.");
   }
   if (activeWindowLocks.has(tab.windowId) || activeBatch) throw new Error("A WinShot capture is already running in this browser window.");
   // Ping an extension API every few seconds so the service worker's 30s idle timer
   // cannot fire in the middle of a long capture delay.
-  const controller = new AbortController();
+  const controller = suppliedController || new AbortController();
   pendingCaptures.set(tab.id, { controller, windowId: tab.windowId });
   updateBadge();
   refreshContextMenu().catch(() => {});
@@ -1052,11 +1062,11 @@ async function pruneHistory() {
   await pruneOlderThan(cutoff, [...activeCaptures.values()].map(entry => entry.session.id));
 }
 
-async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null) {
+async function runConfiguredCapture(mode, target = null, tabOverride = null, suppliedSettings = null, suppliedController = null) {
   const tab = tabOverride || await activeTab();
   const settings = normalizeSettings(suppliedSettings || await loadSettings());
   return await withCaptureReservation(tab, settings.delayMs, (current, controller) =>
-    runCapture(mode, target, current, { settings, limits: captureLimits(settings), controller }));
+    runCapture(mode, target, current, { settings, limits: captureLimits(settings), controller }), suppliedController);
 }
 
 async function startPicker(mode, tabOverride = null, suppliedSettings = null) {
@@ -1139,8 +1149,8 @@ async function stopPickers(tabId, keepFrameId = null, expectedPickerId = null) {
     boundedPickerCall(sendToTab(tabId, { type: "WINSHOT_CANCEL_PICKER", pickerId }, frameId))));
 }
 
-async function cancelActiveCapture({ global = false } = {}) {
-  const tab = await activeTab();
+async function cancelActiveCapture({ global = false, windowId = null } = {}) {
+  const tab = await activeTab(windowId);
   const active = [...activeCaptures.values()].find((entry) => entry.session.windowId === tab.windowId) ||
     (global ? activeCaptures.values().next().value : null);
   active?.controller.abort();
@@ -1163,8 +1173,13 @@ async function cancelActiveCapture({ global = false } = {}) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handle = async () => {
+    if (message.type === "WINSHOT_AUTOMATION_REQUEST") return await handleAutomationRequest(message, sender, (tab, mode, controller, settings) => runConfiguredCapture(mode, null, tab, { ...settings, delayMs: 0, captureActions: {} }, controller));
+    if (message.type === "WINSHOT_REFRESH_AUTOMATION") {
+      if (sender.tab || !sender.url?.startsWith(chrome.runtime.getURL("src/"))) throw new Error("Change website access from the WinShot popup.");
+      return await refreshAutomationBridge({ revoke: true });
+    }
     if (message.type === "WINSHOT_GET_CAPTURE_STATUS") {
-      const tab = await activeTab();
+      const tab = await activeTab(message.windowId ?? null);
       const active = [...activeCaptures.values()].find((entry) => entry.session.windowId === tab.windowId);
       const pending = [...pendingCaptures.values()].some((entry) => entry.windowId === tab.windowId);
       return {
@@ -1174,15 +1189,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === "WINSHOT_START_CAPTURE") {
       await rememberMode(message.mode);
-      return await runConfiguredCapture(message.mode, message.target || null, null, message.settings);
+      return await runConfiguredCapture(message.mode, message.target || null, message.windowId === undefined ? null : await activeTab(message.windowId), message.settings);
     }
     if (message.type === "WINSHOT_START_PICKER") {
       await rememberMode(message.mode === "region" ? CaptureMode.REGION : CaptureMode.ELEMENT);
-      return await startPicker(message.mode, null, message.settings);
+      return await startPicker(message.mode, message.windowId === undefined ? null : await activeTab(message.windowId), message.settings);
     }
-    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || [], { settings: message.settings, combinePdf: message.combinePdf });
+    if (message.type === "WINSHOT_START_BATCH") return await runBatch(message.kind, message.urls || [], { settings: message.settings, combinePdf: message.combinePdf, windowId: message.windowId });
     if (message.type === "WINSHOT_CANCEL_CAPTURE") {
-      return await cancelActiveCapture();
+      return await cancelActiveCapture({ windowId: message.windowId ?? null });
     }
     if (message.type === "WINSHOT_PICK_RESULT") {
       const tab = sender.tab;
@@ -1259,13 +1274,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "winshot-prune-history") pruneHistory().catch(() => {});
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes["winshot:capture-settings"]) refreshContextMenu().catch(() => {});
+  if (area === "local" && changes["winshot:capture-settings"]) {
+    refreshContextMenu().catch(() => {});
+    const change = changes["winshot:capture-settings"];
+    if (JSON.stringify(change.oldValue?.automation) !== JSON.stringify(change.newValue?.automation)) refreshAutomationBridge({ revoke: true }).catch(() => {});
+  }
 });
 
 chrome.webNavigation.onBeforeNavigate.addListener(({ tabId, frameId }) => {
   // tabs.onUpdated also reports History API changes and loading child frames.
   // Only a real navigation of the captured document (or its top page) aborts.
-  if (frameId === 0) pendingCaptures.get(tabId)?.controller.abort();
+  if (frameId === 0) { pendingCaptures.get(tabId)?.controller.abort(); cancelAutomationForNavigation(tabId); }
   if (frameId === 0 && pickerFrames.has(tabId)) {
     pickerSettings.delete(tabId);
     stopPickers(tabId).catch(() => {});
@@ -1277,6 +1296,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(({ tabId, frameId }) => {
 });
 
 chrome.webNavigation.onDOMContentLoaded.addListener(details => {
+  if (details.frameId === 0) chrome.tabs.get(details.tabId).then(installAutomationBridge).catch(() => {});
   const pickerId = pickerTokens.get(details.tabId);
   if (details.frameId && pickerId && pickerModes.get(details.tabId) !== "region") {
     attachChildPicker(details.tabId, details, pickerId).catch(() => {});
@@ -1284,6 +1304,7 @@ chrome.webNavigation.onDOMContentLoaded.addListener(details => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  cancelAutomationForNavigation(tabId);
   pendingCaptures.get(tabId)?.controller.abort();
   const active = activeCaptures.get(tabId);
   if (!active) return;
@@ -1296,3 +1317,4 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 globalThis.__winshotTest = Object.freeze({ runCapture, runBatch, startPicker, cancelActiveCapture, handleCommand });
 
 recoverInterruptedRecords().catch(() => {});
+refreshAutomationBridge().catch(() => {});

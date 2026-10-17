@@ -8,7 +8,7 @@ async function open(file) {
   busy = true; input.disabled = paste.disabled = true;
   status.className = ""; status.textContent = "Opening your file…";
   try {
-    const record = /\.json$/i.test(file.name || "") || file.type === "application/json" ? await importProject(file) : await importImage(file);
+    const record = /\.winshot$/i.test(file.name || "") ? await (await import("./native-project.js")).importNativeProject(file) : /\.json$/i.test(file.name || "") || file.type === "application/json" ? await importProject(file) : await importImage(file);
     location.href = `editor.html?id=${encodeURIComponent(record.id)}`;
   } catch (e) { error(e.message); }
   finally { busy = false; input.disabled = paste.disabled = false; input.value = ""; }
@@ -26,7 +26,7 @@ paste.addEventListener("click", async () => {
     if (!navigator.clipboard?.read) throw new Error("Press Ctrl+V or ⌘V to paste an image here.");
     const items = await navigator.clipboard.read();
     for (const item of items) {
-      const type = item.types.find((t) => /^image\/(png|jpeg|webp|gif|bmp)$/.test(t));
+      const type = item.types.find((t) => /^image\/(png|jpeg|webp|gif|bmp|x-ms-bmp)$/.test(t));
       if (type) { await open(await item.getType(type)); return; }
     }
     throw new Error("The clipboard has no image. Copy an image, then paste again.");

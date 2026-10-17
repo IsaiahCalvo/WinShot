@@ -102,6 +102,15 @@
           >Text
         </button>
         <button
+          data-tool="blur"
+          aria-pressed="false"
+          title="Blur image details (U)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 5h10M4 9h16M4 13h16M7 17h10M10 21h4" /></svg
+          >Blur
+        </button>
+        <button
           data-tool="redact"
           aria-pressed="false"
           title="Cover private details (B)"
@@ -163,6 +172,16 @@ Text</textarea
           value="32"
         />
       </div>
+      <div id="blur-controls" hidden>
+        <label for="edit-blur-radius">Blur radius</label
+        ><input
+          id="edit-blur-radius"
+          type="number"
+          min="1"
+          max="40"
+          value="12"
+        /><span>px · visual effect, not secure redaction</span>
+      </div>
       <div id="crop-controls" hidden>
         <button id="crop-apply">Apply crop</button
         ><button id="crop-cancel">Cancel</button>
@@ -173,11 +192,99 @@ Text</textarea
       <aside>
         <h1 id="title">Loading capture…</h1>
         <div id="state" class="pill">Loading</div>
-        <dl id="report"></dl>
+        <p id="redaction-project-note" class="editor-note" hidden>
+          Editable projects include your original image. Share an image or PDF
+          to keep redactions permanent.
+        </p>
         <section id="warnings" hidden>
           <h2>Warnings</h2>
           <ul></ul>
         </section>
+        <details id="image-size-options" open>
+          <summary>Size &amp; orientation</summary>
+          <div class="image-size-grid">
+            <label for="image-width">Width (px)</label
+            ><label for="image-height">Height (px)</label
+            ><input id="image-width" type="number" min="1" max="200000" /><input
+              id="image-height"
+              type="number"
+              min="1"
+              max="200000"
+            />
+          </div>
+          <label class="check-control"
+            ><input id="image-lock-ratio" type="checkbox" checked />Keep
+            proportions</label
+          >
+          <div class="image-operation-row">
+            <button id="image-resize">Apply size</button
+            ><button id="image-size-reset">Reset size</button>
+          </div>
+          <div class="image-operation-row">
+            <button id="image-rotate-left" title="Rotate left 90 degrees">
+              ↶ 90°</button
+            ><span id="image-rotation-value">0°</span
+            ><button id="image-rotate-right" title="Rotate right 90 degrees">
+              ↷ 90°
+            </button>
+          </div>
+          <div class="image-operation-row">
+            <button id="image-flip-x" aria-pressed="false">
+              Flip horizontal</button
+            ><button id="image-flip-y" aria-pressed="false">
+              Flip vertical
+            </button>
+          </div>
+        </details>
+        <details id="image-effects-options">
+          <summary>Adjust image</summary>
+          <label for="effect-brightness"
+            >Brightness
+            <output id="effect-brightness-value">100%</output></label
+          ><input
+            id="effect-brightness"
+            type="range"
+            min="0"
+            max="200"
+            value="100"
+          />
+          <label for="effect-contrast"
+            >Contrast <output id="effect-contrast-value">100%</output></label
+          ><input
+            id="effect-contrast"
+            type="range"
+            min="0"
+            max="200"
+            value="100"
+          />
+          <label for="effect-saturation"
+            >Saturation
+            <output id="effect-saturation-value">100%</output></label
+          ><input
+            id="effect-saturation"
+            type="range"
+            min="0"
+            max="200"
+            value="100"
+          />
+          <label for="effect-grayscale"
+            >Grayscale <output id="effect-grayscale-value">0%</output></label
+          ><input
+            id="effect-grayscale"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+          />
+          <label for="effect-sepia"
+            >Sepia <output id="effect-sepia-value">0%</output></label
+          ><input id="effect-sepia" type="range" min="0" max="100" value="0" />
+          <button id="effects-reset">Reset adjustments</button>
+        </details>
+        <details id="capture-details">
+          <summary>Capture details</summary>
+          <dl id="report"></dl>
+        </details>
         <details id="pdf-options">
           <summary>PDF capture options</summary>
           <label for="pdf-layout">Layout</label>
@@ -219,10 +326,6 @@ Text</textarea
             >Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small
           >
         </details>
-        <p id="redaction-project-note" class="editor-note" hidden>
-          Editable projects include your original image. Share an image or PDF
-          to keep redactions permanent.
-        </p>
         <p id="edited-pdf-note" class="editor-note" hidden>
           Edited PDFs contain the edited image. Original selectable page text
           and links are removed.

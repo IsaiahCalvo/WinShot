@@ -437,15 +437,18 @@ test("cancel mid-batch closes disposable tabs, restores the original tab, and re
     await run.worker.evaluate(async () => await globalThis.__winshotTest.cancelActiveCapture());
 
     const outcome = await settleWorkerTask(run, "__advCancelBatch", 60_000);
-    expect(outcome.err, "cancelling must reject the batch instead of fabricating a report").toBeTruthy();
-    expect(outcome.err).toMatch(/cancel/i);
+    expect(outcome.err).toBeUndefined();
+    const stopped = await readBatchSummary(run, outcome.ok.batchId);
+    expect(stopped.cancelled).toBe(true);
+    expect(stopped.results.every(item => item.state !== "complete"), "a stopped first capture must not be reported complete").toBe(true);
 
-    // Disposable tabs are closed, the original tab is active again, and no report page opened.
+    // Disposable tabs close and the original stays active. A background report
+    // retains honest stopped results without interrupting the restored page.
     await expect.poll(async () =>
       (await run.browser.pages()).filter((page) => /\/(sticky|horizontal)$/.test(page.url())).length,
     { timeout: 15_000 }).toBe(0);
     await expect.poll(() => activeTabUrl(run), { timeout: 15_000 }).toBe(`${FIX}/body`);
-    expect(run.browser.targets().some((target) => target.url().includes("/src/batch.html"))).toBe(false);
+    expect(run.browser.targets().some((target) => target.url().includes(`/src/batch.html?id=${outcome.ok.batchId}`))).toBe(true);
 
     // Both the per-window lock and the batch slot must be free again.
     const followUp = await run.worker.evaluate(async () =>

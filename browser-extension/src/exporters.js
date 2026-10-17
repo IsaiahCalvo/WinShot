@@ -119,7 +119,7 @@ export async function exportPng(record, tiles, onProgress = () => {}) {
   ], { type: "image/png" });
 }
 
-async function renderCanvas(record, tiles, type, quality = 0.9) {
+async function renderRasterCanvas(record, tiles, type) {
   const { width, height } = record.report.dimensionsPx;
   if (width > MAX_CANVAS_EDGE || height > MAX_CANVAS_EDGE || width * height > MAX_CANVAS_PIXELS) {
     throw new Error("This format needs one browser canvas and is disabled for very large captures. Save PNG or PDF instead.");
@@ -138,7 +138,11 @@ async function renderCanvas(record, tiles, type, quality = 0.9) {
       bitmap.close();
     }
   }
-  return await canvas.convertToBlob({ type, quality });
+  return canvas;
+}
+
+async function renderCanvas(record, tiles, type, quality = 0.9) {
+  return await (await renderRasterCanvas(record, tiles, type)).convertToBlob({ type, quality });
 }
 
 export async function exportJpeg(record, tiles) {
@@ -147,6 +151,48 @@ export async function exportJpeg(record, tiles) {
 
 export async function exportWebp(record, tiles) {
   return await renderCanvas(record, tiles, "image/webp", 0.9);
+}
+
+export async function exportBmp(record, tiles, onProgress = () => {}) {
+  const { width, height } = record.report.dimensionsPx;
+  const stride = Math.ceil(width * 3 / 4) * 4, imageBytes = stride * height;
+  if (![width, height].every(n => Number.isInteger(n) && n > 0 && n <= 200_000) || imageBytes > 100 * 1024 * 1024 - 54) throw new Error("BMP is limited to 100 MB. Save PNG or PDF for larger images.");
+  const header = new Uint8Array(54), view = new DataView(header.buffer);
+  header.set([66, 77]); view.setUint32(2, 54 + imageBytes, true); view.setUint32(10, 54, true);
+  view.setUint32(14, 40, true); view.setInt32(18, width, true); view.setInt32(22, height, true);
+  view.setUint16(26, 1, true); view.setUint16(28, 24, true); view.setUint32(34, imageBytes, true);
+  const parts = [header];
+  for (let bottom = height; bottom > 0;) {
+    const count = Math.min(64, bottom, Math.max(1, Math.floor(32_000_000 / (width * 4)))), top = bottom - count;
+    const pixels = await renderBandPixels(width, top, count, tiles), band = new Uint8Array(stride * count);
+    for (let y = 0; y < count; y++) for (let x = 0; x < width; x++) {
+      const source = ((count - y - 1) * width + x) * 4, target = y * stride + x * 3, alpha = pixels[source + 3] / 255;
+      band[target] = Math.round(pixels[source + 2] * alpha + 255 * (1 - alpha));
+      band[target + 1] = Math.round(pixels[source + 1] * alpha + 255 * (1 - alpha));
+      band[target + 2] = Math.round(pixels[source] * alpha + 255 * (1 - alpha));
+    }
+    parts.push(band); bottom = top; onProgress(1 - bottom / height);
+  }
+  return new Blob(parts, { type: "image/bmp" });
+}
+
+export async function exportGif(record, tiles, onProgress = () => {}) {
+  const { width, height } = record.report.dimensionsPx;
+  if (![width, height].every(n => Number.isInteger(n) && n > 0) || width * height > 16_000_000) throw new Error("GIF is limited to 16 million pixels. Save PNG or PDF for larger images.");
+  const { GIFEncoder, quantize, applyPalette } = await import("./vendor/gifenc.js");
+  // A still frame with a 256-color palette; white compositing avoids ambiguous
+  // one-bit alpha edges. Screenshot recording remains the separate video flow.
+  const canvas = await renderRasterCanvas(record, tiles, "image/gif");
+  const rgba = canvas.getContext("2d").getImageData(0, 0, width, height).data;
+  onProgress(.3);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // Bound the histogram to4096 bins before nearest-neighbor reduction. The
+  // default65536-bin photo workload can spend seconds merging a GIF palette.
+  const palette = quantize(rgba, 256, { format: "rgb444" }), indexed = applyPalette(rgba, palette);
+  onProgress(.7);
+  const gif = GIFEncoder(); gif.writeFrame(indexed, width, height, { palette, repeat: -1 }); gif.finish();
+  onProgress(1);
+  return new Blob([gif.bytes()], { type: "image/gif" });
 }
 
 async function pdfPageJpeg(record, tiles, top, sliceHeight, outputWidth) {

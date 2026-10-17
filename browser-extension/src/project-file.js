@@ -1,9 +1,10 @@
 import { putImportedCapture } from "./store.js";
 import { validateCoverage } from "./contract.js";
+import { readPngProject, embedPngProject } from "./png-project.js";
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_PIXELS = 100_000_000;
-const TYPES = new Set(["arrow", "rectangle", "ellipse", "pen", "text", "redact"]);
+const TYPES = new Set(["arrow", "rectangle", "ellipse", "pen", "text", "redact", "blur"]);
 
 function number(value, min, max) {
   if (!Number.isFinite(value) || value < min || value > max) throw new Error("The project contains invalid image or edit coordinates.");
@@ -64,9 +65,26 @@ function snapshot(value, width, height) {
       if (typeof o.text !== "string" || o.text.length > 10_000) throw new Error("The project has invalid text.");
       result.text = o.text; result.fontSize = number(o.fontSize, 1, 1000);
     }
+    if (o.type === "blur") result.radius = number(o.radius, 1, 40);
+    if (o.type === "redact" && o.redactionColor !== undefined) {
+      if (!/^#[0-9a-f]{6}$/i.test(o.redactionColor)) throw new Error("The project contains an invalid redaction color.");
+      result.redactionColor = o.redactionColor;
+    }
     return result;
   });
-  return { crop, objects };
+  const result = { crop, objects };
+  if (value.transform !== undefined) {
+    const t = value.transform;
+    if (!t || ![0, 90, 180, 270].includes(t.rotation) || typeof t.flipX !== "boolean" || typeof t.flipY !== "boolean") throw new Error("The project has an invalid image transformation.");
+    const w = dimension(t.width), h = dimension(t.height); imageExtent(w, h);
+    result.transform = { rotation: t.rotation, flipX: t.flipX, flipY: t.flipY, width: w, height: h };
+  }
+  if (value.effects !== undefined) {
+    const e = value.effects;
+    if (!e || typeof e !== "object") throw new Error("The project has invalid image effects.");
+    result.effects = { brightness: number(e.brightness, 0, 200), contrast: number(e.contrast, 0, 200), saturation: number(e.saturation, 0, 200), grayscale: number(e.grayscale, 0, 100), sepia: number(e.sepia, 0, 100) };
+  }
+  return result;
 }
 
 export function validateEditorDocument(value, width, height) {
@@ -120,6 +138,12 @@ export async function saveProject(record, tiles) {
   return blob;
 }
 
+// The visible PNG is flattened; the explicit editable variant also contains the
+// original tiles and editable objects. Never use this path for ordinary exports.
+export async function saveEditablePng(flattenedPng, record, originalTiles) {
+  return await embedPngProject(flattenedPng, await saveProject(record, originalTiles));
+}
+
 async function storeImported(title, fileName, width, height, tiles, editorDocument, { state = "complete", warnings = [], coverage = { ratio: 1, complete: true } } = {}) {
   const id = crypto.randomUUID(), stamp = new Date().toISOString();
   const record = { id, sourceTitle: String(title || "Imported image").slice(0, 500), sourceUrl: "", fileName: String(fileName || "winshot-image").replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 160), mode: "import", state, startedAt: stamp, finishedAt: stamp,
@@ -142,10 +166,14 @@ export async function importProject(file) {
   if (!coverage.complete && state === "complete") throw new Error("The project image has missing tile coverage.");
   for (const t of data.tiles) {
     const blob = decodePng(t.png);
+    await readPngProject(blob); // Validate every chunk boundary and CRC before decoding.
     pngDimensions(new Uint8Array(await blob.slice(0, 24).arrayBuffer()), t.widthPx, t.heightPx);
     let bitmap;
     try { bitmap = await createImageBitmap(blob); }
     catch { throw new Error("The project contains a damaged PNG image."); }
+    if (bitmap.width !== t.widthPx || bitmap.height !== t.heightPx) {
+      bitmap.close(); throw new Error("The project tile dimensions do not match its decoded image.");
+    }
     bitmap.close();
     tiles.push({ index: t.index, blob, destXPx: t.destXPx, destYPx: t.destYPx, widthPx: t.widthPx, heightPx: t.heightPx });
   }
@@ -156,13 +184,22 @@ export async function importProject(file) {
 
 export async function importImage(file) {
   checkFile(file);
-  if (!/^image\/(png|jpeg|webp|gif|bmp)$/.test(file.type)) throw new Error("Open a PNG, JPEG, WebP, GIF or BMP image. Use Video studio for recordings.");
+  const mime = file.type || ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", bmp: "image/bmp" }[/\.([^.]+)$/.exec(file.name || "")?.[1]?.toLowerCase()]);
+  if (!/^image\/(png|jpeg|webp|gif|bmp|x-ms-bmp)$/.test(mime)) throw new Error("Open a PNG, JPEG, WebP, GIF or BMP image. Use Video studio for recordings.");
   await preflightImage(file);
+  let projectText = null;
+  if (mime === "image/png") {
+    projectText = await readPngProject(file);
+  }
   let bitmap;
   try { bitmap = await createImageBitmap(file); } catch { throw new Error("This image could not be decoded. Try saving it as PNG."); }
   try {
     const { width, height } = bitmap;
     if (width > 200_000 || height > 200_000 || width * height > MAX_PIXELS) throw new Error("This image is too large to edit in the browser. Open a smaller image.");
+    if (projectText !== null) {
+      bitmap.close(); bitmap = null; // Do not retain the preview while decoding original tiles.
+      return await importProject(new Blob([projectText], { type: "application/json" }));
+    }
     const tiles = [];
     for (let y = 0; y < height; y += 2048) for (let x = 0; x < width; x += 2048) {
       const w = Math.min(2048, width - x), h = Math.min(2048, height - y), canvas = new OffscreenCanvas(w, h);
@@ -171,7 +208,7 @@ export async function importImage(file) {
     }
     const name = file.name || "Clipboard image";
     return await storeImported(name, name.replace(/\.[^.]+$/, ""), width, height, tiles, validateEditorDocument(null, width, height));
-  } finally { bitmap.close(); }
+  } finally { bitmap?.close(); }
 }
 
 // Check dimensions from the file header before asking Chrome to allocate a full

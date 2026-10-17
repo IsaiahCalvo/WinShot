@@ -9,6 +9,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   maxTiles: DEFAULT_LIMITS.maxTiles,
   maxHeightCss: DEFAULT_LIMITS.maxHeightCss,
   batchMode: CaptureMode.FULL_PAGE,
+  batchScope: "current-window",
+  batchOutput: "report",
+  captureActions: Object.freeze({ visible: "editor", "full-page": "editor", region: "editor", element: "editor" }),
+  automation: Object.freeze({ enabled: false, origins: [] }),
   lastMode: CaptureMode.FULL_PAGE,
   contextMenu: true,
   historyRetentionDays: 30, // 0 = keep forever
@@ -26,6 +30,14 @@ export const DEFAULT_SETTINGS = Object.freeze({
   })
 });
 
+export const OUTPUT_ACTIONS = Object.freeze(["editor", "png", "jpeg", "webp", "pdf", "gif", "bmp"]);
+export function normalizeAutomationOrigins(origins) {
+  return [...new Set((Array.isArray(origins) ? origins : []).filter(x => typeof x === "string").flatMap(value => {
+    try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.hostname.includes("*") && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash ? [url.origin] : []; }
+    catch { return []; }
+  }))].slice(0, 20);
+}
+
 function finiteNumber(value, fallback, minimum, maximum) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
@@ -40,6 +52,10 @@ export function normalizeSettings(value = {}) {
     maxTiles: Math.round(finiteNumber(value.maxTiles, DEFAULT_SETTINGS.maxTiles, 1, 2000)),
     maxHeightCss: Math.round(finiteNumber(value.maxHeightCss, DEFAULT_SETTINGS.maxHeightCss, 1000, 2_000_000)),
     batchMode: value.batchMode === CaptureMode.VISIBLE ? CaptureMode.VISIBLE : CaptureMode.FULL_PAGE,
+    batchScope: ["current-window", "selected-tabs", "all-windows"].includes(value.batchScope) ? value.batchScope : DEFAULT_SETTINGS.batchScope,
+    batchOutput: ["report", "png", "jpeg", "webp", "pdf", "gif", "bmp", "combined-pdf"].includes(value.batchOutput) ? value.batchOutput : DEFAULT_SETTINGS.batchOutput,
+    captureActions: Object.fromEntries(Object.keys(DEFAULT_SETTINGS.captureActions).map(mode => [mode, OUTPUT_ACTIONS.includes(value.captureActions?.[mode]) ? value.captureActions[mode] : "editor"])),
+    automation: { enabled: value.automation?.enabled === true, origins: normalizeAutomationOrigins(value.automation?.origins) },
     lastMode: [CaptureMode.VISIBLE, CaptureMode.FULL_PAGE, CaptureMode.REGION, CaptureMode.ELEMENT].includes(value.lastMode)
       ? value.lastMode : DEFAULT_SETTINGS.lastMode,
     contextMenu: value.contextMenu !== false,

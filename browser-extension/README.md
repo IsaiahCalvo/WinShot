@@ -2,20 +2,29 @@
 
 WinShot Capture is a local-first Manifest V3 extension. It captures real browser pixels,
 stores large captures as tiles, validates coverage and overlap confidence, and exports
-PNG, JPEG, WebP, or PDF without a cloud service. WinShot desktop integration is optional;
+PNG, JPEG, WebP, GIF, BMP or PDF without a cloud service. WinShot desktop integration is optional;
 the browser image editor and video studio work without the Windows app.
 
 Captures open a Chrome tab with drawing, arrows, shapes, text, opaque redaction,
-crop, undo/redo and local autosave. **Open file** imports images/clipboard images
-or editable `.winshot.json` projects; **Save project** preserves the original and
-editable annotations. Every image export uses the current edits. Edited PDFs omit
+crop, resize, rotate/flip, regional blur, color adjustments, undo/redo and local
+autosave. **Open file** imports images/clipboard images, editable `.winshot.json`
+or PNG projects, and a documented subset of native `.winshot` projects.
+**Save project** and **Editable PNG** preserve the original and editable annotations. Every image export uses the current edits. Edited PDFs omit
 the original text/link layer so covered or cropped source content is not exposed.
 
 **Record & edit video** opens a separate tab with Chrome's screen/window/tab
-sharing chooser, local video import, playback, trim, source download and WebM
-clip export. Export runs at playback speed; no native handoff is involved.
+sharing chooser, local video import, frame-step trimming, crop/rotate/flip, speed
+and audio controls. Offline WebCodecs export writes WebM or MP4 using supported
+local codecs; compatibility WebM still runs at playback speed. Originals remain
+available and no native handoff is involved.
 See [browser editing](docs/browser-editing.md) for formats, limits and sharing
 editable projects safely.
+
+**Share** offers an attached-image email draft, OneNote clipboard paste, an
+offline image note, and prepared file sharing/dragging where the OS supports it.
+See [sharing](docs/sharing.md). Per-mode output preferences, selected/current/all-window
+batches, ZIP results and an explicitly enabled origin-scoped page API are described
+in [batch actions and automation](docs/page-automation.md).
 
 ## Build and test
 

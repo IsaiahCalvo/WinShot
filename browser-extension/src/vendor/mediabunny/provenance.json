@@ -1,0 +1,10 @@
+{
+  "name": "mediabunny",
+  "version": "1.61.6",
+  "license": "MPL-2.0",
+  "source": "https://github.com/Vanilagy/mediabunny",
+  "npmTarball": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.61.6.tgz",
+  "tarballSha256": "e7433559092971a2f9f0ed345db4881e605c19154e62399b573da1fa83491782",
+  "modifications": "none",
+  "includedSource": "../../../docs/source/mediabunny-1.61.6.tgz"
+}

@@ -719,3 +719,534 @@ test("browser image editor undo during a new drawing cancels it without a later 
     ).toEqual(["rectangle"]);
   });
 });
+
+async function importEffectsFixture(
+  editor,
+  { width = 200, height = 120, checker = false } = {},
+) {
+  const id = await editor.evaluate(
+    async ({ width, height, checker }) => {
+      const { importImage } = await import(
+        chrome.runtime.getURL("src/project-file.js")
+      );
+      const canvas = new OffscreenCanvas(width, height),
+        ctx = canvas.getContext("2d");
+      if (checker) {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = "#fff";
+        for (let x = 0; x < width; x += 8) ctx.fillRect(x, 0, 4, height);
+      } else {
+        for (const [color, x, y] of [
+          ["#ff0000", 0, 0],
+          ["#00ff00", width / 2, 0],
+          ["#0000ff", 0, height / 2],
+          ["#ffff00", width / 2, height / 2],
+        ]) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x, y, width / 2, height / 2);
+        }
+      }
+      const record = await importImage(
+        new File(
+          [await canvas.convertToBlob({ type: "image/png" })],
+          "Effects pixel fixture.png",
+          { type: "image/png" },
+        ),
+      );
+      return record.id;
+    },
+    { width, height, checker },
+  );
+  await editor.goto(new URL(`editor.html?id=${id}`, editor.url()).href);
+  await editor.waitForSelector(".annotation-overlay");
+  await editor.waitForFunction(() =>
+    [...document.querySelectorAll("#preview img")].every(
+      (i) => i.complete && i.naturalWidth,
+    ),
+  );
+}
+async function effectPixels(editor, positions) {
+  return editor.evaluate(async (positions) => {
+    const s = await import(chrome.runtime.getURL("src/store.js")),
+      m = await import(chrome.runtime.getURL("src/image-editor.js")),
+      e = await import(chrome.runtime.getURL("src/exporters.js")),
+      id = new URL(location.href).searchParams.get("id"),
+      record = await s.getRecord(id),
+      tiles = await s.getTiles(id),
+      edited = await m.renderEditedCapture(
+        record,
+        tiles,
+        record.editorDocument,
+      ),
+      blob = await e.exportPng(edited.record, edited.tiles),
+      bitmap = await createImageBitmap(blob),
+      canvas = new OffscreenCanvas(bitmap.width, bitmap.height),
+      ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return {
+      size: edited.record.report.dimensionsPx,
+      pixels: positions.map(([x, y]) => [...ctx.getImageData(x, y, 1, 1).data]),
+      semantics: edited.record.semantics ?? null,
+      maxTileEdge: Math.max(
+        ...edited.tiles.flatMap((t) => [t.widthPx, t.heightPx]),
+      ),
+    };
+  }, positions);
+}
+async function setEditValue(editor, selector, value, event = "change") {
+  await editor.$eval(
+    selector,
+    (node, { value, event }) => {
+      node.value = value;
+      node.dispatchEvent(new Event(event, { bubbles: true }));
+    },
+    { value: String(value), event },
+  );
+}
+async function dragOutput(editor, tool, x, y, x2, y2) {
+  await editor.click(`[data-tool='${tool}']`);
+  const box = await editor.$eval("#preview", (n) => {
+    const r = n.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  });
+  const doc = (await stored(editor)).editorDocument,
+    size = doc.transform || doc.crop;
+  await editor.mouse.move(
+    box.x + (x * box.width) / size.width,
+    box.y + (y * box.height) / size.height,
+  );
+  await editor.mouse.down();
+  await editor.mouse.move(
+    box.x + (x2 * box.width) / size.width,
+    box.y + (y2 * box.height) / size.height,
+    { steps: 6 },
+  );
+  await editor.mouse.up();
+  await saved(editor);
+}
+
+test("browser image editor size rotation and flips preserve quadrant pixels undo and editable projects", async () => {
+  await runEditor(async ({ editor }) => {
+    await importEffectsFixture(editor);
+    await setEditValue(editor, "#image-width", 100, "input");
+    expect(await editor.$eval("#image-height", (n) => n.value)).toBe("60");
+    await editor.click("#image-resize");
+    await saved(editor);
+    expect(
+      await effectPixels(editor, [
+        [10, 10],
+        [80, 10],
+        [10, 50],
+        [80, 50],
+      ]),
+    ).toMatchObject({
+      size: { width: 100, height: 60 },
+      pixels: [
+        [255, 0, 0, 255],
+        [0, 255, 0, 255],
+        [0, 0, 255, 255],
+        [255, 255, 0, 255],
+      ],
+    });
+    await editor.click("#image-rotate-right");
+    await saved(editor);
+    expect(
+      await effectPixels(editor, [
+        [10, 10],
+        [50, 10],
+        [10, 80],
+        [50, 80],
+      ]),
+    ).toMatchObject({
+      size: { width: 60, height: 100 },
+      pixels: [
+        [0, 0, 255, 255],
+        [255, 0, 0, 255],
+        [255, 255, 0, 255],
+        [0, 255, 0, 255],
+      ],
+    });
+    await editor.click("#image-flip-x");
+    await saved(editor);
+    expect(
+      (
+        await effectPixels(editor, [
+          [10, 10],
+          [50, 10],
+          [10, 80],
+          [50, 80],
+        ])
+      ).pixels,
+    ).toEqual([
+      [255, 0, 0, 255],
+      [0, 0, 255, 255],
+      [0, 255, 0, 255],
+      [255, 255, 0, 255],
+    ]);
+    await editor.click("#image-flip-y");
+    await saved(editor);
+    const expected = [
+      [0, 255, 0, 255],
+      [255, 255, 0, 255],
+      [255, 0, 0, 255],
+      [0, 0, 255, 255],
+    ];
+    expect(
+      (
+        await effectPixels(editor, [
+          [10, 10],
+          [50, 10],
+          [10, 80],
+          [50, 80],
+        ])
+      ).pixels,
+    ).toEqual(expected);
+    await editor.click("#edit-undo");
+    await saved(editor);
+    expect((await stored(editor)).editorDocument.transform.flipY).toBe(false);
+    await editor.click("#edit-redo");
+    await saved(editor);
+    await editor.reload();
+    await editor.waitForSelector(".annotation-overlay");
+    expect(
+      (
+        await effectPixels(editor, [
+          [10, 10],
+          [50, 10],
+          [10, 80],
+          [50, 80],
+        ])
+      ).pixels,
+    ).toEqual(expected);
+    const roundtrip = await editor.evaluate(async () => {
+      const s = await import(chrome.runtime.getURL("src/store.js")),
+        p = await import(chrome.runtime.getURL("src/project-file.js")),
+        id = new URL(location.href).searchParams.get("id"),
+        r = await s.getRecord(id),
+        tiles = await s.getTiles(id),
+        blob = await p.saveProject(r, tiles),
+        restored = await p.importProject(blob);
+      return restored.editorDocument.transform;
+    });
+    expect(roundtrip).toEqual((await stored(editor)).editorDocument.transform);
+  });
+});
+
+test("browser image editor draws and crops at the displayed location after rotation and nonuniform resize", async () => {
+  await runEditor(async ({ editor }) => {
+    await importEffectsFixture(editor);
+    await editor.click("#image-rotate-right");
+    await saved(editor);
+    await editor.click("#image-lock-ratio");
+    await setEditValue(editor, "#image-width", 240);
+    await setEditValue(editor, "#image-height", 200);
+    await editor.click("#image-resize");
+    await saved(editor);
+    await dragOutput(editor, "redact", 20, 20, 80, 70);
+    expect(
+      (
+        await effectPixels(editor, [
+          [40, 40],
+          [200, 40],
+        ])
+      ).pixels,
+    ).toEqual([
+      [17, 17, 17, 255],
+      [255, 0, 0, 255],
+    ]);
+    await dragOutput(editor, "crop", 0, 0, 120, 100);
+    await editor.click("#crop-apply");
+    await saved(editor);
+    expect((await stored(editor)).editorDocument.crop).toMatchObject({
+      width: 100,
+      height: 60,
+    });
+    expect((await effectPixels(editor, [[10, 10]])).size).toEqual({
+      width: 60,
+      height: 100,
+    });
+    await editor.click("#edit-undo");
+    await saved(editor);
+    expect((await effectPixels(editor, [[40, 40]])).size).toEqual({
+      width: 240,
+      height: 200,
+    });
+  });
+});
+
+test("browser image editor global adjustments change real pixels reset cleanly and preserve opaque redactions", async () => {
+  await runEditor(async ({ editor }) => {
+    await importEffectsFixture(editor);
+    await editor.$eval("#image-effects-options", (n) => (n.open = true));
+    await setEditValue(editor, "#effect-grayscale", 100);
+    await saved(editor);
+    const gray = (await effectPixels(editor, [[20, 20]])).pixels[0];
+    expect(Math.abs(gray[0] - gray[1])).toBeLessThanOrEqual(1);
+    expect(Math.abs(gray[1] - gray[2])).toBeLessThanOrEqual(1);
+    expect(gray[0]).toBeGreaterThan(40);
+    expect(gray[0]).toBeLessThan(80);
+    await editor.click("#effects-reset");
+    await saved(editor);
+    expect((await effectPixels(editor, [[20, 20]])).pixels[0]).toEqual([
+      255, 0, 0, 255,
+    ]);
+    await setEditValue(editor, "#effect-brightness", 50);
+    await saved(editor);
+    const half = (await effectPixels(editor, [[20, 20]])).pixels[0];
+    expect(half[0]).toBeGreaterThanOrEqual(127);
+    expect(half[0]).toBeLessThanOrEqual(128);
+    expect(half.slice(1)).toEqual([0, 0, 255]);
+    await setEditValue(editor, "#effect-saturation", 0);
+    await saved(editor);
+    const desaturated = (await effectPixels(editor, [[20, 20]])).pixels[0];
+    expect(Math.abs(desaturated[0] - desaturated[1])).toBeLessThanOrEqual(1);
+    await editor.click("#effects-reset");
+    await setEditValue(editor, "#effect-sepia", 100);
+    await saved(editor);
+    const sepia = (await effectPixels(editor, [[20, 20]])).pixels[0];
+    expect(sepia[0]).toBeGreaterThan(sepia[1]);
+    expect(sepia[1]).toBeGreaterThan(sepia[2]);
+    await setEditValue(editor, "#effect-contrast", 0);
+    await saved(editor);
+    await dragOutput(editor, "redact", 10, 10, 50, 50);
+    expect(
+      (
+        await effectPixels(editor, [
+          [20, 20],
+          [180, 100],
+        ])
+      ).pixels[0],
+    ).toEqual([17, 17, 17, 255]);
+    expect(await editor.$eval("#edited-pdf-note", (n) => n.hidden)).toBe(false);
+  });
+});
+
+test("browser image editor blur softens source pixels without crossing its bounds and stays below secure redaction", async () => {
+  await runEditor(async ({ editor }) => {
+    await importEffectsFixture(editor, {
+      width: 320,
+      height: 160,
+      checker: true,
+    });
+    const before = await effectPixels(editor, [
+      [100, 80],
+      [104, 80],
+      [20, 80],
+    ]);
+    await dragOutput(editor, "blur", 60, 20, 260, 140);
+    const blurred = await effectPixels(editor, [
+      [100, 80],
+      [104, 80],
+      [20, 80],
+    ]);
+    expect(Math.abs(blurred.pixels[0][0] - blurred.pixels[1][0])).toBeLessThan(
+      15,
+    );
+    expect(Math.abs(before.pixels[0][0] - before.pixels[1][0])).toBeGreaterThan(
+      240,
+    );
+    expect(blurred.pixels[2]).toEqual(before.pixels[2]);
+    const box = await editor.$eval("#preview", (n) => {
+      const r = n.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    const screenshot = await editor.screenshot({ clip: box });
+    const previewPixels = await editor.evaluate(
+      async (bytes) => {
+        const bitmap = await createImageBitmap(
+            new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+          ),
+          canvas = new OffscreenCanvas(bitmap.width, bitmap.height),
+          ctx = canvas.getContext("2d");
+        ctx.drawImage(bitmap, 0, 0);
+        return [
+          [...ctx.getImageData(100, 80, 1, 1).data],
+          [...ctx.getImageData(104, 80, 1, 1).data],
+        ];
+      },
+      [...screenshot],
+    );
+    expect(Math.abs(previewPixels[0][0] - previewPixels[1][0])).toBeLessThan(
+      15,
+    );
+    expect(previewPixels[0][0]).toBeGreaterThan(90);
+    expect(previewPixels[0][0]).toBeLessThan(165);
+    expect(await editor.$eval("#edit-help", (n) => n.textContent)).toContain(
+      "not secure redaction",
+    );
+    await dragOutput(editor, "redact", 80, 50, 160, 110);
+    await dragOutput(editor, "blur", 70, 40, 170, 120);
+    expect((await effectPixels(editor, [[100, 80]])).pixels[0]).toEqual([
+      17, 17, 17, 255,
+    ]);
+    const roundtrip = await editor.evaluate(async () => {
+      const s = await import(chrome.runtime.getURL("src/store.js")),
+        p = await import(chrome.runtime.getURL("src/project-file.js")),
+        id = new URL(location.href).searchParams.get("id"),
+        r = await s.getRecord(id),
+        tiles = await s.getTiles(id);
+      const saved = await p.saveProject(r, tiles),
+        imported = await p.importProject(saved);
+      return imported.editorDocument.objects;
+    });
+    expect(
+      roundtrip.filter((s) => s.type === "blur").map((s) => s.radius),
+    ).toEqual([12, 12]);
+    const seam = await editor.evaluate(async () => {
+      const m = await import(chrome.runtime.getURL("src/image-editor.js")),
+        e = await import(chrome.runtime.getURL("src/exporters.js")),
+        width = 2200,
+        height = 160,
+        c = new OffscreenCanvas(width, height),
+        ctx = c.getContext("2d");
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "#fff";
+      for (let x = 0; x < width; x += 8) ctx.fillRect(x, 0, 4, height);
+      const record = {
+          id: "blur-seam",
+          report: {
+            dimensionsPx: { width, height },
+            dimensionsCss: { width, height },
+          },
+        },
+        tiles = [
+          {
+            index: 0,
+            destXPx: 0,
+            destYPx: 0,
+            widthPx: width,
+            heightPx: height,
+            blob: await c.convertToBlob({ type: "image/png" }),
+          },
+        ],
+        doc = {
+          version: 1,
+          crop: { x: 0, y: 0, width, height },
+          objects: [
+            {
+              id: "seam",
+              type: "blur",
+              x: 20,
+              y: 20,
+              width: 2160,
+              height: 120,
+              radius: 12,
+              color: "#111111",
+              stroke: 4,
+            },
+          ],
+        },
+        out = await m.renderEditedCapture(record, tiles, doc),
+        bitmap = await createImageBitmap(
+          await e.exportPng(out.record, out.tiles),
+        ),
+        canvas = new OffscreenCanvas(width, height),
+        pixels = canvas.getContext("2d");
+      pixels.drawImage(bitmap, 0, 0);
+      return Array.from(
+        { length: 16 },
+        (_, i) => pixels.getImageData(2040 + i, 80, 1, 1).data[0],
+      );
+    });
+    expect(Math.max(...seam) - Math.min(...seam)).toBeLessThan(4);
+    expect(Math.min(...seam)).toBeGreaterThan(90);
+    expect(Math.max(...seam)).toBeLessThan(165);
+    if (process.env.WINSHOT_EDITOR_EVIDENCE_DIR) {
+      const root = process.env.WINSHOT_EDITOR_EVIDENCE_DIR;
+      fs.mkdirSync(root, { recursive: true });
+      await editor.$eval("#image-effects-options", (n) => (n.open = true));
+      await setEditValue(editor, "#editor-zoom", 2);
+      await editor.screenshot({
+        path: path.join(root, "image-effects-desktop.png"),
+      });
+      await editor.setViewport({ width: 390, height: 844 });
+      await setEditValue(editor, "#editor-zoom", "fit");
+      await editor.screenshot({
+        path: path.join(root, "image-effects-mobile.png"),
+      });
+      expect(
+        await editor.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    }
+  });
+});
+
+test("browser image editor resize effects remain bounded for tall captures and reject oversized output", async () => {
+  await runEditor(async ({ editor }) => {
+    const result = await editor.evaluate(async () => {
+      const { renderEditedCapture } = await import(
+        chrome.runtime.getURL("src/image-editor.js")
+      );
+      const tiles = [],
+        width = 160,
+        height = 19000;
+      for (let y = 0; y < height; y += 1000) {
+        const c = new OffscreenCanvas(width, Math.min(1000, height - y)),
+          ctx = c.getContext("2d");
+        ctx.fillStyle = "#ff0000";
+        ctx.fillRect(0, 0, c.width, c.height);
+        tiles.push({
+          index: tiles.length,
+          destXPx: 0,
+          destYPx: y,
+          widthPx: c.width,
+          heightPx: c.height,
+          blob: await c.convertToBlob({ type: "image/png" }),
+        });
+      }
+      const r = {
+          id: "tall-effects",
+          report: {
+            dimensionsPx: { width, height },
+            dimensionsCss: { width, height },
+          },
+        },
+        doc = {
+          version: 1,
+          crop: { x: 0, y: 0, width, height },
+          objects: [],
+          transform: {
+            rotation: 90,
+            flipX: false,
+            flipY: false,
+            width: 9500,
+            height: 80,
+          },
+          effects: { grayscale: 100 },
+        };
+      const out = await renderEditedCapture(r, tiles, doc);
+      let error = "";
+      try {
+        await renderEditedCapture(r, tiles, {
+          ...doc,
+          transform: { ...doc.transform, width: 200000, height: 200000 },
+        });
+      } catch (e) {
+        error = e.message;
+      }
+      return {
+        size: out.record.report.dimensionsPx,
+        maxEdge: Math.max(...out.tiles.flatMap((t) => [t.widthPx, t.heightPx])),
+        count: out.tiles.length,
+        error,
+      };
+    });
+    expect(result.size).toEqual({ width: 9500, height: 80 });
+    expect(result.maxEdge).toBeLessThanOrEqual(2048);
+    expect(result.count).toBe(5);
+    expect(result.error).toContain("100 million pixel");
+    const original = (await stored(editor)).editorDocument;
+    await setEditValue(editor, "#image-width", 200000);
+    await setEditValue(editor, "#image-height", 200000);
+    await editor.click("#image-resize");
+    expect(await editor.$eval("#toast", (n) => n.textContent)).toContain(
+      "100 million",
+    );
+    expect((await stored(editor)).editorDocument).toEqual(original);
+  });
+});

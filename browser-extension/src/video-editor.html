@@ -27,13 +27,25 @@
       <div class="section-label">Record</div>
       <label class="check"><input id="capture-audio" type="checkbox" checked> Include shared audio</label>
       <p class="hint">Chrome asks which tab, window, or screen to share. Available audio depends on your choice and operating system.</p>
+      <div class="section-label">Shape &amp; speed</div>
+      <div class="tool-row"><button id="rotate-left" disabled aria-label="Rotate video counterclockwise">↶ 90°</button><button id="rotate-right" disabled aria-label="Rotate video clockwise">↷ 90°</button></div>
+      <div class="two-col"><label class="check"><input id="flip-horizontal" type="checkbox" disabled> Flip horizontal</label><label class="check"><input id="flip-vertical" type="checkbox" disabled> Flip vertical</label></div>
+      <label for="video-speed">Playback speed</label><select id="video-speed" disabled><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1× · original</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      <p class="hint">Speed changes the video and audio together, including audio pitch.</p>
+      <label for="crop-preset">Crop</label><select id="crop-preset" disabled><option value="full">Full frame</option><option value="square">Square · 1:1</option><option value="wide">Landscape · 16:9</option><option value="portrait">Portrait · 9:16</option><option value="custom">Custom crop</option></select>
+      <div class="two-col crop-fields"><div><label for="crop-left">Left %</label><input id="crop-left" type="number" min="0" max="99" step="0.1" value="0" disabled></div><div><label for="crop-top">Top %</label><input id="crop-top" type="number" min="0" max="99" step="0.1" value="0" disabled></div><div><label for="crop-width">Width %</label><input id="crop-width" type="number" min="0.1" max="100" step="0.1" value="100" disabled></div><div><label for="crop-height">Height %</label><input id="crop-height" type="number" min="0.1" max="100" step="0.1" value="100" disabled></div></div>
+      <div class="tool-row"><button id="select-crop" disabled aria-pressed="false">Drag to crop</button><button id="reset-transform" disabled>Reset edits</button></div>
+      <p class="hint" id="crop-hint">Crop follows rotation and flips. Numeric fields provide the same controls as dragging.</p>
       <div class="section-label">Export</div>
+      <label for="video-format">Format</label><select id="video-format" disabled><option value="webm">WebM</option><option value="mp4">MP4</option></select>
+      <label for="export-engine">Export method</label><select id="export-engine" disabled><option value="auto">Fast · automatic fallback</option><option value="fast">Fast only</option><option value="realtime">Compatibility · WebM</option></select>
+      <p id="export-capabilities" class="hint">Checking browser codecs…</p>
       <label for="resolution">Resolution</label><select id="resolution" disabled><option value="original">Original size</option><option value="1080">Up to 1080p</option><option value="720">Up to 720p</option></select>
       <div class="two-col"><div><label for="quality">Quality</label><select id="quality" disabled><option value="compact">Smaller file</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></div><div><label for="fps">Frame rate</label><select id="fps" disabled><option value="24">24 fps</option><option value="30" selected>30 fps</option><option value="60">60 fps</option></select></div></div>
       <label class="check"><input id="mute-export" type="checkbox" disabled> Mute exported audio</label>
       <label class="check"><input id="mono-export" type="checkbox" disabled> Mono audio</label>
       <label for="volume">Export volume <output id="volume-value">100%</output></label><input id="volume" type="range" min="0" max="200" value="100" step="5" disabled>
-      <p class="hint">WebM export runs at playback speed. Keep this tab visible. Trim boundaries are approximate; the original stays untouched. Audio boost above 100% and mono apply on export.</p>
+      <p class="hint">Fast export processes frames directly without playing the clip. Compatibility WebM runs at playback speed and needs this tab visible. Original recordings stay untouched. Audio boost above 100% and mono apply on export.</p>
       <button id="save-local" hidden>Retry saving to history</button>
       <div class="section-heading"><div class="section-label">Saved videos</div><button id="refresh-history" title="Refresh saved videos" aria-label="Refresh saved videos">↻</button></div>
       <div id="video-history" class="history"><p class="hint">Loading…</p></div>
@@ -43,15 +55,21 @@
     <section class="workspace" aria-label="Video workspace">
       <div class="preview-shell">
         <div id="empty-state"><div class="empty-icon" aria-hidden="true">▶</div><h1>Your next take starts here.</h1><p>Record a tab, window, or screen.<br>Or open a video and make it yours.</p><button id="empty-import" disabled>Open a video</button><small>WebM and video formats your Chrome can play</small></div>
-        <video id="preview" controls playsinline hidden aria-label="Video preview"></video>
+        <video id="preview" class="source-video" playsinline hidden aria-label="Source video decoder"></video>
+        <canvas id="edited-preview" hidden aria-label="Edited video preview"></canvas>
+        <div id="crop-outline" hidden aria-hidden="true"></div>
         <div id="recording-indicator" hidden><span class="record-dot" aria-hidden="true"></span><span id="recording-time">Recording · 0:00</span></div>
+      </div>
+      <div id="preview-transport" class="preview-transport" hidden>
+        <button id="step-back" aria-label="Step back one frame">‹</button><button id="play-pause" aria-label="Play video">▶</button><button id="step-forward" aria-label="Step forward one frame">›</button>
+        <input id="seek-position" type="range" min="0" max="1" step="0.001" value="0" aria-label="Video playhead"><output id="preview-time">0:00 / 0:00</output>
       </div>
       <section id="timeline" class="timeline" aria-label="Clip trim" hidden>
         <div class="timeline-heading"><strong>Trim your clip</strong><span id="selection-duration" class="muted"></span><button id="reset-trim">Reset</button><button id="play-selection">Preview clip</button></div>
         <div class="trim-bar" aria-hidden="true"><span id="trim-selected"></span><span id="playhead"></span></div>
-        <label for="trim-start">Start <output id="start-label">0:00</output></label><input id="trim-start" type="range" min="0" max="1" step="0.05" value="0">
-        <label for="trim-end">End <output id="end-label">0:00</output></label><input id="trim-end" type="range" min="0" max="1" step="0.05" value="1">
-        <div class="two-col"><div><label for="start-time">Start in seconds</label><input id="start-time" type="number" min="0" step="0.05" value="0"></div><div><label for="end-time">End in seconds</label><input id="end-time" type="number" min="0.1" step="0.05" value="1"></div></div>
+        <label for="trim-start">Start <output id="start-label">0:00</output></label><input id="trim-start" type="range" min="0" max="1" step="0.001" value="0">
+        <label for="trim-end">End <output id="end-label">0:00</output></label><input id="trim-end" type="range" min="0" max="1" step="0.001" value="1">
+        <div class="two-col"><div><label for="start-time">Start in seconds</label><input id="start-time" type="number" min="0" step="0.001" value="0"></div><div><label for="end-time">End in seconds</label><input id="end-time" type="number" min="0.1" step="0.001" value="1"></div></div>
       </section>
       <footer><p id="status" role="status" aria-live="polite">Loading WinShot…</p><progress id="export-progress" max="1" value="0" hidden aria-label="Export progress"></progress></footer>
     </section>

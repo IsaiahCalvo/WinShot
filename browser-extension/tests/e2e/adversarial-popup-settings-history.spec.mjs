@@ -245,11 +245,11 @@ test("cross-window progress cannot disable idle controls or finish another windo
     await expect.poll(() => popup.$eval("#status", node => node.textContent)).toContain("seconds");
     let pendingStatus;
     await expect.poll(async () => {
-      pendingStatus = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" }));
+      pendingStatus = await popup.evaluate(windowId => chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS", windowId }), source.windowId);
       return pendingStatus;
     }).toMatchObject({ busy: true, message: expect.stringContaining("Waiting to capture") });
     const beforeStop = {
-      activeTabs: await run.worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true })).map(({ id, windowId }) => ({ id, windowId }))),
+      activeTabs: await run.worker.evaluate(async sourceWindowId => (await chrome.tabs.query({ active: true, windowId: sourceWindowId })).map(({ id, windowId }) => ({ id, windowId })), source.windowId),
       status: pendingStatus
     };
     trace.beforeStop = beforeStop;
@@ -263,7 +263,7 @@ test("cross-window progress cannot disable idle controls or finish another windo
     expect(await popup.evaluate(() => globalThis.stopReply)).toEqual({ cancelled: true });
     await expect.poll(() => popup.$eval("body", node => node.dataset.busy)).toBe("false");
     expect(await popup.$eval("[data-mode='visible']", node => node.disabled)).toBe(false);
-    await expect.poll(() => popup.evaluate(async () => (await chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS" })).busy)).toBe(false);
+    await expect.poll(() => popup.evaluate(async windowId => (await chrome.runtime.sendMessage({ type: "WINSHOT_GET_CAPTURE_STATUS", windowId })).busy, source.windowId)).toBe(false);
     expect(run.browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
     // Read storage through the still-open popup so the assertion does not itself
     // create a tab and close the native action popup.

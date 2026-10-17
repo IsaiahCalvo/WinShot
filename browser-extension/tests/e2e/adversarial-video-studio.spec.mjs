@@ -143,6 +143,7 @@ test("browser video studio imports, persists trim edits, and exports playable cl
 test("browser video studio cancellation preserves the source and a later muted resized export succeeds", async () => {
   await withStudio(async ({ studio, profile, downloadPath }) => {
     const fixture = await makeVideo(studio, profile); await importVideo(studio, fixture);
+    await change(studio, "#export-engine", "realtime");
     const before = await studio.evaluate(async () => { const { getVideo } = await import(chrome.runtime.getURL("src/video-store.js")); const saved = await getVideo(new URL(location.href).searchParams.get("id")); return { id: saved.record.id, size: saved.blob.size }; });
     await studio.click("#export-video"); await studio.waitForFunction(() => document.querySelector("#export-progress").value > .1);
     await studio.click("#cancel-export"); await studio.waitForFunction(() => document.body.dataset.state === "ready" && /cancelled/.test(document.querySelector("#status").textContent));
@@ -159,7 +160,7 @@ test("browser video studio cancellation preserves the source and a later muted r
     const exportBytes = await studio.evaluate(async () => {
       const { getVideo } = await import(chrome.runtime.getURL("src/video-store.js")); const { exportVideoClip } = await import(chrome.runtime.getURL("src/video-tools.js"));
       const saved = await getVideo(new URL(location.href).searchParams.get("id"));
-      const blob = await exportVideoClip(saved.blob, { start: 1, end: 2, width: 120, height: 80, mute: true, fps: 24 });
+      const blob = await exportVideoClip(saved.blob, { start: 1, end: 2, width: 120, height: 80, mute: true, fps: 24, engine: "realtime" });
       return btoa(String.fromCharCode(...new Uint8Array(await blob.arrayBuffer())));
     });
     const file = path.join(profile, "muted-resized.webm"); fs.writeFileSync(file, Buffer.from(exportBytes, "base64"));
@@ -203,7 +204,7 @@ test("browser video studio reports denied sharing and unavailable encoders while
     await studio.click("#record"); await studio.waitForFunction(() => /Sharing cancelled/.test(document.querySelector("#status").textContent));
     expect(await studio.$eval("#preview", node => node.srcObject)).toBeNull();
     expect(await studio.$eval("#export-video", node => node.disabled)).toBe(false);
-    await studio.evaluateOnNewDocument(() => { MediaRecorder.isTypeSupported = () => false; });
+    await studio.evaluateOnNewDocument(() => { MediaRecorder.isTypeSupported = () => false; window.VideoEncoder = undefined; window.VideoDecoder = undefined; });
     await studio.reload(); await studio.waitForSelector('body[data-state="ready"]');
     expect(await studio.$eval("#record", node => node.disabled)).toBe(true); expect(await studio.$eval("#export-video", node => node.disabled)).toBe(true);
     expect(await studio.$eval("#import-video", node => node.disabled)).toBe(false); expect(await studio.$eval("#save-source", node => node.disabled)).toBe(false);
@@ -260,6 +261,7 @@ test("browser video studio exports sound after metadata loads beyond transient a
     expect(browser.process().spawnargs.some(argument => argument.includes("autoplay-policy"))).toBe(false);
     const fixture = await makeVideo(studio, profile); await importVideo(studio, fixture);
     await change(studio, "#start-time", 1); await change(studio, "#end-time", 2);
+    await change(studio, "#export-engine", "realtime");
     await studio.evaluate(() => {
       const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
       const play = HTMLMediaElement.prototype.play, connect = AudioNode.prototype.connect;

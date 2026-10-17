@@ -22,6 +22,11 @@
     <button disabled data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
     <details>
       <summary>Capture settings</summary>
+      <label for="capture-action-mode">Remember action for</label>
+      <select id="capture-action-mode"><option value="full-page">Entire page</option><option value="visible">Visible viewport</option><option value="region">Selection</option><option value="element">Element / scrolling frame</option></select>
+      <label for="capture-action-output">After a complete capture</label>
+      <select id="capture-action-output"><option value="editor">Open editor</option><option value="png">Save PNG and open editor</option><option value="jpeg">Save JPEG and open editor</option><option value="webp">Save WebP and open editor</option><option value="pdf">Save PDF and open editor</option><option value="gif">Save GIF and open editor</option><option value="bmp">Save BMP and open editor</option></select>
+      <small>Each mode remembers its action. Partial captures always open for review.</small>
       <label for="capture-delay">Delay before capture</label>
       <select id="capture-delay">
         <option value="0">No delay</option>
@@ -53,6 +58,10 @@
       <label class="check"><input id="context-menu" type="checkbox"> Right-click menu: repeat last capture</label>
       <small>Safety limits prevent a runaway page from exhausting memory. Filename fields: {title}, {host}, {date}, {time}, {mode}, {counter} — or FireShot-style %t %e %n %y-%m-%d %H:%M:%S</small>
     </details>
+    <label for="batch-scope">Tabs to capture</label>
+    <select id="batch-scope"><option value="current-window">This window</option><option value="selected-tabs">Selected tabs in this window</option><option value="all-windows">All windows</option></select>
+    <label for="batch-output">Batch result</label>
+    <select id="batch-output"><option value="report">Open results</option><option value="png">Save PNG files</option><option value="jpeg">Save JPEG files</option><option value="webp">Save WebP files</option><option value="pdf">Save individual PDFs</option><option value="gif">Save GIF files</option><option value="bmp">Save BMP files</option><option value="combined-pdf">Save one combined PDF</option></select>
     <label for="batch-mode">Batch capture area</label>
     <select id="batch-mode">
       <option value="full-page">Entire page</option>
@@ -63,6 +72,16 @@
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
     <button disabled id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
+    <details id="automation-settings">
+      <summary>Website automation</summary>
+      <label class="check"><input id="automation-enabled" type="checkbox"> Allow listed websites to request captures</label>
+      <label for="automation-origins">Allowed website origins, one per line</label>
+      <textarea id="automation-origins" rows="3" placeholder="https://example.com"></textarea>
+      <small>Only these exact websites may capture their own active tab and cancel their own requests. Results open in WinShot; image bytes are never returned to the website. Turn off to revoke access and stop its requests.</small>
+      <button id="automation-use-site" type="button">Add this website</button>
+      <button id="automation-save" type="button">Apply website access</button>
+      <a href="../docs/page-automation.md" target="_blank">Website API instructions</a>
+    </details>
     <button disabled id="open-library"><span>Open image or project</span><small>Edit a saved image or WinShot project in Chrome</small></button>
     <button disabled id="open-video-studio"><span>Record &amp; edit video</span><small>Opens WinShot video studio in a Chrome tab</small></button>
     <a id="open-history" href="#">Capture history…</a>

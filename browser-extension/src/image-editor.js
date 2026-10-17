@@ -24,7 +24,69 @@ const bounds = (shape) => {
     height: Math.abs(shape.height),
   };
 };
-const snapshot = (doc) => clone({ crop: doc.crop, objects: doc.objects });
+const NEUTRAL_EFFECTS = {
+  brightness: 100,
+  contrast: 100,
+  saturation: 100,
+  grayscale: 0,
+  sepia: 0,
+};
+export function imageOutputSize(doc) {
+  const rotated = (doc.transform?.rotation || 0) % 180 !== 0;
+  return {
+    width: doc.transform?.width || (rotated ? doc.crop.height : doc.crop.width),
+    height:
+      doc.transform?.height || (rotated ? doc.crop.width : doc.crop.height),
+  };
+}
+function imageTransform(doc) {
+  return {
+    rotation: 0,
+    flipX: false,
+    flipY: false,
+    ...imageOutputSize(doc),
+    ...doc.transform,
+  };
+}
+function imageEffects(doc) {
+  return { ...NEUTRAL_EFFECTS, ...doc.effects };
+}
+function effectFilter(doc) {
+  const e = imageEffects(doc);
+  return `brightness(${e.brightness}%) contrast(${e.contrast}%) saturate(${e.saturation}%) grayscale(${e.grayscale}%) sepia(${e.sepia}%)`;
+}
+function outputMatrix(doc) {
+  const c = doc.crop,
+    t = imageTransform(doc),
+    rotated = t.rotation % 180 !== 0,
+    rw = rotated ? c.height : c.width,
+    rh = rotated ? c.width : c.height;
+  const rotate =
+    t.rotation === 90
+      ? new DOMMatrix([0, 1, -1, 0, c.height, 0])
+      : t.rotation === 180
+        ? new DOMMatrix([-1, 0, 0, -1, c.width, c.height])
+        : t.rotation === 270
+          ? new DOMMatrix([0, -1, 1, 0, 0, c.width])
+          : new DOMMatrix();
+  return new DOMMatrix()
+    .scale(t.width / rw, t.height / rh)
+    .translate(t.flipX ? rw : 0, t.flipY ? rh : 0)
+    .scale(t.flipX ? -1 : 1, t.flipY ? -1 : 1)
+    .multiply(rotate);
+}
+const snapshot = (doc) =>
+  clone({
+    crop: doc.crop,
+    objects: doc.objects,
+    transform: imageTransform(doc),
+    effects: imageEffects(doc),
+  });
+function restoreSnapshot(doc, value) {
+  Object.assign(doc, value);
+  doc.transform = imageTransform(value);
+  doc.effects = imageEffects(value);
+}
 function svg(tag, attributes = {}) {
   const node = document.createElementNS(SVG, tag);
   for (const [key, value] of Object.entries(attributes))
@@ -48,6 +110,11 @@ function arrowPoints(s) {
     },
   ];
 }
+function redactionFill(shape) {
+  return /^#[0-9a-f]{6}$/i.test(shape.redactionColor || "")
+    ? shape.redactionColor
+    : "#111111";
+}
 function drawSvg(shape) {
   const s = shape,
     b = bounds(s),
@@ -63,7 +130,9 @@ function drawSvg(shape) {
     group.append(
       svg("rect", {
         ...b,
-        ...(s.type === "redact" ? { fill: "#111111", stroke: "none" } : {}),
+        ...(s.type === "redact"
+          ? { fill: redactionFill(s), stroke: "none" }
+          : {}),
       }),
     );
   else if (s.type === "ellipse")
@@ -122,7 +191,7 @@ function drawCanvas(ctx, s) {
   ctx.beginPath();
   if (s.type === "rectangle") ctx.rect(b.x, b.y, b.width, b.height);
   else if (s.type === "redact") {
-    ctx.fillStyle = "#111111";
+    ctx.fillStyle = redactionFill(s);
     ctx.fillRect(b.x, b.y, b.width, b.height);
     ctx.restore();
     return;
@@ -167,7 +236,7 @@ export class ImageEditor {
     this.preview = preview;
     this.stage = stage;
     this.record = record;
-    this.tiles = tiles;
+    this.tiles = [...tiles].sort((a, b) => a.index - b.index);
     this.persist = persist;
     this.notify = notify;
     const size = record.report.dimensionsPx,
@@ -178,6 +247,8 @@ export class ImageEditor {
         : { version: 1, crop: full, objects: [], past: [], future: [] };
     this.doc.past ||= [];
     this.doc.future ||= [];
+    this.doc.transform = imageTransform(this.doc);
+    this.doc.effects = imageEffects(this.doc);
     this.tool = "select";
     this.selected = null;
     this.scale = 1;
@@ -203,7 +274,7 @@ export class ImageEditor {
     this.source = document.createElement("div");
     this.source.className = "source-tiles";
     this.content.append(this.source);
-    for (const tile of [...tiles].sort((a, b) => a.index - b.index)) {
+    for (const tile of this.tiles) {
       const img = document.createElement("img"),
         url = URL.createObjectURL(tile.blob);
       this.urls.push(url);
@@ -226,9 +297,125 @@ export class ImageEditor {
     this.overlay.classList.add("annotation-overlay");
     this.content.append(this.overlay);
     this.bind();
+    this.bindImageControls();
     this.render();
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(stage);
+  }
+  bindImageControls() {
+    document.querySelector("#image-resize").addEventListener("click", () => {
+      const width = Number(document.querySelector("#image-width").value),
+        height = Number(document.querySelector("#image-height").value);
+      if (
+        !Number.isInteger(width) ||
+        !Number.isInteger(height) ||
+        width < 1 ||
+        height < 1 ||
+        width > 200000 ||
+        height > 200000 ||
+        width * height > 100000000
+      ) {
+        this.notify(
+          "Choose whole pixel sizes up to 200,000 per side and 100 million pixels total.",
+        );
+        return;
+      }
+      this.cancelGesture();
+      this.remember();
+      Object.assign(this.doc.transform, { width, height });
+      this.changed();
+    });
+    for (const [field, other] of [
+      ["width", "height"],
+      ["height", "width"],
+    ])
+      document
+        .querySelector(`#image-${field}`)
+        .addEventListener("input", () => {
+          if (!document.querySelector("#image-lock-ratio").checked) return;
+          const size = imageOutputSize(this.doc),
+            value = Number(document.querySelector(`#image-${field}`).value);
+          if (Number.isFinite(value) && value > 0)
+            document.querySelector(`#image-${other}`).value = Math.max(
+              1,
+              Math.round((value * size[other]) / size[field]),
+            );
+        });
+    for (const turn of [-90, 90])
+      document
+        .querySelector(turn < 0 ? "#image-rotate-left" : "#image-rotate-right")
+        .addEventListener("click", () => {
+          this.cancelGesture();
+          this.remember();
+          const t = this.doc.transform;
+          t.rotation = (t.rotation + turn + 360) % 360;
+          [t.width, t.height] = [t.height, t.width];
+          [t.flipX, t.flipY] = [t.flipY, t.flipX];
+          this.changed();
+        });
+    for (const axis of ["X", "Y"])
+      document
+        .querySelector(`#image-flip-${axis.toLowerCase()}`)
+        .addEventListener("click", () => {
+          this.cancelGesture();
+          this.remember();
+          this.doc.transform[`flip${axis}`] =
+            !this.doc.transform[`flip${axis}`];
+          this.changed();
+        });
+    for (const name of Object.keys(NEUTRAL_EFFECTS))
+      document
+        .querySelector(`#effect-${name}`)
+        .addEventListener("change", () => {
+          const input = document.querySelector(`#effect-${name}`),
+            max = name === "grayscale" || name === "sepia" ? 100 : 200;
+          this.cancelGesture();
+          this.remember();
+          this.doc.effects[name] = Math.max(
+            0,
+            Math.min(max, Number(input.value) || 0),
+          );
+          this.changed();
+        });
+    document.querySelector("#effects-reset").addEventListener("click", () => {
+      this.cancelGesture();
+      this.remember();
+      this.doc.effects = { ...NEUTRAL_EFFECTS };
+      this.changed();
+    });
+    document
+      .querySelector("#image-size-reset")
+      .addEventListener("click", () => {
+        this.cancelGesture();
+        this.remember();
+        const c = this.doc.crop,
+          rotated = this.doc.transform.rotation % 180 !== 0;
+        Object.assign(this.doc.transform, {
+          width: rotated ? c.height : c.width,
+          height: rotated ? c.width : c.height,
+        });
+        this.changed();
+      });
+    document
+      .querySelector("#edit-blur-radius")
+      .addEventListener("change", () => this.updateStyle());
+  }
+  syncImageControls() {
+    const size = imageOutputSize(this.doc);
+    document.querySelector("#image-width").value = size.width;
+    document.querySelector("#image-height").value = size.height;
+    for (const [key, value] of Object.entries(imageEffects(this.doc))) {
+      document.querySelector(`#effect-${key}`).value = value;
+      document.querySelector(`#effect-${key}-value`).textContent = `${value}%`;
+    }
+    document.querySelector("#image-rotation-value").textContent =
+      `${this.doc.transform.rotation}°`;
+    document
+      .querySelector("#image-flip-x")
+      .setAttribute("aria-pressed", String(this.doc.transform.flipX));
+    document
+      .querySelector("#image-flip-y")
+      .setAttribute("aria-pressed", String(this.doc.transform.flipY));
   }
   bind() {
     document
@@ -302,6 +489,7 @@ export class ImageEditor {
           p: "pen",
           t: "text",
           b: "redact",
+          u: "blur",
         };
         if (tools[e.key.toLowerCase()])
           this.setTool(tools[e.key.toLowerCase()]);
@@ -311,7 +499,7 @@ export class ImageEditor {
   cancelGesture() {
     const drag = this.drag;
     this.drag = null;
-    if (drag?.before) Object.assign(this.doc, drag.before);
+    if (drag?.before) restoreSnapshot(this.doc, drag.before);
     this.releasePointer();
     if (drag) this.render();
   }
@@ -346,6 +534,13 @@ export class ImageEditor {
         ),
       ),
       text: document.querySelector("#edit-text").value.trim() || "Text",
+      radius: Math.max(
+        1,
+        Math.min(
+          40,
+          Number(document.querySelector("#edit-blur-radius").value) || 12,
+        ),
+      ),
     };
   }
   updateStyle() {
@@ -367,17 +562,16 @@ export class ImageEditor {
     s.height = s.text.split("\n").length * s.fontSize * 1.25;
   }
   point(e) {
-    const rect = this.overlay.getBoundingClientRect(),
+    const rect = this.preview.getBoundingClientRect(),
       c = this.doc.crop;
+    const point = this.viewMatrix
+      .inverse()
+      .transformPoint(
+        new DOMPoint(e.clientX - rect.left, e.clientY - rect.top),
+      );
     return {
-      x: Math.max(
-        c.x,
-        Math.min(c.x + c.width, c.x + (e.clientX - rect.left) / this.scale),
-      ),
-      y: Math.max(
-        c.y,
-        Math.min(c.y + c.height, c.y + (e.clientY - rect.top) / this.scale),
-      ),
+      x: Math.max(c.x, Math.min(c.x + c.width, c.x + point.x)),
+      y: Math.max(c.y, Math.min(c.y + c.height, c.y + point.y)),
     };
   }
   down(e) {
@@ -392,15 +586,20 @@ export class ImageEditor {
     if (this.tool === "select") {
       const tolerance = 8 / this.scale;
       this.selected =
-        [...this.doc.objects].reverse().find((s) => {
-          const b = bounds(s);
-          return (
-            p.x >= b.x - tolerance &&
-            p.x <= b.x + b.width + tolerance &&
-            p.y >= b.y - tolerance &&
-            p.y <= b.y + b.height + tolerance
-          );
-        })?.id || null;
+        [
+          ...this.doc.objects.filter((s) => s.type === "blur"),
+          ...this.doc.objects.filter((s) => s.type !== "blur"),
+        ]
+          .reverse()
+          .find((s) => {
+            const b = bounds(s);
+            return (
+              p.x >= b.x - tolerance &&
+              p.x <= b.x + b.width + tolerance &&
+              p.y >= b.y - tolerance &&
+              p.y <= b.y + b.height + tolerance
+            );
+          })?.id || null;
       const original = this.doc.objects.find((s) => s.id === this.selected);
       this.drag = original
         ? { start: p, before, original: clone(original), moving: true }
@@ -504,7 +703,7 @@ export class ImageEditor {
     this.cancelGesture();
     if (!this.doc.past.length) return;
     this.doc.future.push(snapshot(this.doc));
-    Object.assign(this.doc, this.doc.past.pop());
+    restoreSnapshot(this.doc, this.doc.past.pop());
     this.selected = null;
     this.pendingCrop = null;
     this.changed();
@@ -513,7 +712,7 @@ export class ImageEditor {
     this.cancelGesture();
     if (!this.doc.future.length) return;
     this.doc.past.push(snapshot(this.doc));
-    Object.assign(this.doc, this.doc.future.pop());
+    restoreSnapshot(this.doc, this.doc.future.pop());
     this.selected = null;
     this.pendingCrop = null;
     this.changed();
@@ -537,6 +736,13 @@ export class ImageEditor {
       width: Math.max(1, Math.floor(b.x + b.width) - Math.ceil(b.x)),
       height: Math.max(1, Math.floor(b.y + b.height) - Math.ceil(b.y)),
     };
+    const rotated = this.doc.transform.rotation % 180 !== 0;
+    this.doc.transform.width = rotated
+      ? this.doc.crop.height
+      : this.doc.crop.width;
+    this.doc.transform.height = rotated
+      ? this.doc.crop.width
+      : this.doc.crop.height;
     this.pendingCrop = null;
     this.selected = null;
     this.changed();
@@ -548,6 +754,8 @@ export class ImageEditor {
     document.querySelector("#edit-stroke").value = s.stroke;
     if (s.fontSize) document.querySelector("#edit-font").value = s.fontSize;
     if (s.type === "text") document.querySelector("#edit-text").value = s.text;
+    if (s.type === "blur")
+      document.querySelector("#edit-blur-radius").value = s.radius;
   }
   changed() {
     this.render();
@@ -576,22 +784,35 @@ export class ImageEditor {
     this.saveChain.catch(() => {});
   }
   layout() {
-    const c = this.doc.crop;
-    this.scale =
+    const c = this.doc.crop,
+      size = imageOutputSize(this.doc);
+    const zoom =
       this.zoom === "fit"
-        ? Math.min(1, Math.max(120, this.stage.clientWidth - 56) / c.width)
+        ? Math.min(1, Math.max(120, this.stage.clientWidth - 56) / size.width)
         : Number(this.zoom);
+    this.viewMatrix = new DOMMatrix()
+      .scale(zoom)
+      .multiply(outputMatrix(this.doc));
+    this.scale = Math.max(
+      0.000001,
+      Math.min(
+        Math.hypot(this.viewMatrix.a, this.viewMatrix.b),
+        Math.hypot(this.viewMatrix.c, this.viewMatrix.d),
+      ),
+    );
     Object.assign(this.preview.style, {
-      width: `${c.width * this.scale}px`,
-      height: `${c.height * this.scale}px`,
+      width: `${size.width * zoom}px`,
+      height: `${size.height * zoom}px`,
       transform: "none",
     });
     Object.assign(this.content.style, {
       width: `${c.width}px`,
       height: `${c.height}px`,
-      transform: `scale(${this.scale})`,
+      transform: this.viewMatrix.toString(),
     });
     Object.assign(this.source.style, { left: `${-c.x}px`, top: `${-c.y}px` });
+    for (const image of this.source.children)
+      image.style.filter = effectFilter(this.doc);
     this.overlay.setAttribute(
       "viewBox",
       `${c.x} ${c.y} ${c.width} ${c.height}`,
@@ -599,10 +820,11 @@ export class ImageEditor {
     this.overlay.setAttribute("width", c.width);
     this.overlay.setAttribute("height", c.height);
     document.querySelector("#edit-dimensions").textContent =
-      `${c.width} × ${c.height} px · ${Math.round(this.scale * 100)}%`;
+      `${size.width} × ${size.height} px · ${Math.round(zoom * 100)}%`;
   }
   render() {
     this.layout();
+    this.syncImageControls();
     this.renderOverlay();
     document
       .querySelectorAll("[data-tool]")
@@ -617,25 +839,92 @@ export class ImageEditor {
     document.querySelector("#text-controls").hidden =
       this.tool !== "text" &&
       this.doc.objects.find((s) => s.id === this.selected)?.type !== "text";
+    document.querySelector("#blur-controls").hidden =
+      this.tool !== "blur" &&
+      this.doc.objects.find((s) => s.id === this.selected)?.type !== "blur";
     document.querySelector("#edit-help").textContent =
-      this.tool === "redact"
-        ? "Drag to cover private details. Image/PDF exports remove covered pixels; editable projects retain the original."
-        : this.tool === "crop"
-          ? "Drag a crop area, then choose Apply crop."
-          : this.tool === "text"
-            ? "Enter your text, then click on the image to place it."
-            : this.tool === "select"
-              ? "Select an annotation to move it, change its style, or delete it."
-              : "Drag on the image to draw. Ctrl+Z to undo.";
+      this.tool === "blur"
+        ? "Drag to soften image details. Blur is a visual effect, not secure redaction. Use Redact for private information."
+        : this.tool === "redact"
+          ? "Drag to cover private details. Image/PDF exports remove covered pixels; editable projects retain the original."
+          : this.tool === "crop"
+            ? "Drag a crop area, then choose Apply crop."
+            : this.tool === "text"
+              ? "Enter your text, then click on the image to place it."
+              : this.tool === "select"
+                ? "Select an annotation to move it, change its style, or delete it."
+                : "Drag on the image to draw. Ctrl+Z to undo.";
     document.querySelector("#edited-pdf-note").hidden = !this.isEdited();
     document.querySelector("#redaction-project-note").hidden =
       !this.doc.objects.some((s) => s.type === "redact");
   }
+  renderBlur(shape) {
+    const b = bounds(shape),
+      matrix = outputMatrix(this.doc),
+      sx = Math.hypot(matrix.a, matrix.b),
+      sy = Math.hypot(matrix.c, matrix.d),
+      radius = shape.radius || 12;
+    if (!b.width || !b.height) return;
+    const key = `image-blur-${this.doc.objects.indexOf(shape) + 1}`,
+      defs = svg("defs"),
+      clip = svg("clipPath", { id: `${key}-clip` }),
+      cropClip = svg("clipPath", { id: `${key}-crop` }),
+      filter = svg("filter", {
+        id: key,
+        filterUnits: "userSpaceOnUse",
+        x: b.x - (3 * radius) / sx,
+        y: b.y - (3 * radius) / sy,
+        width: b.width + (6 * radius) / sx,
+        height: b.height + (6 * radius) / sy,
+        "color-interpolation-filters": "sRGB",
+      });
+    clip.append(svg("rect", b));
+    cropClip.append(svg("rect", this.doc.crop));
+    filter.append(
+      svg("feGaussianBlur", { stdDeviation: `${radius / sx} ${radius / sy}` }),
+    );
+    defs.append(clip, cropClip, filter);
+    const group = svg("g", {
+        "data-object-id": shape.id,
+        "clip-path": `url(#${key}-clip)`,
+      }),
+      blur = svg("g", { filter: `url(#${key})` }),
+      pixels = svg("g", { "clip-path": `url(#${key}-crop)` });
+    for (let i = 0; i < this.tiles.length; i++) {
+      const tile = this.tiles[i];
+      if (
+        tile.destXPx > b.x + b.width + (3 * radius) / sx ||
+        tile.destXPx + tile.widthPx < b.x - (3 * radius) / sx ||
+        tile.destYPx > b.y + b.height + (3 * radius) / sy ||
+        tile.destYPx + tile.heightPx < b.y - (3 * radius) / sy
+      )
+        continue;
+      const image = svg("image", {
+        href: this.source.children[i].src,
+        x: tile.destXPx,
+        y: tile.destYPx,
+        width: tile.widthPx,
+        height: tile.heightPx,
+      });
+      image.style.filter = effectFilter(this.doc);
+      pixels.append(image);
+    }
+    blur.append(pixels);
+    group.append(blur);
+    this.overlay.append(defs, group);
+  }
   renderOverlay() {
     this.overlay.replaceChildren();
-    for (const shape of this.doc.objects) this.overlay.append(drawSvg(shape));
+    const shapes = [
+      ...this.doc.objects,
+      ...(this.drag?.shape?.type === "blur" ? [this.drag.shape] : []),
+    ];
+    for (const shape of shapes.filter((s) => s.type === "blur"))
+      this.renderBlur(shape);
+    for (const shape of this.doc.objects.filter((s) => s.type !== "blur"))
+      this.overlay.append(drawSvg(shape));
     const d = this.drag;
-    if (d?.shape && d.shape.type !== "crop")
+    if (d?.shape && d.shape.type !== "crop" && d.shape.type !== "blur")
       this.overlay.append(drawSvg(d.shape));
     const region =
       this.pendingCrop || (d?.shape?.type === "crop" ? bounds(d.shape) : null);
@@ -672,6 +961,14 @@ export class ImageEditor {
       s = this.record.report.dimensionsPx;
     return (
       !!this.doc.objects.length ||
+      Object.entries(imageEffects(this.doc)).some(
+        ([key, value]) => value !== NEUTRAL_EFFECTS[key],
+      ) ||
+      this.doc.transform.rotation !== 0 ||
+      this.doc.transform.flipX ||
+      this.doc.transform.flipY ||
+      this.doc.transform.width !== c.width ||
+      this.doc.transform.height !== c.height ||
       c.x !== 0 ||
       c.y !== 0 ||
       c.width !== s.width ||
@@ -697,43 +994,90 @@ export async function renderEditedCapture(
   onProgress = () => {},
 ) {
   const c = document.crop,
-    size = record.report.dimensionsPx;
+    size = record.report.dimensionsPx,
+    out = imageOutputSize(document),
+    t = imageTransform(document),
+    effects = imageEffects(document);
+  const neutral = Object.entries(effects).every(
+    ([key, value]) => value === NEUTRAL_EFFECTS[key],
+  );
   if (
     !document.objects.length &&
     c.x === 0 &&
     c.y === 0 &&
     c.width === size.width &&
-    c.height === size.height
+    c.height === size.height &&
+    t.rotation === 0 &&
+    !t.flipX &&
+    !t.flipY &&
+    out.width === size.width &&
+    out.height === size.height &&
+    neutral
   )
     return { record, tiles };
-  const output = [];
-  const columns = Math.ceil(c.width / 2048),
-    rows = Math.ceil(c.height / 1024),
+  if (
+    !Number.isInteger(out.width) ||
+    !Number.isInteger(out.height) ||
+    out.width < 1 ||
+    out.height < 1 ||
+    out.width > 200000 ||
+    out.height > 200000 ||
+    out.width * out.height > 100000000
+  )
+    throw new Error(
+      "The edited image exceeds the 100 million pixel export limit. Choose a smaller output size.",
+    );
+  const output = [],
+    columns = Math.ceil(out.width / 2048),
+    rows = Math.ceil(out.height / 1024),
     total = columns * rows;
-  // At most one destination tile and its intersecting source bitmaps live at a
-  // time, even when the capture exceeds the browser's single-canvas limit.
-  for (let top = 0; top < c.height; top += 1024)
-    for (let left = 0; left < c.width; left += 2048) {
-      const width = Math.min(2048, c.width - left),
-        height = Math.min(1024, c.height - top),
-        x = c.x + left,
-        y = c.y + top;
-      const canvas = new OffscreenCanvas(width, height),
-        ctx = canvas.getContext("2d", { alpha: true });
-      for (const tile of [...tiles].sort((a, b) => a.index - b.index)) {
+  const matrix = outputMatrix(document).translate(-c.x, -c.y),
+    inverse = matrix.inverse(),
+    sorted = [...tiles].sort((a, b) => a.index - b.index);
+  const blurs = document.objects.filter((s) => s.type === "blur"),
+    pad = blurs.length
+      ? Math.ceil(3 * Math.max(...blurs.map((s) => s.radius || 12)))
+      : 0;
+  for (let top = 0; top < out.height; top += 1024)
+    for (let left = 0; left < out.width; left += 2048) {
+      const width = Math.min(2048, out.width - left),
+        height = Math.min(1024, out.height - top),
+        pw = width + 2 * pad,
+        ph = height + 2 * pad;
+      const source = new OffscreenCanvas(pw, ph),
+        ctx = source.getContext("2d", { alpha: true });
+      const corners = [
+        [left - pad, top - pad],
+        [left + width + pad, top - pad],
+        [left - pad, top + height + pad],
+        [left + width + pad, top + height + pad],
+      ].map(([x, y]) => inverse.transformPoint(new DOMPoint(x, y)));
+      const x1 = Math.min(...corners.map((p) => p.x)),
+        x2 = Math.max(...corners.map((p) => p.x)),
+        y1 = Math.min(...corners.map((p) => p.y)),
+        y2 = Math.max(...corners.map((p) => p.y));
+      ctx.setTransform(
+        new DOMMatrix().translate(pad - left, pad - top).multiply(matrix),
+      );
+      ctx.beginPath();
+      ctx.rect(c.x, c.y, c.width, c.height);
+      ctx.clip();
+      ctx.filter = effectFilter(document);
+      ctx.imageSmoothingQuality = "high";
+      for (const tile of sorted) {
         if (
-          tile.destXPx >= x + width ||
-          tile.destXPx + tile.widthPx <= x ||
-          tile.destYPx >= y + height ||
-          tile.destYPx + tile.heightPx <= y
+          tile.destXPx > x2 ||
+          tile.destXPx + tile.widthPx < x1 ||
+          tile.destYPx > y2 ||
+          tile.destYPx + tile.heightPx < y1
         )
           continue;
         const bitmap = await createImageBitmap(tile.blob);
         try {
           ctx.drawImage(
             bitmap,
-            tile.destXPx - x,
-            tile.destYPx - y,
+            tile.destXPx,
+            tile.destYPx,
             tile.widthPx,
             tile.heightPx,
           );
@@ -741,10 +1085,28 @@ export async function renderEditedCapture(
           bitmap.close();
         }
       }
-      ctx.save();
-      ctx.translate(-x, -y);
-      for (const shape of document.objects) drawCanvas(ctx, shape);
-      ctx.restore();
+      const canvas = new OffscreenCanvas(width, height),
+        outputContext = canvas.getContext("2d", { alpha: true });
+      outputContext.drawImage(source, -pad, -pad);
+      for (const shape of blurs) {
+        const b = bounds(shape);
+        outputContext.save();
+        outputContext.setTransform(
+          new DOMMatrix().translate(-left, -top).multiply(matrix),
+        );
+        outputContext.beginPath();
+        outputContext.rect(b.x, b.y, b.width, b.height);
+        outputContext.clip();
+        outputContext.resetTransform();
+        outputContext.filter = `blur(${shape.radius || 12}px)`;
+        outputContext.drawImage(source, -pad, -pad);
+        outputContext.restore();
+      }
+      outputContext.setTransform(
+        new DOMMatrix().translate(-left, -top).multiply(matrix),
+      );
+      for (const shape of document.objects)
+        if (shape.type !== "blur") drawCanvas(outputContext, shape);
       output.push({
         captureId: record.id,
         index: output.length,
@@ -757,15 +1119,13 @@ export async function renderEditedCapture(
       onProgress(output.length / total);
     }
   const edited = clone(record);
-  edited.report.dimensionsPx = { width: c.width, height: c.height };
+  edited.report.dimensionsPx = out;
   const ratio = size.width / (record.report.dimensionsCss?.width || size.width);
   edited.report.dimensionsCss = {
-    width: c.width / ratio,
-    height: c.height / ratio,
+    width: out.width / ratio,
+    height: out.height / ratio,
   };
   edited.report.tileCount = output.length;
-  // Cropping/redaction would otherwise leave selectable text and live links at
-  // stale coordinates, potentially exposing hidden content in the PDF.
   delete edited.semantics;
   return { record: edited, tiles: output };
 }
