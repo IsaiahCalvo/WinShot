@@ -192,3 +192,19 @@ full-suite native stall. The original 9-second watchdog, screenshot quota, captu
 deadline and honest partial reporting are unchanged. Separate regressions verify
 Stop, deadline expiry, wrong-session rejection, missing MAIN acknowledgements and
 cleanup after actual service-worker termination.
+
+Nested-frame preparation shares every acknowledged parent with the outer capture
+cleanup. That owner stops heartbeats before restoring the source and parent frames,
+so a slow restoration acknowledgement cannot replace the original frame-location
+error with false session expiry. The regression forwards a real native restoration,
+holds its successful response for three seconds, and checks the original geometry
+error, exact restoration and a subsequent usable capture.
+
+Parent frames prepared during a nested capture use the same cleanup owner as the
+source page. If a later frame cannot be located, the outer capture first stops
+renewals and then restores the source and acknowledged parents. It preserves the
+original frame-location error. Restoring a parent inside the location helper while
+renewal was still live could otherwise report an expired parent and overwrite that
+error. The regression delays a successful real parent-restoration acknowledgement,
+checks source/parent state, and confirms that a subsequent native visible capture
+still succeeds.
