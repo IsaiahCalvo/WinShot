@@ -29,7 +29,7 @@ export function publicDocumentError({ url = "", title = "", text = "", response 
   if (response?.status >= 400 && withoutFragment(response.url) === withoutFragment(url)) return `HTTP ${response.status} loading ${url}`;
   if (/^(?:chrome-error:|edge-error:|about:neterror(?:[?#]|$))/i.test(url)) return `Browser error document: ${url}`;
   const heading = title.trim().replace(/\s+/g, " ");
-  if (/^(?:just a moment[.!…]*|access denied[.!]*|attention required(?:!|\s*\|\s*cloudflare)?|privacy error|error response|(?:[45]\d\d\s+)?(?:bad gateway|service unavailable|forbidden|proxy error|gateway time(?:d?\s*out|out))|this site can(?:not|'t|’t) be reached)[.!…]*$/i.test(heading)) {
+  if (/^(?:just a moment[.!…]*|access denied[.!]*|attention required!?(?:\s*\|\s*cloudflare)?|privacy error|error response|(?:[45]\d\d\s+)?(?:bad gateway|service unavailable|forbidden|proxy error|gateway time(?:d?\s*out|out))|this site can(?:not|'t|’t) be reached)[.!…]*$/i.test(heading)) {
     return `Blocked or error document: ${heading}`;
   }
   const body = text.trim().replace(/\s+/g, " ");
