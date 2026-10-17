@@ -18,11 +18,11 @@
       const nonce = crypto.randomUUID();
       const done = result => { clearTimeout(timer); removeEventListener("message", receive); resolve(result); };
       const receive = event => {
-        if (event.source === window && event.data?.source === "winshot-effects-response-v3" && event.data.nonce === nonce) done(event.data.result);
+        if (event.source === window && event.data?.source === "winshot-effects-response-v4" && event.data.nonce === nonce) done(event.data.result);
       };
       const timer = setTimeout(() => done({ error: "The page animation bridge did not respond." }), 700);
       addEventListener("message", receive);
-      postMessage({ source: "winshot-effects-request-v3", action, id, nonce }, "*");
+      postMessage({ source: "winshot-effects-request-v4", action, id, nonce }, "*");
     });
   }
 
@@ -1502,9 +1502,13 @@
         case "WINSHOT_PREPARE": return await prepare(request);
         case "WINSHOT_SCROLL": return await scrollTarget(request);
         case "WINSHOT_METRICS": return currentMetrics();
-        case "WINSHOT_HEARTBEAT":
-          if (session?.id === request.sessionId) session.lastHeartbeat = Date.now();
-          return { alive: Boolean(session) };
+        case "WINSHOT_HEARTBEAT": {
+          const current = session;
+          if (!current || current.id !== request.sessionId) return { alive: false, effectsAlive: false };
+          current.lastHeartbeat = Date.now();
+          const effects = await pageEffects("heartbeat", current.id);
+          return { alive: session === current, effectsAlive: typeof effects.handled === "boolean" ? effects.handled : null };
+        }
         case "WINSHOT_RESTORE": return restore(request.reason || "complete");
         case "WINSHOT_LOCATE_FRAME": return await locateFrameHost(request);
         case "WINSHOT_ANNOUNCE_FRAME":
@@ -1514,7 +1518,7 @@
         case "WINSHOT_RESTORE_FRAME_HOST": return restoreFrameHost();
         case "WINSHOT_HEARTBEAT_FRAME_HOST":
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
-          return { alive: Boolean(frameHostSession) };
+          return { alive: Boolean(frameHostSession && frameHostSession.id === request.sessionId) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
         case "WINSHOT_FRAME_INVENTORY": return {
           count: openRoots().reduce((count, root) => count + [...root.querySelectorAll("iframe,frame")].filter(node => node.clientWidth > 100 && node.clientHeight > 50).length, 0)

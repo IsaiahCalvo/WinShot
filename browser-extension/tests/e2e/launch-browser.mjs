@@ -24,11 +24,12 @@ export async function launchCaptureBrowser(userDataDir, viewport = { width: 1200
       ...args
     ]
   });
+  let page, client, windowId, bounds;
   try {
-    const [page] = await browser.pages();
-    const client = await page.createCDPSession();
-    const { windowId } = await client.send("Browser.getWindowForTarget");
-    const bounds = await page.evaluate(({ width, height }) => ({
+    [page] = await browser.pages();
+    client = await page.createCDPSession();
+    ({ windowId } = await client.send("Browser.getWindowForTarget"));
+    bounds = await page.evaluate(({ width, height }) => ({
       width: outerWidth + width - innerWidth,
       height: outerHeight + height - innerHeight
     }), viewport);
@@ -37,7 +38,22 @@ export async function launchCaptureBrowser(userDataDir, viewport = { width: 1200
     await client.detach();
     return browser;
   } catch (error) {
+    let diagnosticTimer;
+    const details = await Promise.race([
+      Promise.allSettled([
+        page ? page.evaluate(() => ({
+          inner: { width: innerWidth, height: innerHeight },
+          outer: { width: outerWidth, height: outerHeight },
+          screen: { width: screen.width, height: screen.height, availWidth: screen.availWidth, availHeight: screen.availHeight },
+          devicePixelRatio
+        })) : Promise.reject(new Error("No initial page")),
+        client && windowId !== undefined ? client.send("Browser.getWindowBounds", { windowId }) : Promise.reject(new Error("No native browser window"))
+      ]).then(results => results.map(result => result.status === "fulfilled" ? result.value : { error: result.reason?.message || String(result.reason) })),
+      new Promise(resolve => { diagnosticTimer = setTimeout(() => resolve({ error: "Window diagnostics timed out after 2 seconds" }), 2000); })
+    ]);
+    clearTimeout(diagnosticTimer);
+    const diagnostic = { headless, requestedViewport: viewport, requestedBounds: bounds, actual: details };
     await browser.close();
-    throw error;
+    throw new Error(`${error.message}\nChrome window sizing diagnostics: ${JSON.stringify(diagnostic)}`, { cause: error });
   }
 }

@@ -828,12 +828,26 @@ test("service-worker termination triggers page watchdog cleanup and restart reco
     const page = await run.browser.newPage();
     monitorPage(page, run.errors);
     await page.goto("http://127.0.0.1:4173/long", { waitUntil: "networkidle0" });
-    await page.evaluate(() => scrollTo(0, 720));
+    const originalStyles = await page.evaluate(() => {
+      // Keep real MAIN-world function references: isolated DOM cleanup alone
+      // cannot prove the separate page-effects watchdog restored its proxies.
+      window.workerLossOriginalMediaMethods = {
+        play: HTMLMediaElement.prototype.play,
+        pause: HTMLMediaElement.prototype.pause
+      };
+      scrollTo(0, 720);
+      return { html: document.documentElement.style.cssText, body: document.body.style.cssText };
+    });
     const popup = await openPopup(run, page);
     await popup.click("[data-mode='full-page']");
     await page.waitForSelector("[data-winshot-capture]", { timeout: 10_000 });
+    await page.waitForFunction(() => HTMLMediaElement.prototype.play !== window.workerLossOriginalMediaMethods.play &&
+      HTMLMediaElement.prototype.pause !== window.workerLossOriginalMediaMethods.pause, { timeout: 3000 });
     await run.worker.close();
-    await page.waitForFunction(() => !document.querySelector("[data-winshot-capture]") && scrollY === 720, { timeout: 15_000 });
+    await page.waitForFunction(() => !document.querySelector("[data-winshot-capture]") && scrollY === 720 &&
+      HTMLMediaElement.prototype.play === window.workerLossOriginalMediaMethods.play &&
+      HTMLMediaElement.prototype.pause === window.workerLossOriginalMediaMethods.pause, { timeout: 15_000 });
+    expect(await page.evaluate(() => ({ html: document.documentElement.style.cssText, body: document.body.style.cssText }))).toEqual(originalStyles);
     await popup.close().catch(() => {});
 
     const newWorkerTarget = run.browser.waitForTarget(

@@ -6,9 +6,9 @@ import { test, expect } from "@playwright/test";
 import { launchCaptureBrowser } from "./launch-browser.mjs";
 
 const root = "http://127.0.0.1:4173";
-async function run(check, { incognito = false, headless = true } = {}) {
+async function run(check, { incognito = false, headless = true, viewport } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-actions-api-"));
-  const browser = await launchCaptureBrowser(path.join(temp, "profile"), undefined, { headless });
+  const browser = await launchCaptureBrowser(path.join(temp, "profile"), viewport, { headless });
   try {
     const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || fileURLToPath(new URL("../../dist/winshot-capture", import.meta.url)), { enabledInIncognito: incognito });
     const extension = (await browser.extensions()).get(id);
@@ -252,7 +252,7 @@ test("all-window batches capture each window's own pixels and restore the origin
     expect(focusEvidence.calls.at(-1)?.windowId).toBe(origin.windowId);
     expect(focusEvidence.calls.at(-1)?.error).toBeUndefined();
     await expect.poll(() => worker.evaluate(async () => (await chrome.windows.getLastFocused()).id)).toBe(origin.windowId);
-  }, { headless: !headedFocus });
+  }, { headless: !headedFocus, viewport: headedFocus ? { width: 800, height: 500 } : undefined });
 });
 
 test("manual popup captures and delayed Stop remain bound to the originating window", async () => {

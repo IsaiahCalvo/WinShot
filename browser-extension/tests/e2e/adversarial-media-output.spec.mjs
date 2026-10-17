@@ -85,19 +85,19 @@ test('a later page pause overrides an earlier video play request during scrollin
   });
 });
 
-test('an installed version 2 media bridge is replaced before an upgraded capture',async()=>{
+test('an installed version 3 media bridge is replaced before an upgraded capture',async()=>{
   await runCapture(async page=>page.evaluate(()=>{
-    window.disposedMediaBridgeV2=false;window.obsoleteMediaRequests=0;
+    window.disposedMediaBridgeV3=false;window.obsoleteMediaRequests=0;
     const receive=event=>{
-      if(event.source===window&&event.data?.source==='winshot-effects-request-v2'){
+      if(event.source===window&&event.data?.source==='winshot-effects-request-v3'){
         window.obsoleteMediaRequests++;
-        postMessage({source:'winshot-effects-response-v2',nonce:event.data.nonce,result:{error:'Obsolete media bridge'}},'*');
+        postMessage({source:'winshot-effects-response-v3',nonce:event.data.nonce,result:{error:'Obsolete media bridge'}},'*');
       }
     };
     addEventListener('message',receive);
-    window[Symbol.for('winshot.page-effects')]={version:2,dispose(){window.disposedMediaBridgeV2=true;removeEventListener('message',receive);}};
+    window[Symbol.for('winshot.page-effects')]={version:3,dispose(){window.disposedMediaBridgeV3=true;removeEventListener('message',receive);}};
   }),async({page,record})=>{
-    expect(await page.evaluate(()=>({disposed:window.disposedMediaBridgeV2,obsoleteRequests:window.obsoleteMediaRequests,version:window[Symbol.for('winshot.page-effects')].version}))).toEqual({disposed:true,obsoleteRequests:0,version:3});
+    expect(await page.evaluate(()=>({disposed:window.disposedMediaBridgeV3,obsoleteRequests:window.obsoleteMediaRequests,version:window[Symbol.for('winshot.page-effects')].version}))).toEqual({disposed:true,obsoleteRequests:0,version:4});
     expect(record.report.restoration).toBe('verified by read-back');
   });
 });

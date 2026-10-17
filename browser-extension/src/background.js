@@ -97,7 +97,7 @@ function screenshotMetrics(metrics, frameHost) {
   };
 }
 
-async function locateFrameChain(session) {
+async function locateFrameChain(session, preparedFrameIds = []) {
   const frames = await chrome.webNavigation.getAllFrames({ tabId: session.tabId });
   const byId = new Map(frames.map((frame) => [frame.frameId, frame]));
   const edges = [];
@@ -112,7 +112,6 @@ async function locateFrameChain(session) {
   let left = 0;
   let top = 0;
   let topViewport = null;
-  const preparedFrameIds = [];
   try {
     for (const edge of edges) {
       await injectCaptureScript(session.tabId, edge.parentFrameId);
@@ -146,6 +145,47 @@ async function restoreFrameChain(session, preparedFrameIds) {
 async function heartbeatFrameChain(session, preparedFrameIds) {
   await Promise.allSettled(preparedFrameIds.map((frameId) =>
     sendToTab(session.tabId, { type: "WINSHOT_HEARTBEAT_FRAME_HOST", sessionId: session.id }, frameId)));
+}
+
+function startCaptureHeartbeat(session, controller, startTime, frameHostIds) {
+  const deadline = startTime + session.limits.maxDurationMs;
+  let stopped = false;
+  let pending = false;
+  let timer;
+  const stop = () => {
+    stopped = true;
+    clearInterval(timer);
+    controller.signal.removeEventListener("abort", stop);
+  };
+  const live = () => !stopped && !controller.signal.aborted &&
+    activeCaptures.get(session.tabId)?.session === session && performance.now() < deadline;
+  const tick = async () => {
+    if (!live()) { stop(); return; }
+    if (pending) return;
+    pending = true;
+    try {
+      const replies = await Promise.allSettled([
+        sendToTab(session.tabId, { type: "WINSHOT_HEARTBEAT", sessionId: session.id }, session.frameId),
+        ...frameHostIds().map(frameId => sendToTab(session.tabId,
+          { type: "WINSHOT_HEARTBEAT_FRAME_HOST", sessionId: session.id }, frameId))
+      ]);
+      // Layout retries reuse the session ID. A stopped attempt must not fail the
+      // next attempt when an old heartbeat finally returns.
+      if (!live()) { stop(); return; }
+      if (replies.some(reply => reply.status === "fulfilled" &&
+          (reply.value?.alive === false || reply.value?.effectsAlive === false))) {
+        const active = activeCaptures.get(session.tabId);
+        active.failureReason ||= "The page capture session expired and was restored before capture finished.";
+        controller.abort();
+      }
+      // A delayed transport/bridge acknowledgement is not proof of expiry.
+      // Existing watchdog and per-scroll checks still detect disconnected pages.
+    } finally { pending = false; }
+  };
+  timer = setInterval(tick, 1500);
+  controller.signal.addEventListener("abort", stop, { once: true });
+  if (!live()) stop();
+  return stop;
 }
 
 async function assertStillActive(session) {
@@ -398,6 +438,7 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0, tile
   let expectedScale = null;
   let frameHost = null;
   let frameHostPrepared = [];
+  let stopHeartbeat = () => {};
   let extent;
   let viewportSize;
   let allTilesStable = true;
@@ -413,10 +454,11 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0, tile
       target: session.target
     }, session.frameId);
     prepared = true;
+    stopHeartbeat = startCaptureHeartbeat(session, controller, startTime, () => frameHostPrepared);
     let captureMetrics = prep.metrics;
     const documentToken = prep.metrics.documentToken;
     if (session.frameId) {
-      frameHost = await locateFrameChain(session);
+      frameHost = await locateFrameChain(session, frameHostPrepared);
       frameHostPrepared = frameHost.preparedFrameIds;
       captureMetrics = await sendToTab(session.tabId, { type: "WINSHOT_METRICS", sessionId: session.id }, session.frameId);
     }
@@ -682,6 +724,7 @@ async function storeScrollingCapture(session, controller, retryAttempt = 0, tile
       : SessionState.PARTIAL;
     canRetryLayout = (minimum < 0.7 || layoutShrank) && allTilesStable && !safetyStopReason;
   } finally {
+    stopHeartbeat();
     if (prepared) {
       let failures = null;
       try {

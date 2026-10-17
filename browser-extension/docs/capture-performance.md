@@ -167,3 +167,28 @@ and makes the original context paint a new frame after restoration. Opaque
 comparisons are exact; translucent first-tile blending permits one color level of
 browser rounding. Media and GSAP regressions independently exercise playback
 intent, user-paused effects and bridge upgrades.
+
+## Healthy workers and delayed screenshot delivery
+
+A native screenshot Promise can remain pending while the page and extension worker
+are otherwise responsive. Previously, only the next scroll refreshed the page's
+9-second capture watchdog. A bounded regression forwarded an actual screenshot
+unchanged, delayed its successful delivery by 10.2 seconds, and reproduced capture
+expiry after nine stored tiles. Both the page and MAIN animation bridge restored
+while the worker was still capturing.
+
+A live scrolling capture now renews the page, MAIN effects and prepared parent
+frames every 1.5 seconds, with one renewal in flight. Renewal stops on cancellation,
+the original monotonic capture deadline, or before cleanup. It never starts or
+recreates a page session. An explicitly expired session fails capture; a delayed
+bridge acknowledgement alone does not prove expiry. The MAIN heartbeat only touches
+its lease timestamp and does not advance GSAP animations. Version 4 upgrades the
+previously injected bridge so this touch-only action is available.
+
+With the same real screenshot delay, the scaled two-axis fixture completed all 27
+tiles with full coverage, exact seam comparisons and restored scroll positions.
+This demonstrates the lifecycle correction; it does not isolate the original rare
+full-suite native stall. The original 9-second watchdog, screenshot quota, capture
+deadline and honest partial reporting are unchanged. Separate regressions verify
+Stop, deadline expiry, wrong-session rejection, missing MAIN acknowledgements and
+cleanup after actual service-worker termination.

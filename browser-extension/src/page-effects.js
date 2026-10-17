@@ -1,6 +1,6 @@
 (() => {
   const key = Symbol.for("winshot.page-effects");
-  const version = 3;
+  const version = 4;
   if (window[key]?.version === version) return;
   window[key]?.dispose?.();
   let capture = null;
@@ -134,15 +134,16 @@
   }
   const receive = event => {
     const message = event.data;
-    if (event.source !== window || message?.source !== "winshot-effects-request-v3" || typeof message.nonce !== "string") return;
+    if (event.source !== window || message?.source !== "winshot-effects-request-v4" || typeof message.nonce !== "string") return;
     let result;
     try {
       if (message.action === "begin") result = begin(message.id);
       else if (message.action === "restore") result = restore(message.id);
       else if (message.action === "update" && capture?.id === message.id) { update(); result = { handled: true }; }
+      else if (message.action === "heartbeat" && capture?.id === message.id) { capture.touched = performance.now(); result = { handled: true }; }
       else result = { handled: false };
     } catch (error) { result = { error: String(error.message) }; }
-    postMessage({ source: "winshot-effects-response-v3", nonce: message.nonce, result }, "*");
+    postMessage({ source: "winshot-effects-response-v4", nonce: message.nonce, result }, "*");
   };
   addEventListener("message", receive);
   window[key] = { version, dispose() {

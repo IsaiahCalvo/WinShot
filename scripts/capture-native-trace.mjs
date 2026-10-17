@@ -265,7 +265,7 @@ try {
       const actions=new Map();
       addEventListener("message",event=>{
         const data=event.data;
-        if(event.source!==window || !/^winshot-effects-(request|response)-v3$/.test(data?.source||""))return;
+        if(event.source!==window || !/^winshot-effects-(request|response)-v4$/.test(data?.source||""))return;
         if(data.action)actions.set(data.nonce,data.action);
         const action=data.action||actions.get(data.nonce)||"unknown";
         emit("WS ISOLATED "+(data.action?"request ":"response ")+action);
@@ -291,7 +291,7 @@ try {
       const actions=new Map();
       addEventListener("message",event=>{
         const data=event.data;
-        if(event.source!==window || !/^winshot-effects-(request|response)-v3$/.test(data?.source||""))return;
+        if(event.source!==window || !/^winshot-effects-(request|response)-v4$/.test(data?.source||""))return;
         if(data.action)actions.set(data.nonce,data.action);
         const action=data.action||actions.get(data.nonce)||"unknown";
         emit("WS MAIN "+(data.action?"request ":"response ")+action);
