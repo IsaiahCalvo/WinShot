@@ -76,7 +76,9 @@ test('capture deadline stops heartbeat renewal without extending the configured 
     await expect.poll(()=>run.worker.evaluate(()=>Boolean(globalThis.heartbeatDelayStarted))).toBe(true);
     await new Promise(resolve=>setTimeout(resolve,5000));
     expect(await run.worker.evaluate(()=>heartbeatTrace.filter(row=>row.type==='WINSHOT_HEARTBEAT'&&row.at>heartbeatAttemptStarted+4500).length)).toBe(0);
-    const record=await run.worker.evaluate(()=>globalThis.heartbeatCapture);
+    const outcome=await run.worker.evaluate(()=>globalThis.heartbeatCapture);
+    const storePage=await run.browser.newPage();await storePage.goto(`chrome-extension://${run.extension.id}/src/popup.html`);
+    const record=await storePage.evaluate(async id=>{const {getRecord}=await import(chrome.runtime.getURL('src/store.js'));return getRecord(id);},outcome.captureId);
     expect(record.state).toBe('partial');expect(record.limits.maxDurationMs).toBe(4000);expect(record.report.warnings.join(' ')).toContain('configured time limit');expect(record.report.coverage.complete).toBe(false);
     expect(await poststate(run)).toEqual({styles:0,scroll:230,playRestored:true,pauseRestored:true});await attach(run,testInfo);
   }finally{await run.close();}
