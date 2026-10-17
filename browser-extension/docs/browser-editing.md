@@ -19,6 +19,10 @@ Escape cancels an unfinished drawing or move.
 PNG/JPEG/WebP/GIF/BMP/PDF, Copy, Print and Share all use the current edits. Very long images
 remain tiled; they do not require a page-sized canvas. Some large formats retain
 their existing browser allocation limits.
+Export and editing controls remain unavailable while settings and source tiles
+load, then enable together so the first usable click is handled.
+If saved export settings cannot be read, defaults apply for that tab without
+overwriting the saved preferences.
 
 **Save project** creates a `.winshot.json` file containing the original pixels and
 editable annotations. Open it from **Open file** to continue editing in a new

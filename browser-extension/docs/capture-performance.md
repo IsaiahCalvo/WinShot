@@ -126,3 +126,44 @@ The animation bridge also preserves the page's latest video play/pause request.
 Capture-internal pauses do not count as page requests. A page that plays a video
 as it enters view and pauses it after it leaves view therefore stays paused
 after capture, rather than restarting every video visited during scrolling.
+
+## Frozen WebGL canvases and restoration
+
+A hidden canvas can continue submitting WebGL work while its frozen copy is
+captured. On the software compositor, restoring that canvas can then block the
+renderer in native `ReadPixels`/command-buffer synchronization before the page's
+animation-restoration message is delivered. Increasing the bridge timeout would
+leave the underlying wait intact. Chromium's WebGL `finish()` implementation
+[intentionally calls `Flush()`](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc#L3604-L3608),
+so it does not provide the needed synchronization.
+
+Capture now performs a real one-pixel CPU readback of previously frozen canvases
+before each tile's existing DOM-settling timer starts. It repeats that readback
+before releasing the static copies during restoration. This keeps GPU work from
+accumulating until the end. It preserves the original canvas, context, drawing
+methods, visibility rules, restoration order, screenshot quota and stability
+checks. Tainted or unavailable readbacks fall back to the existing capture and
+restoration checks. The readbacks can wait for the GPU; they are not a universal
+latency bound or a way to preempt a hung graphics driver.
+
+A bounded Linux Chrome 156 diagnostic on the actual Lenis page reproduced the
+old cleanup stall after all 41 tiles were captured, then exceeded its 120-second
+editor wait. The content-only candidate captured the full 1,200 × 38,219 image,
+decoded the editor in 53.154 seconds and verified a foreground native screenshot
+in 54.572 seconds, with a complete result and verified restoration. The source
+resumed WebGL drawing, retained its original canvas and native prototypes,
+returned to its original scroll position, and retained all 16 observed media
+pause states. Its native trace contained 114,999 events with no reported loss.
+Both attempts explicitly used software GL and CPU composition. This is a bounded
+diagnosis and one candidate success, not a matched speed cohort or a claim about
+Windows or every website. Final-package repeat results belong in the release
+verification artifacts.
+
+The native canvas regression additionally checks opaque WebGL 1/2, an idle
+non-preserved drawing buffer, translucent pixels and rounded/filter styling. It
+compares first-tile pixels, requires exact blank-background pixels where fixed
+surfaces disappear on middle tiles, verifies actual foreground screenshot pixels,
+and makes the original context paint a new frame after restoration. Opaque
+comparisons are exact; translucent first-tile blending permits one color level of
+browser rounding. Media and GSAP regressions independently exercise playback
+intent, user-paused effects and bridge upgrades.

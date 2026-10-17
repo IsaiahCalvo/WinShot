@@ -6,11 +6,11 @@ import { test, expect } from "@playwright/test";
 import { launchCaptureBrowser } from "./launch-browser.mjs";
 
 const root = "http://127.0.0.1:4173";
-async function run(check) {
+async function run(check, { incognito = false, headless = true } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-actions-api-"));
-  const browser = await launchCaptureBrowser(path.join(temp, "profile"));
+  const browser = await launchCaptureBrowser(path.join(temp, "profile"), undefined, { headless });
   try {
-    const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || fileURLToPath(new URL("../../dist/winshot-capture", import.meta.url)));
+    const id = await browser.installExtension(process.env.WINSHOT_EXTENSION_PATH || fileURLToPath(new URL("../../dist/winshot-capture", import.meta.url)), { enabledInIncognito: incognito });
     const extension = (await browser.extensions()).get(id);
     const worker = await (await browser.waitForTarget(t => t.type() === "service_worker" && t.url().endsWith("/src/background.js"))).worker();
     const page = await browser.newPage(); await page.goto(`${root}/body`);
@@ -172,6 +172,10 @@ test("website request cancellation and revocation stop only that page capture an
 });
 
 test("all-window batches capture each window's own pixels and restore the original window", async () => {
+  // Native Windows headless Chrome can report two focused windows and retain a
+  // stale getLastFocused even before WinShot runs. Exercise the strict focus
+  // regression against a real window manager when this CI option is enabled.
+  const headedFocus = process.env.WINSHOT_TEST_WINDOW_FOCUS_HEADED === "1";
   await run(async context => {
     const { browser, page, worker } = context;
     await page.evaluate(() => { document.body.innerHTML = '<div style="position:fixed;inset:0;background:#dc1e1e"></div>'; });
@@ -180,13 +184,27 @@ test("all-window batches capture each window's own pixels and restore the origin
     const otherPage = await (await browser.waitForTarget(target => target.type() === "page" && target.url().includes("?other-window"))).asPage();
     await otherPage.waitForSelector("body");
     await otherPage.evaluate(() => { document.body.innerHTML = '<div style="position:fixed;inset:0;background:#1edc1e"></div>'; });
-    const focusPreflight = await worker.evaluate(async ids => {
+    const focusPreflight = await worker.evaluate(async ({ ids, headedFocus }) => {
       const entries = [];
       // Exercise focus independently of WinShot's batch implementation first.
       for (const id of ids) {
         let result, error;
         try { result = await chrome.windows.update(id, { focused: true }); } catch (failure) { error = failure.message; }
-        entries.push({ requested: id, result, error, lastFocused: await chrome.windows.getLastFocused(), windows: await chrome.windows.getAll() });
+        const entry = { requested: id, result, error, lastFocused: await chrome.windows.getLastFocused(), windows: await chrome.windows.getAll() };
+        if (headedFocus && !error) {
+          const deadline = Date.now() + 5000;
+          let focused = entry.lastFocused;
+          let windows = entry.windows;
+          const coherent = () => focused.id === id && windows.filter(window => window.focused).length === 1 && windows.find(window => window.focused)?.id === id;
+          while (!coherent() && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+            focused = await chrome.windows.getLastFocused();
+            windows = await chrome.windows.getAll();
+          }
+          entry.settledLastFocused = focused;
+          entry.settledWindows = windows;
+        }
+        entries.push(entry);
       }
       const native = chrome.windows.update;
       globalThis.nativeWindowFocusCalls = [];
@@ -197,10 +215,17 @@ test("all-window batches capture each window's own pixels and restore the origin
         catch (error) { entry.error = error.message; throw error; }
       };
       return entries;
-    }, [origin.windowId, other.id, origin.windowId]);
+    }, { ids: [origin.windowId, other.id, origin.windowId], headedFocus });
     const preflightPath = test.info().outputPath("native-window-focus-preflight.json");
     fs.mkdirSync(path.dirname(preflightPath), { recursive: true }); fs.writeFileSync(preflightPath, JSON.stringify(focusPreflight, null, 2));
     await test.info().attach("native-window-focus-preflight", { path: preflightPath, contentType: "application/json" });
+    if (headedFocus) {
+      for (const entry of focusPreflight) {
+        expect(entry.error, "native focus preflight must succeed before testing WinShot").toBeUndefined();
+        expect(entry.settledLastFocused?.id, "native window manager must honor source/other/source focus").toBe(entry.requested);
+        expect(entry.settledWindows.filter(window => window.focused).map(window => window.id), "native window manager must have exactly one focused window").toEqual([entry.requested]);
+      }
+    }
     const popup = await popupFor(context, page);
     expect(await popup.evaluate(async () => (await chrome.windows.getCurrent()).id)).toBe(origin.windowId);
     await popup.select("#batch-scope", "all-windows"); await popup.select("#batch-mode", "visible");
@@ -222,12 +247,12 @@ test("all-window batches capture each window's own pixels and restore the origin
     expect(await report.evaluate(async () => (await chrome.tabs.getCurrent()).windowId)).toBe(origin.windowId);
     const focusEvidence = await worker.evaluate(async () => ({ calls: globalThis.nativeWindowFocusCalls, windows: await chrome.windows.getAll(), lastFocused: await chrome.windows.getLastFocused() }));
     const evidencePath = test.info().outputPath("native-window-focus.json");
-    fs.mkdirSync(path.dirname(evidencePath), { recursive: true }); fs.writeFileSync(evidencePath, JSON.stringify({ preflight: focusPreflight, afterBatch: focusEvidence }, null, 2));
+    fs.mkdirSync(path.dirname(evidencePath), { recursive: true }); fs.writeFileSync(evidencePath, JSON.stringify({ headed: headedFocus, platform: process.platform, preflight: focusPreflight, afterBatch: focusEvidence }, null, 2));
     await test.info().attach("native-window-focus", { path: evidencePath, contentType: "application/json" });
     expect(focusEvidence.calls.at(-1)?.windowId).toBe(origin.windowId);
     expect(focusEvidence.calls.at(-1)?.error).toBeUndefined();
     await expect.poll(() => worker.evaluate(async () => (await chrome.windows.getLastFocused()).id)).toBe(origin.windowId);
-  });
+  }, { headless: !headedFocus });
 });
 
 test("manual popup captures and delayed Stop remain bound to the originating window", async () => {
@@ -268,4 +293,69 @@ test("manual popup captures and delayed Stop remain bound to the originating win
     expect(browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
     expect(await delayed.evaluate(async () => (await (await import("./store.js")).listRecords()).length)).toBe(1);
   });
+});
+
+for (const stop of [false, true]) {
+  test(`a ${stop ? "stopped" : "completed"} all-window batch keeps its report available after the source window closes`, async () => {
+    await run(async context => {
+      const { browser, page, worker } = context;
+      const sourceWindowId = await worker.evaluate(async () => (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0].windowId);
+      const survivor = await worker.evaluate(async () => chrome.windows.create({ url: "http://127.0.0.1:4173/sticky?surviving-window", focused: false }));
+      const survivingPage = await (await browser.waitForTarget(target => target.type() === "page" && target.url().includes("?surviving-window"))).asPage();
+      await survivingPage.waitForSelector("body");
+      const popup = await popupFor(context, page);
+      await popup.select("#batch-scope", "all-windows"); await popup.select("#batch-mode", "full-page");
+      const waiting = browser.waitForTarget(target => target.type() === "page" && target.url().includes("/src/batch.html?id="));
+      await popup.click("#all-tabs");
+      // The first source is already stored by the time the second window enters
+      // the real capture engine. Close the actual source window, not a mocked API.
+      await survivingPage.waitForSelector("[data-winshot-capture]");
+      await worker.evaluate(windowId => chrome.windows.remove(windowId), sourceWindowId);
+      if (stop) await worker.evaluate(() => globalThis.__winshotTest.cancelActiveCapture({ global: true }));
+      const report = await (await waiting).asPage();
+      await report.waitForFunction(() => document.querySelector("#summary").textContent.includes("captures completed"), { polling: 100 });
+      const info = await report.evaluate(async () => {
+        const tab = await chrome.tabs.getCurrent(), key = `batch:${new URL(location.href).searchParams.get("id")}`;
+        const batch = (await chrome.storage.local.get(key))[key], store = await import("./store.js"), retained = [];
+        for (const item of batch.results.filter(item => item.state === "complete")) retained.push({ record: await store.getRecord(item.captureId), tiles: (await store.getTiles(item.captureId)).length });
+        return { tab: { windowId: tab.windowId, active: tab.active }, batch, retained };
+      });
+      expect(info.tab.windowId).toBe(survivor.id); expect(info.batch.cancelled).toBe(stop);
+      expect(info.retained.length).toBeGreaterThanOrEqual(1);
+      expect(info.retained.every(item => item.record.state === "complete" && item.tiles > 0)).toBe(true);
+      if (stop) {
+        expect(info.tab.active).toBe(false);
+        expect(await worker.evaluate(async windowId => (await chrome.tabs.query({ windowId, active: true }))[0].url, survivor.id)).toContain("?surviving-window");
+      } else {
+        expect(info.tab.active).toBe(true); expect(info.batch.results.filter(item => item.state === "complete")).toHaveLength(2);
+      }
+    });
+  });
+}
+
+test("a regular all-window batch excludes real incognito captures and private skipped metadata", async () => {
+  await run(async context => {
+    const { browser, page, worker } = context;
+    expect(await worker.evaluate(() => chrome.extension.isAllowedIncognitoAccess())).toBe(true);
+    const privateWindow = await worker.evaluate(async () => chrome.windows.create({ incognito: true, focused: false, url: "http://127.0.0.1:4173/body?private-batch-secret=never-collect" }));
+    const privatePage = await (await browser.waitForTarget(target => target.type() === "page" && target.url().includes("private-batch-secret"))).asPage();
+    await privatePage.waitForSelector("body");
+    const before = await worker.evaluate(async () => (await chrome.tabs.query({})).map(tab => ({ id: tab.id, incognito: tab.incognito, url: tab.url })));
+    expect(before.some(tab => tab.incognito && tab.url?.includes("private-batch-secret"))).toBe(true);
+    const popup = await popupFor(context, page);
+    await popup.select("#batch-scope", "all-windows"); await popup.select("#batch-mode", "visible");
+    const waiting = browser.waitForTarget(target => target.type() === "page" && target.url().includes("/src/batch.html?id="));
+    await popup.click("#all-tabs");
+    const report = await (await waiting).asPage();
+    await report.waitForFunction(() => document.querySelector("#summary").textContent.includes("captures completed"));
+    const info = await report.evaluate(async () => {
+      const tab = await chrome.tabs.getCurrent(), key = `batch:${new URL(location.href).searchParams.get("id")}`;
+      return { privateReport: tab.incognito, batch: (await chrome.storage.local.get(key))[key], records: await (await import("./store.js")).listRecords(), text: document.body.textContent };
+    });
+    expect(info.privateReport).toBe(false); expect(info.batch.results).toHaveLength(1);
+    expect(info.batch.results[0].state).toBe("complete");
+    expect(info.records).toHaveLength(1); expect(JSON.stringify(info)).not.toContain("private-batch-secret");
+    // The private tab remains open and unmodified; exclusion does not close it.
+    expect(await worker.evaluate(async id => (await chrome.windows.get(id)).incognito, privateWindow.id)).toBe(true);
+  }, { incognito: true });
 });

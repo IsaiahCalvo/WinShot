@@ -897,6 +897,22 @@ async function captureBatchTab(tab, controller, mode, settings) {
   return { tabId: tab.id, title: ready.title || tab.title || ready.url, url: ready.url, ...result };
 }
 
+async function openBatchReport(original, url, active) {
+  const samePrivacyContext = window => Boolean(window.incognito) === Boolean(original.incognito);
+  // Prefer the source, but it may close while another window is being captured.
+  // Never let an unscoped tabs.create choose a different privacy context.
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  const targets = [...windows.filter(window => window.id === original.windowId), ...windows.filter(window => window.id !== original.windowId)].filter(samePrivacyContext);
+  for (const window of targets) {
+    try { return await chrome.tabs.create({ windowId: window.id, active, url }); }
+    catch { /* A window can close between enumeration and creating the report. */ }
+  }
+  // No surviving window in this context: create one deliberately instead of
+  // opening regular results in a private window, or private results in regular.
+  const created = await chrome.windows.create({ url, incognito: Boolean(original.incognito), focused: active });
+  return created.tabs?.[0] || null;
+}
+
 async function runBatch(kind, urls = [], batchOptions = {}) {
   if (activeBatch) throw new Error("A WinShot batch is already running.");
   // captureBatchTab activates other tabs, which would make a running capture's
@@ -921,7 +937,10 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
     let tabs;
     if (kind === "all-tabs") {
       const query = settings.batchScope === "all-windows" ? {} : { windowId: original.windowId, ...(settings.batchScope === "selected-tabs" ? { highlighted: true } : {}) };
-      const candidates = await chrome.tabs.query(query);
+      // A spanning extension can enumerate both regular and private tabs when
+      // enabled in incognito. Exclude the other context before reading URLs or
+      // adding skipped metadata, not merely before taking its screenshot.
+      const candidates = (await chrome.tabs.query(query)).filter(tab => Boolean(tab.incognito) === Boolean(original.incognito));
       const supported = candidates.filter((tab) => supportedBatchUrl(tab.url));
       tabs = supported.slice(0, 20);
       for (const tab of candidates.filter((tab) => !supportedBatchUrl(tab.url))) {
@@ -978,7 +997,7 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
 
   const summary = { id: batchId, kind, mode, cancelled: cancelled || controller.signal.aborted, scope: settings.batchScope, output: settings.batchOutput, combinePdf: Boolean(batchOptions.combinePdf || settings.batchOutput === "combined-pdf"), createdAt: new Date().toISOString(), results, skipped };
   await chrome.storage.local.set({ [`batch:${batchId}`]: summary });
-  await chrome.tabs.create({ windowId: original.windowId, active: !controller.signal.aborted, url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
+  await openBatchReport(original, chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`), !controller.signal.aborted);
   return {
     batchId,
     complete: results.filter((item) => item.state === SessionState.COMPLETE).length,

@@ -26,8 +26,29 @@ Edited output is limited to 100 million pixels and 200,000 pixels per edge.
 Exports render in tiles of at most 2048 × 1024 pixels. Blur uses up to 120 pixels
 of neighboring context on each side, keeping the temporary padded raster at
 most 2288 × 1264 pixels rather than allocating a full-page canvas. Source tiles
-are decoded sequentially and closed after drawing. Blur halos avoid artificial
-boundaries between export tiles. Quarter-turn transforms work for captures taller
+are decoded sequentially and closed after drawing. When resizing, native source
+patches include neighboring pixels from abutting tiles before the patch is
+resampled; independently resizing each tile would clamp its edges and create
+colored seams. These source patches are at most 2048 × 1024 pixels. Larger output
+interiors are partitioned at whole output-pixel boundaries, while source aprons
+keep the interpolation kernel away from artificial patch edges. Integer crops,
+quarter-turns and flips at the original resolution use a direct drawing fast path.
+Color adjustments apply after source tiles are composed, so transparent overlaps
+in imported projects match between the grouped preview and flattened exports.
+Only overlapping tiles with nonneutral adjustments require composited patches
+at the original resolution; ordinary nonoverlapping or neutral exports keep the
+direct path. The tall-preview check samples native browser paint at both ends of
+a 19,000-pixel image, alongside actual exported-pixel checks.
+
+For severe downscaling, only axes whose remaining scale is below 1/16 receive
+progressive reductions of up to eightfold before the final resampling pass.
+These passes also use bounded patches, preserve alpha, and apply the image
+adjustments after resampling. A multi-pass severe reduction is not guaranteed to
+be pixel-identical to one native Canvas resize of a monolithic source. Ordinary
+resizing is checked against that independent native Canvas oracle, including
+hard edges, gradients and fractional tile boundaries.
+
+Blur halos avoid artificial boundaries between export tiles. Quarter-turn transforms work for captures taller
 than the browser's single-canvas limit. JPEG/WebP still have their existing
 single-canvas format limits; PNG/PDF support tile-backed captures.
 

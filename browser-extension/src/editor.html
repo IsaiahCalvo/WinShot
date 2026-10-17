@@ -7,7 +7,7 @@
     <link rel="icon" href="../icons/32.png" />
     <link rel="stylesheet" href="editor.css" />
   </head>
-  <body>
+  <body data-ready="false" aria-busy="true">
     <header>
       <div class="brand">
         <img
@@ -21,21 +21,22 @@
       <div class="actions">
         <button
           id="save-project"
+          disabled
           title="Save an editable project including the original image"
         >
           Save project
         </button>
-        <button id="save-png">Save PNG</button>
-        <button id="save-jpeg">Save JPEG</button>
-        <button id="save-webp">Save WebP</button>
-        <button id="save-pdf">Save PDF</button>
-        <button id="copy-clipboard">Copy</button>
-        <button id="print-capture">Print</button>
+        <button id="save-png" disabled>Save PNG</button>
+        <button id="save-jpeg" disabled>Save JPEG</button>
+        <button id="save-webp" disabled>Save WebP</button>
+        <button id="save-pdf" disabled>Save PDF</button>
+        <button id="copy-clipboard" disabled>Copy</button>
+        <button id="print-capture" disabled>Print</button>
         <a id="open-library" href="library.html">Open file</a>
         <a id="open-history" href="history.html">History</a>
       </div>
     </header>
-    <div class="editor-bar" aria-label="Image editing tools">
+    <div class="editor-bar" aria-label="Image editing tools" data-editor-loading inert>
       <div class="tool-group history-tools">
         <button id="edit-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -149,7 +150,7 @@
         </button>
       </div>
     </div>
-    <div class="editor-context">
+    <div class="editor-context" data-editor-loading inert>
       <p id="edit-help">
         Select an annotation to move it, change its style, or delete it.
       </p>
@@ -200,7 +201,7 @@ Text</textarea
           <h2>Warnings</h2>
           <ul></ul>
         </section>
-        <details id="image-size-options" open>
+        <details id="image-size-options" open data-editor-loading inert>
           <summary>Size &amp; orientation</summary>
           <div class="image-size-grid">
             <label for="image-width">Width (px)</label
@@ -236,7 +237,7 @@ Text</textarea
             </button>
           </div>
         </details>
-        <details id="image-effects-options">
+        <details id="image-effects-options" data-editor-loading inert>
           <summary>Adjust image</summary>
           <label for="effect-brightness"
             >Brightness
@@ -285,7 +286,7 @@ Text</textarea
           <summary>Capture details</summary>
           <dl id="report"></dl>
         </details>
-        <details id="pdf-options">
+        <details id="pdf-options" data-editor-loading inert>
           <summary>PDF capture options</summary>
           <label for="pdf-layout">Layout</label>
           <select id="pdf-layout">
@@ -336,7 +337,7 @@ Text</textarea
         </p>
       </aside>
       <section class="stage" aria-label="Capture preview">
-        <div class="zoom-row">
+        <div class="zoom-row" data-editor-loading inert>
           <span id="edit-dimensions"></span><label for="editor-zoom">Zoom</label
           ><select id="editor-zoom">
             <option value="fit">Fit width</option>

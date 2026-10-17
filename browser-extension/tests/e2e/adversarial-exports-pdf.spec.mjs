@@ -404,8 +404,19 @@ test("giant capture: JPEG and WebP refuse gracefully with guidance and leave the
         await editor.waitForSelector(`${selector}:not([disabled])`);
         await editor.click(selector);
         // The single-canvas guard must fail fast with actionable guidance, not hang or crash.
-        await editor.waitForFunction(() =>
-          /very large captures/i.test(document.querySelector("#toast")?.textContent || ""), { timeout: 15_000 });
+        try {
+          await editor.waitForFunction(() =>
+            /very large captures/i.test(document.querySelector("#toast")?.textContent || ""), { timeout: 15_000 });
+        } catch (error) {
+          await test.info().attach("large-export-ui", { contentType: "application/json", body: JSON.stringify(await editor.evaluate(() => ({
+            ready: document.body.dataset.ready,
+            state: document.querySelector("#state")?.textContent,
+            toast: document.querySelector("#toast")?.textContent,
+            buttons: [...document.querySelectorAll("header button")].map(node => ({ id: node.id, disabled: node.disabled, text: node.textContent })),
+          })), null, 2) });
+          await test.info().attach("large-export-screen", { contentType: "image/png", body: await editor.screenshot() });
+          throw error;
+        }
         expect(fs.readdirSync(downloadRoot).filter((name) => name.endsWith(extension))).toHaveLength(0);
       }
       // Buttons must be re-enabled after a failed export so PNG/PDF stay available.

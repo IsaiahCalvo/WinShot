@@ -1,9 +1,9 @@
 import puppeteer from "puppeteer";
 
-export async function launchCaptureBrowser(userDataDir, viewport = { width: 1200, height: 1000 }, { args = [] } = {}) {
+export async function launchCaptureBrowser(userDataDir, viewport = { width: 1200, height: 1000 }, { args = [], headless = true } = {}) {
   const browser = await puppeteer.launch({
     executablePath: await puppeteer.executablePath(),
-    headless: true, enableExtensions: true, userDataDir,
+    headless, enableExtensions: true, userDataDir,
     // captureVisibleTab reads the physical surface, not CDP's emulated viewport.
     // Emulation can claim 1000px while Chrome actually returns only 913px,
     // especially on extension-created batch tabs. Resize the real window instead.

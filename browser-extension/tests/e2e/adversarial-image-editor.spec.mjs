@@ -1229,7 +1229,14 @@ test("browser image editor resize effects remain bounded for tall captures and r
       } catch (e) {
         error = e.message;
       }
+      const { saveProject, importProject } = await import(
+          chrome.runtime.getURL("src/project-file.js")
+        ),
+        imported = await importProject(
+          await saveProject({ ...r, state: "complete" }, tiles),
+        );
       return {
+        previewId: imported.id,
         size: out.record.report.dimensionsPx,
         maxEdge: Math.max(...out.tiles.flatMap((t) => [t.widthPx, t.heightPx])),
         count: out.tiles.length,
@@ -1248,5 +1255,630 @@ test("browser image editor resize effects remain bounded for tall captures and r
       "100 million",
     );
     expect((await stored(editor)).editorDocument).toEqual(original);
+    // Grouped color filters must still paint the visible viewport at both ends
+    // of a tall tiled image, without a whole-page canvas or blank layer limit.
+    await editor.goto(
+      new URL(`editor.html?id=${result.previewId}`, editor.url()).href,
+    );
+    await editor.waitForSelector(".annotation-overlay");
+    await editor.waitForFunction(() =>
+      [...document.querySelectorAll("#preview img")].every(
+        (i) => i.complete && i.naturalWidth,
+      ),
+    );
+    await setEditValue(editor, "#effect-brightness", 50);
+    await saved(editor);
+    const previewSamples = [];
+    for (const end of ["top", "bottom"]) {
+      const clip = await editor.evaluate(async (end) => {
+        const stage =
+          document.querySelector("#stage") || document.querySelector(".stage");
+        stage.scrollTop = end === "bottom" ? stage.scrollHeight : 0;
+        await new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+        const p = document.querySelector("#preview").getBoundingClientRect(),
+          s = stage.getBoundingClientRect();
+        return {
+          x: p.x + 40,
+          y:
+            end === "bottom"
+              ? Math.min(p.bottom, s.bottom) - 50
+              : Math.max(p.top, s.top) + 20,
+          width: 20,
+          height: 20,
+        };
+      }, end);
+      const png = await editor.screenshot({ type: "png", clip });
+      previewSamples.push(
+        await editor.evaluate(
+          async (bytes) => {
+            const b = await createImageBitmap(
+                new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+              ),
+              c = new OffscreenCanvas(20, 20),
+              ctx = c.getContext("2d");
+            ctx.drawImage(b, 0, 0);
+            b.close();
+            return [...ctx.getImageData(10, 10, 1, 1).data];
+          },
+          [...png],
+        ),
+      );
+    }
+    for (const pixel of previewSamples) {
+      expect(pixel[0]).toBeGreaterThanOrEqual(126);
+      expect(pixel[0]).toBeLessThanOrEqual(129);
+      expect(pixel.slice(1)).toEqual([0, 0, 255]);
+    }
+    if (process.env.WINSHOT_EDITOR_EVIDENCE_DIR)
+      fs.writeFileSync(
+        path.join(
+          process.env.WINSHOT_EDITOR_EVIDENCE_DIR,
+          "tall-filter-preview.json",
+        ),
+        JSON.stringify(previewSamples, null, 2),
+      );
+  });
+});
+
+test("browser image editor resampling matches a monolithic canvas across original and output tile seams", async () => {
+  await runEditor(async ({ editor }) => {
+    const fixture = await editor.evaluate(async () => {
+      const width = 2600,
+        height = 600,
+        canvas = new OffscreenCanvas(width, height),
+        ctx = canvas.getContext("2d"),
+        gradient = ctx.createLinearGradient(0, 0, width, height);
+      gradient.addColorStop(0, "#123456");
+      gradient.addColorStop(0.5, "#cdba90");
+      gradient.addColorStop(1, "#ffeedd");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+      for (const [x, color] of [
+        [980, "#f01030"],
+        [1001, "#083ed0"],
+        [1780, "#ffffff"],
+        [1800, "#000000"],
+      ]) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, 0, x === 980 || x === 1780 ? 21 : 22, height);
+      }
+      const png = await canvas.convertToBlob({ type: "image/png" }),
+        tiles = [];
+      function base64(bytes) {
+        let text = "";
+        for (let i = 0; i < bytes.length; i += 32768)
+          text += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        return btoa(text);
+      }
+      for (const [left, right] of [
+        [0, 1001],
+        [1001, 1800],
+        [1800, width],
+      ]) {
+        const c = new OffscreenCanvas(right - left, height);
+        c.getContext("2d").drawImage(canvas, -left, 0);
+        tiles.push({
+          index: tiles.length,
+          destXPx: left,
+          destYPx: 0,
+          widthPx: c.width,
+          heightPx: height,
+          png: base64(
+            new Uint8Array(
+              await (
+                await c.convertToBlob({ type: "image/png" })
+              ).arrayBuffer(),
+            ),
+          ),
+        });
+      }
+      const { importProject } = await import(
+          chrome.runtime.getURL("src/project-file.js")
+        ),
+        record = await importProject(
+          new Blob(
+            [
+              JSON.stringify({
+                format: "winshot-browser-project",
+                version: 1,
+                title: "Resampling oracle",
+                fileName: "resampling-oracle",
+                width,
+                height,
+                editorDocument: {
+                  version: 1,
+                  crop: { x: 0, y: 0, width, height },
+                  objects: [],
+                },
+                tiles,
+              }),
+            ],
+            { type: "application/json" },
+          ),
+        );
+      return {
+        id: record.id,
+        png: [...new Uint8Array(await png.arrayBuffer())],
+      };
+    });
+    await editor.goto(
+      new URL(`editor.html?id=${fixture.id}`, editor.url()).href,
+    );
+    await editor.waitForSelector(".annotation-overlay");
+    await setEditValue(editor, "#effect-brightness", 90);
+    await setEditValue(editor, "#effect-contrast", 110);
+    await setEditValue(editor, "#effect-saturation", 85);
+    await setEditValue(editor, "#effect-grayscale", 15);
+    await setEditValue(editor, "#effect-sepia", 5);
+    await saved(editor);
+    const results = [];
+    for (const scale of [0.5, 1.5]) {
+      await setEditValue(editor, "#image-width", 2600 * scale, "input");
+      await editor.click("#image-resize");
+      await saved(editor);
+      results.push(
+        await editor.evaluate(
+          async ({ png, scale }) => {
+            const s = await import(chrome.runtime.getURL("src/store.js")),
+              m = await import(chrome.runtime.getURL("src/image-editor.js")),
+              e = await import(chrome.runtime.getURL("src/exporters.js")),
+              r = await s.getRecord(
+                new URL(location.href).searchParams.get("id"),
+              ),
+              tiles = await s.getTiles(r.id),
+              edited = await m.renderEditedCapture(r, tiles, r.editorDocument),
+              actualBitmap = await createImageBitmap(
+                await e.exportPng(edited.record, edited.tiles),
+              ),
+              original = await createImageBitmap(
+                new Blob([new Uint8Array(png)], { type: "image/png" }),
+              ),
+              width = 2600 * scale,
+              height = 600 * scale;
+            const actualCanvas = new OffscreenCanvas(width, height),
+              actual = actualCanvas.getContext("2d"),
+              oracleCanvas = new OffscreenCanvas(width, height),
+              oracle = oracleCanvas.getContext("2d");
+            actual.drawImage(actualBitmap, 0, 0);
+            actualBitmap.close();
+            // Independent oracle: resample one full source image once, rather than
+            // rebuilding editor tiles or calling its transform/filter helpers.
+            oracle.imageSmoothingQuality = "high";
+            oracle.filter =
+              "brightness(90%) contrast(110%) saturate(85%) grayscale(15%) sepia(5%)";
+            oracle.scale(scale, scale);
+            oracle.drawImage(original, 0, 0);
+            original.close();
+            const boundaries = [
+                1001 * scale,
+                1800 * scale,
+                ...(width > 2048 ? [2048] : []),
+              ],
+              checks = [];
+            for (const boundary of boundaries) {
+              let maximum = 0,
+                alpha = 0,
+                example;
+              for (
+                let x = Math.floor(boundary) - 4;
+                x <= Math.ceil(boundary) + 4;
+                x++
+              )
+                for (let y = 10; y < height - 10; y += 17) {
+                  const a = [...actual.getImageData(x, y, 1, 1).data],
+                    o = [...oracle.getImageData(x, y, 1, 1).data],
+                    difference = Math.max(
+                      ...a.map((v, i) => Math.abs(v - o[i])),
+                    );
+                  alpha = Math.max(alpha, Math.abs(a[3] - o[3]));
+                  if (difference > maximum) {
+                    maximum = difference;
+                    example = { x, y, actual: a, expected: o };
+                  }
+                }
+              checks.push({ boundary, maximum, alpha, example });
+            }
+            return { scale, width, height, checks };
+          },
+          { png: fixture.png, scale },
+        ),
+      );
+    }
+    if (process.env.WINSHOT_EDITOR_EVIDENCE_DIR) {
+      fs.mkdirSync(process.env.WINSHOT_EDITOR_EVIDENCE_DIR, {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(
+          process.env.WINSHOT_EDITOR_EVIDENCE_DIR,
+          "resampling-seams.json",
+        ),
+        JSON.stringify(results, null, 2),
+      );
+    }
+    for (const result of results)
+      for (const check of result.checks)
+        expect(check.maximum, JSON.stringify(result)).toBeLessThanOrEqual(2);
+  });
+});
+
+test("browser image editor resamples rotated alpha and severe reductions within bounded native patches", async () => {
+  await runEditor(async ({ editor }) => {
+    async function fixture(width, height, uniform) {
+      const result = await editor.evaluate(
+        async ({ width, height, uniform }) => {
+          const canvas = new OffscreenCanvas(width, height),
+            ctx = canvas.getContext("2d");
+          ctx.fillStyle = "rgba(32,160,224,.5)";
+          ctx.fillRect(0, 0, width, height);
+          if (!uniform) {
+            ctx.clearRect(450, 260, 100, 100);
+            ctx.fillStyle = "rgba(230,20,70,.75)";
+            ctx.fillRect(501, 0, width - 501, height);
+          }
+          const png = await canvas.convertToBlob({ type: "image/png" }),
+            tiles = [];
+          function b64(bytes) {
+            let s = "";
+            for (let i = 0; i < bytes.length; i += 32768)
+              s += String.fromCharCode(...bytes.subarray(i, i + 32768));
+            return btoa(s);
+          }
+          const xs = uniform ? [0, 2001, width] : [0, 501, width],
+            ys = uniform ? [0, height] : [0, 301, height];
+          for (let row = 0; row < ys.length - 1; row++)
+            for (let col = 0; col < xs.length - 1; col++) {
+              const c = new OffscreenCanvas(
+                xs[col + 1] - xs[col],
+                ys[row + 1] - ys[row],
+              );
+              c.getContext("2d").drawImage(canvas, -xs[col], -ys[row]);
+              tiles.push({
+                index: tiles.length,
+                destXPx: xs[col],
+                destYPx: ys[row],
+                widthPx: c.width,
+                heightPx: c.height,
+                png: b64(
+                  new Uint8Array(
+                    await (
+                      await c.convertToBlob({ type: "image/png" })
+                    ).arrayBuffer(),
+                  ),
+                ),
+              });
+            }
+          const { importProject } = await import(
+              chrome.runtime.getURL("src/project-file.js")
+            ),
+            r = await importProject(
+              new Blob(
+                [
+                  JSON.stringify({
+                    format: "winshot-browser-project",
+                    version: 1,
+                    title: "Alpha resampling oracle",
+                    width,
+                    height,
+                    editorDocument: {
+                      version: 1,
+                      crop: { x: 0, y: 0, width, height },
+                      objects: [],
+                    },
+                    tiles,
+                  }),
+                ],
+                { type: "application/json" },
+              ),
+            );
+          return {
+            id: r.id,
+            png: [...new Uint8Array(await png.arrayBuffer())],
+          };
+        },
+        { width, height, uniform },
+      );
+      await editor.goto(
+        new URL(`editor.html?id=${result.id}`, editor.url()).href,
+      );
+      await editor.waitForSelector(".annotation-overlay");
+      return result;
+    }
+    async function compare(png, rotated) {
+      return editor.evaluate(
+        async ({ png, rotated }) => {
+          const s = await import(chrome.runtime.getURL("src/store.js")),
+            m = await import(chrome.runtime.getURL("src/image-editor.js")),
+            e = await import(chrome.runtime.getURL("src/exporters.js")),
+            r = await s.getRecord(
+              new URL(location.href).searchParams.get("id"),
+            ),
+            tiles = await s.getTiles(r.id),
+            allocations = [],
+            NativeCanvas = OffscreenCanvas;
+          let edited;
+          // Allocation instrumentation keeps every operation native and restores the
+          // constructor before creating the independent monolithic oracle below.
+          window.OffscreenCanvas = new Proxy(NativeCanvas, {
+            construct(target, args) {
+              allocations.push(args);
+              return Reflect.construct(target, args);
+            },
+          });
+          try {
+            edited = await m.renderEditedCapture(r, tiles, r.editorDocument);
+          } finally {
+            window.OffscreenCanvas = NativeCanvas;
+          }
+          const { width, height } = edited.record.report.dimensionsPx,
+            actualCanvas = new OffscreenCanvas(width, height),
+            actual = actualCanvas.getContext("2d"),
+            oracleCanvas = new OffscreenCanvas(width, height),
+            oracle = oracleCanvas.getContext("2d"),
+            a = await createImageBitmap(
+              await e.exportPng(edited.record, edited.tiles),
+            ),
+            original = await createImageBitmap(
+              new Blob([new Uint8Array(png)], { type: "image/png" }),
+            );
+          actual.drawImage(a, 0, 0);
+          a.close();
+          oracle.imageSmoothingQuality = "high";
+          if (rotated) {
+            oracle.translate(width, 0);
+            oracle.scale(-1, 1);
+            oracle.scale(width / 601, height / 1001);
+            oracle.translate(601, 0);
+            oracle.rotate(Math.PI / 2);
+          } else oracle.scale(width / 3901, height / 997);
+          oracle.drawImage(original, 0, 0);
+          original.close();
+          const points = rotated ? [] : [[0, 0]];
+          if (rotated) {
+            const bx = (301 * width) / 601,
+              by = (501 * height) / 1001;
+            for (let x = Math.floor(bx) - 4; x <= Math.ceil(bx) + 4; x++)
+              for (let y = 10; y < height - 10; y += 19) points.push([x, y]);
+            for (let y = Math.floor(by) - 4; y <= Math.ceil(by) + 4; y++)
+              for (let x = 10; x < width - 10; x += 19) points.push([x, y]);
+          }
+          let maximum = 0,
+            alpha = 0,
+            example;
+          for (const [x, y] of points) {
+            const a = [...actual.getImageData(x, y, 1, 1).data],
+              o = [...oracle.getImageData(x, y, 1, 1).data],
+              difference = Math.max(
+                Math.abs(a[3] - o[3]),
+                ...a
+                  .slice(0, 3)
+                  .map((v, i) =>
+                    Math.abs((v * a[3]) / 255 - (o[i] * o[3]) / 255),
+                  ),
+              );
+            alpha = Math.max(alpha, Math.abs(a[3] - o[3]));
+            if (difference > maximum) {
+              maximum = difference;
+              example = { x, y, actual: a, expected: o };
+            }
+          }
+          return {
+            width,
+            height,
+            maximum,
+            alpha,
+            example,
+            allocations,
+            maxPixels: Math.max(...allocations.map(([w, h]) => w * h)),
+          };
+        },
+        { png, rotated },
+      );
+    }
+    const alphaFixture = await fixture(1001, 601, false);
+    await editor.click("#image-rotate-right");
+    await editor.click("#image-flip-x");
+    await setEditValue(editor, "#image-width", 301, "input");
+    await editor.click("#image-resize");
+    await saved(editor);
+    const rotated = await compare(alphaFixture.png, true);
+    expect(rotated.maximum, JSON.stringify(rotated)).toBeLessThanOrEqual(2);
+    expect(rotated.alpha, JSON.stringify(rotated)).toBeLessThanOrEqual(2);
+    expect(rotated).toMatchObject({ width: 301, height: 501 });
+    const severeFixture = await fixture(3901, 997, true);
+    await setEditValue(editor, "#image-width", 1, "input");
+    await editor.click("#image-resize");
+    await saved(editor);
+    const severe = await compare(severeFixture.png, false);
+    expect(severe).toMatchObject({ width: 1, height: 1 });
+    expect(severe.maximum, JSON.stringify(severe)).toBeLessThanOrEqual(2);
+    expect(severe.alpha).toBeLessThanOrEqual(2);
+    for (const result of [rotated, severe]) {
+      expect(result.allocations.length).toBeGreaterThan(0);
+      expect(
+        result.allocations.every(([w, h]) => w <= 2048 && h <= 1024),
+        JSON.stringify(result),
+      ).toBe(true);
+      expect(result.maxPixels).toBeLessThanOrEqual(2048 * 1024);
+    }
+    if (process.env.WINSHOT_EDITOR_EVIDENCE_DIR) {
+      fs.mkdirSync(process.env.WINSHOT_EDITOR_EVIDENCE_DIR, {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(
+          process.env.WINSHOT_EDITOR_EVIDENCE_DIR,
+          "resampling-alpha-extreme.json",
+        ),
+        JSON.stringify({ rotated, severe }, null, 2),
+      );
+    }
+  });
+});
+
+test("browser image editor adjusts overlapping transparent source tiles after composition in preview and exports", async () => {
+  await runEditor(async ({ editor }) => {
+    const fixture = await editor.evaluate(async () => {
+      const tiles = [],
+        source = new OffscreenCanvas(100, 100),
+        ctx = source.getContext("2d");
+      for (const color of ["rgba(0,0,0,.5)", "rgba(255,255,255,.5)"]) {
+        const tile = new OffscreenCanvas(100, 100),
+          tc = tile.getContext("2d");
+        tc.fillStyle = color;
+        tc.fillRect(0, 0, 100, 100);
+        ctx.drawImage(tile, 0, 0);
+        const bytes = new Uint8Array(
+          await (await tile.convertToBlob({ type: "image/png" })).arrayBuffer(),
+        );
+        tiles.push({
+          index: tiles.length,
+          destXPx: 0,
+          destYPx: 0,
+          widthPx: 100,
+          heightPx: 100,
+          png: btoa(String.fromCharCode(...bytes)),
+        });
+      }
+      const { importProject } = await import(
+        chrome.runtime.getURL("src/project-file.js")
+      );
+      const record = await importProject(
+        new Blob(
+          [
+            JSON.stringify({
+              format: "winshot-browser-project",
+              version: 1,
+              title: "Transparent overlap",
+              fileName: "transparent-overlap",
+              width: 100,
+              height: 100,
+              editorDocument: {
+                version: 1,
+                crop: { x: 0, y: 0, width: 100, height: 100 },
+                objects: [],
+              },
+              tiles,
+            }),
+          ],
+          { type: "application/json" },
+        ),
+      );
+      return {
+        id: record.id,
+        png: [
+          ...new Uint8Array(
+            await (
+              await source.convertToBlob({ type: "image/png" })
+            ).arrayBuffer(),
+          ),
+        ],
+      };
+    });
+    await editor.goto(
+      new URL(`editor.html?id=${fixture.id}`, editor.url()).href,
+    );
+    await editor.waitForSelector(".annotation-overlay");
+    await setEditValue(editor, "#effect-contrast", 200);
+    await saved(editor);
+    await editor.waitForFunction(() =>
+      [...document.querySelectorAll("#preview img")].every(
+        (i) => i.complete && i.naturalWidth,
+      ),
+    );
+    const clip = await editor.$eval("#preview", (n) => {
+      const b = n.getBoundingClientRect();
+      return { x: b.x + 20, y: b.y + 20, width: 20, height: 20 };
+    });
+    const preview = [...(await editor.screenshot({ type: "png", clip }))];
+    const results = [];
+    for (const width of [100, 150]) {
+      if (width === 150) {
+        await setEditValue(editor, "#image-width", width, "input");
+        await editor.click("#image-resize");
+        await saved(editor);
+      }
+      results.push(
+        await editor.evaluate(
+          async ({ png, preview, width }) => {
+            const s = await import(chrome.runtime.getURL("src/store.js")),
+              m = await import(chrome.runtime.getURL("src/image-editor.js")),
+              e = await import(chrome.runtime.getURL("src/exporters.js"));
+            const r = await s.getRecord(
+                new URL(location.href).searchParams.get("id"),
+              ),
+              edited = await m.renderEditedCapture(
+                r,
+                await s.getTiles(r.id),
+                r.editorDocument,
+              );
+            async function bitmap(bytes) {
+              return createImageBitmap(
+                new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+              );
+            }
+            const original = await bitmap(png),
+              oracle = new OffscreenCanvas(width, width),
+              o = oracle.getContext("2d"),
+              actual = new OffscreenCanvas(width, width),
+              a = actual.getContext("2d");
+            o.filter = "contrast(200%)";
+            o.drawImage(original, 0, 0, width, width);
+            original.close();
+            const rendered = await createImageBitmap(
+              await e.exportPng(edited.record, edited.tiles),
+            );
+            a.drawImage(rendered, 0, 0);
+            rendered.close();
+            const expected = [...o.getImageData(20, 20, 1, 1).data],
+              pixel = [...a.getImageData(20, 20, 1, 1).data];
+            const screen = await bitmap(preview),
+              pc = new OffscreenCanvas(20, 20),
+              p = pc.getContext("2d");
+            p.drawImage(screen, 0, 0);
+            screen.close();
+            const screenPixel = [...p.getImageData(10, 10, 1, 1).data];
+            return {
+              width,
+              pixel,
+              expected,
+              screenPixel,
+              screenExpected: expected
+                .slice(0, 3)
+                .map((v) =>
+                  Math.round((v * expected[3]) / 255 + 255 - expected[3]),
+                ),
+            };
+          },
+          { png: fixture.png, preview, width },
+        ),
+      );
+    }
+    if (process.env.WINSHOT_EDITOR_EVIDENCE_DIR)
+      fs.writeFileSync(
+        path.join(
+          process.env.WINSHOT_EDITOR_EVIDENCE_DIR,
+          "overlap-alpha-effects.json",
+        ),
+        JSON.stringify(results, null, 2),
+      );
+    for (const result of results) {
+      expect(
+        Math.max(
+          ...result.pixel.map((v, i) => Math.abs(v - result.expected[i])),
+        ),
+        JSON.stringify(result),
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.max(
+          ...result.screenExpected.map((v, i) =>
+            Math.abs(v - result.screenPixel[i]),
+          ),
+        ),
+        JSON.stringify(result),
+      ).toBeLessThanOrEqual(2);
+    }
   });
 });

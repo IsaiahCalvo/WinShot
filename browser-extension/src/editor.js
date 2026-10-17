@@ -16,7 +16,7 @@ const toast = document.querySelector("#toast");
 let formatAnchor = document.querySelector("#save-webp");
 for (const [id, text, tip] of [["save-bmp", "Save BMP", "Full-color still image; transparent areas become white"], ["save-gif", "Save GIF", "Still image with up to 256 colors; transparent areas become white"], ["save-editable-png", "Editable PNG", "Includes the ORIGINAL image and editable objects. Use Save PNG for a flattened image to share."]]) {
   if (!document.getElementById(id)) {
-    const button = document.createElement("button"); button.id = id; button.textContent = text; button.title = tip;
+    const button = document.createElement("button"); button.id = id; button.textContent = text; button.title = tip; button.disabled = true;
     formatAnchor.after(button); formatAnchor = button;
   }
 }
@@ -24,7 +24,11 @@ const buttons = [...document.querySelectorAll("header button")];
 let record;
 let tiles = [];
 let imageEditor;
-let settings = await loadSettings();
+let settingsUnavailable = false;
+let settings = await loadSettings().catch(() => {
+  settingsUnavailable = true;
+  return normalizeSettings();
+});
 const objectUrls = [];
 
 function showToast(message) {
@@ -275,6 +279,11 @@ function readPdfSettings() {
 showPdfSettings();
 async function persistPdfSettings() {
   settings = normalizeSettings({ ...settings, pdf: readPdfSettings() });
+  if (settingsUnavailable) {
+    showToast("PDF options apply only for this tab because saved settings could not be read.");
+    showPdfSettings();
+    return;
+  }
   try {
     settings = await saveSettings(settings);
   } catch (error) {
@@ -333,6 +342,15 @@ try {
     );
   tiles = await getTiles(id);
   renderRecord();
+  if (imageEditor) {
+    // Controls become usable only after settings, source tiles and all handlers
+    // are ready. Early clicks must not disappear or export an undefined editor.
+    document.querySelectorAll("[data-editor-loading]").forEach(node => { node.inert = false; });
+    buttons.forEach(button => { button.disabled = false; });
+    document.body.dataset.ready = "true";
+  }
+  document.body.setAttribute("aria-busy", "false");
+  if (settingsUnavailable) showToast("Saved export settings could not be loaded. Using defaults for this tab.");
   // Consume remembered output actions once; reloading the editor must not save
   // another file. Partial/cancelled captures always require a deliberate export.
   const action = params.get("action");
@@ -342,6 +360,7 @@ try {
     await runExport(document.querySelector(`#save-${action}`), ...actions[action]);
   }
 } catch (error) {
+  document.body.setAttribute("aria-busy", "false");
   title.textContent = "Could not load capture";
   state.textContent = "failed";
   state.className = "pill failed";

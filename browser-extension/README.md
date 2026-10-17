@@ -49,6 +49,10 @@ disposable profile; never point the harness at your everyday Chrome profile.
 The Windows CI runner uses `WINSHOT_TEST_SOFTWARE_GL=1` for a software WebGL
 renderer because that VM has no usable GPU context. This is limited to isolated
 fixture tests; normal test and live-site runs retain Chrome's default renderer.
+The Windows CI focus regression uses a visible Chrome window and first verifies
+native window focus independently of WinShot. Windows headless Chrome can report
+multiple windows as focused; that is unsuitable evidence for this OS interaction.
+Other extension tests retain their normal headless configuration.
 
 For a repeatable check on real websites, run
 `npm run test:live -- https://example.com/article https://example.org/another-page`.

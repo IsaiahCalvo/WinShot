@@ -53,6 +53,8 @@ function imageEffects(doc) {
 }
 function effectFilter(doc) {
   const e = imageEffects(doc);
+  if (Object.entries(NEUTRAL_EFFECTS).every(([key, value]) => e[key] === value))
+    return "none";
   return `brightness(${e.brightness}%) contrast(${e.contrast}%) saturate(${e.saturation}%) grayscale(${e.grayscale}%) sepia(${e.sepia}%)`;
 }
 function outputMatrix(doc) {
@@ -810,9 +812,13 @@ export class ImageEditor {
       height: `${c.height}px`,
       transform: this.viewMatrix.toString(),
     });
-    Object.assign(this.source.style, { left: `${-c.x}px`, top: `${-c.y}px` });
-    for (const image of this.source.children)
-      image.style.filter = effectFilter(this.doc);
+    Object.assign(this.source.style, {
+      left: `${-c.x}px`,
+      top: `${-c.y}px`,
+      width: `${this.record.report.dimensionsPx.width}px`,
+      height: `${this.record.report.dimensionsPx.height}px`,
+      filter: effectFilter(this.doc),
+    });
     this.overlay.setAttribute(
       "viewBox",
       `${c.x} ${c.y} ${c.width} ${c.height}`,
@@ -906,9 +912,9 @@ export class ImageEditor {
         width: tile.widthPx,
         height: tile.heightPx,
       });
-      image.style.filter = effectFilter(this.doc);
       pixels.append(image);
     }
+    pixels.style.filter = effectFilter(this.doc);
     blur.append(pixels);
     group.append(blur);
     this.overlay.append(defs, group);
@@ -987,6 +993,256 @@ export class ImageEditor {
   }
 }
 
+// Resampling each source tile independently clamps its image edges. Stitch a
+// native-resolution apron first, then sample only its integer output interior.
+// Both patch size and final tiles stay bounded, including severe downscales.
+const SOURCE_PATCH_WIDTH = 2048;
+const SOURCE_PATCH_HEIGHT = 1024;
+function inverseWindow(matrix, left, top, width, height) {
+  const inverse = matrix.inverse(),
+    points = [
+      [left, top],
+      [left + width, top],
+      [left, top + height],
+      [left + width, top + height],
+    ].map(([x, y]) => inverse.transformPoint(new DOMPoint(x, y)));
+  return {
+    left: Math.min(...points.map((p) => p.x)),
+    right: Math.max(...points.map((p) => p.x)),
+    top: Math.min(...points.map((p) => p.y)),
+    bottom: Math.max(...points.map((p) => p.y)),
+  };
+}
+function intersects(tile, rect) {
+  return (
+    tile.destXPx < rect.right &&
+    tile.destXPx + tile.widthPx > rect.left &&
+    tile.destYPx < rect.bottom &&
+    tile.destYPx + tile.heightPx > rect.top
+  );
+}
+function tilesOverlap(tiles) {
+  if (tiles.length < 2) return false;
+  // Sweep the less crowded axis: horizontal strips and vertical columns both
+  // keep a small active set, without comparing every pair of ordinary tiles.
+  const width = Math.max(...tiles.map((t) => t.destXPx + t.widthPx)),
+    height = Math.max(...tiles.map((t) => t.destYPx + t.heightPx)),
+    horizontal =
+      tiles.reduce((sum, t) => sum + t.widthPx, 0) / width <
+      tiles.reduce((sum, t) => sum + t.heightPx, 0) / height,
+    start = horizontal ? "destXPx" : "destYPx",
+    length = horizontal ? "widthPx" : "heightPx",
+    other = horizontal ? "destYPx" : "destXPx",
+    otherLength = horizontal ? "heightPx" : "widthPx";
+  let active = [];
+  for (const tile of [...tiles].sort((a, b) => a[start] - b[start])) {
+    active = active.filter((t) => t[start] + t[length] > tile[start]);
+    if (
+      active.some(
+        (t) =>
+          t[other] < tile[other] + tile[otherLength] &&
+          t[other] + t[otherLength] > tile[other],
+      )
+    )
+      return true;
+    active.push(tile);
+  }
+  return false;
+}
+function unitPixelTransform(matrix) {
+  return (
+    [matrix.a, matrix.b, matrix.c, matrix.d].every((value) =>
+      [-1, 0, 1].includes(value),
+    ) &&
+    Number.isInteger(matrix.e) &&
+    Number.isInteger(matrix.f) &&
+    Math.hypot(matrix.a, matrix.b) === 1 &&
+    Math.hypot(matrix.c, matrix.d) === 1
+  );
+}
+async function sourcePatch(tiles, rect) {
+  const canvas = new OffscreenCanvas(
+      rect.right - rect.left,
+      rect.bottom - rect.top,
+    ),
+    context = canvas.getContext("2d", { alpha: true });
+  for (const tile of tiles) {
+    if (!intersects(tile, rect)) continue;
+    const left = Math.max(rect.left, tile.destXPx),
+      top = Math.max(rect.top, tile.destYPx),
+      right = Math.min(rect.right, tile.destXPx + tile.widthPx),
+      bottom = Math.min(rect.bottom, tile.destYPx + tile.heightPx);
+    const bitmap = await createImageBitmap(
+      tile.blob,
+      left - tile.destXPx,
+      top - tile.destYPx,
+      right - left,
+      bottom - top,
+    );
+    try {
+      context.drawImage(bitmap, left - rect.left, top - rect.top);
+    } finally {
+      bitmap.close();
+    }
+  }
+  return canvas;
+}
+async function paintRasterWindow(
+  context,
+  tiles,
+  crop,
+  matrix,
+  window,
+  filter = "none",
+  compositeEffects = false,
+) {
+  const transform = new DOMMatrix()
+    .translate(-window.left, -window.top)
+    .multiply(matrix);
+  // No apron or intermediate decodes are needed for ordinary annotations,
+  // integer crops, quarter-turns and flips that preserve the source resolution.
+  if (unitPixelTransform(matrix) && !compositeEffects) {
+    const rect = inverseWindow(
+      matrix,
+      window.left,
+      window.top,
+      window.width,
+      window.height,
+    );
+    context.save();
+    context.setTransform(transform);
+    context.beginPath();
+    context.rect(crop.x, crop.y, crop.width, crop.height);
+    context.clip();
+    context.filter = filter;
+    for (const tile of tiles) {
+      if (!intersects(tile, rect)) continue;
+      const bitmap = await createImageBitmap(tile.blob);
+      try {
+        context.drawImage(
+          bitmap,
+          tile.destXPx,
+          tile.destYPx,
+          tile.widthPx,
+          tile.heightPx,
+        );
+      } finally {
+        bitmap.close();
+      }
+    }
+    context.restore();
+    return;
+  }
+  const sx = Math.hypot(matrix.a, matrix.b),
+    sy = Math.hypot(matrix.c, matrix.d),
+    rotated = Math.abs(matrix.b) > Math.abs(matrix.a),
+    ax = Math.ceil(4 / sx) + 2,
+    ay = Math.ceil(4 / sy) + 2;
+  const patchWidth = Math.max(
+      1,
+      Math.floor(
+        (rotated
+          ? SOURCE_PATCH_HEIGHT - 2 * ay - 4
+          : SOURCE_PATCH_WIDTH - 2 * ax - 4) * (rotated ? sy : sx),
+      ),
+    ),
+    patchHeight = Math.max(
+      1,
+      Math.floor(
+        (rotated
+          ? SOURCE_PATCH_WIDTH - 2 * ax - 4
+          : SOURCE_PATCH_HEIGHT - 2 * ay - 4) * (rotated ? sx : sy),
+      ),
+    );
+  for (let y = window.top; y < window.top + window.height; y += patchHeight)
+    for (let x = window.left; x < window.left + window.width; x += patchWidth) {
+      const width = Math.min(patchWidth, window.left + window.width - x),
+        height = Math.min(patchHeight, window.top + window.height - y),
+        needed = inverseWindow(matrix, x, y, width, height);
+      const rect = {
+        left: Math.max(crop.x, Math.floor(needed.left) - ax),
+        top: Math.max(crop.y, Math.floor(needed.top) - ay),
+        right: Math.min(crop.x + crop.width, Math.ceil(needed.right) + ax),
+        bottom: Math.min(crop.y + crop.height, Math.ceil(needed.bottom) + ay),
+      };
+      if (rect.right <= rect.left || rect.bottom <= rect.top) continue;
+      if (
+        rect.right - rect.left > SOURCE_PATCH_WIDTH ||
+        rect.bottom - rect.top > SOURCE_PATCH_HEIGHT
+      )
+        throw new Error(
+          "The image could not be resized within the bounded source patch. Choose a larger output size.",
+        );
+      const patch = await sourcePatch(tiles, rect);
+      context.save();
+      context.resetTransform();
+      context.beginPath();
+      context.rect(x - window.left, y - window.top, width, height);
+      context.clip();
+      context.setTransform(transform);
+      context.beginPath();
+      context.rect(crop.x, crop.y, crop.width, crop.height);
+      context.clip();
+      context.filter = filter;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(patch, rect.left, rect.top);
+      context.restore();
+    }
+}
+async function prepareResamplingRaster(tiles, crop, matrix) {
+  let raster = tiles,
+    region = { ...crop },
+    map = matrix;
+  // Keep the final sampling footprint bounded even when a very tall capture is
+  // reduced to a handful of pixels. Only axes needing reduction are processed.
+  while (
+    Math.hypot(map.a, map.b) < 1 / 16 ||
+    Math.hypot(map.c, map.d) < 1 / 16
+  ) {
+    const width =
+        Math.hypot(map.a, map.b) < 1 / 16
+          ? Math.max(1, Math.ceil(region.width / 8))
+          : region.width,
+      height =
+        Math.hypot(map.c, map.d) < 1 / 16
+          ? Math.max(1, Math.ceil(region.height / 8))
+          : region.height;
+    const reduction = new DOMMatrix()
+        .scale(width / region.width, height / region.height)
+        .translate(-region.x, -region.y),
+      next = [];
+    for (let top = 0; top < height; top += 1024)
+      for (let left = 0; left < width; left += 2048) {
+        const w = Math.min(2048, width - left),
+          h = Math.min(1024, height - top),
+          canvas = new OffscreenCanvas(w, h);
+        await paintRasterWindow(
+          canvas.getContext("2d", { alpha: true }),
+          raster,
+          region,
+          reduction,
+          { left, top, width: w, height: h },
+        );
+        next.push({
+          index: next.length,
+          destXPx: left,
+          destYPx: top,
+          widthPx: w,
+          heightPx: h,
+          blob: await canvas.convertToBlob({ type: "image/png" }),
+        });
+      }
+    raster = next;
+    region = { x: 0, y: 0, width, height };
+    map = matrix.multiply(
+      new DOMMatrix()
+        .translate(crop.x, crop.y)
+        .scale(crop.width / width, crop.height / height),
+    );
+  }
+  return { tiles: raster, crop: region, matrix: map };
+}
+
 export async function renderEditedCapture(
   record,
   tiles,
@@ -1031,9 +1287,16 @@ export async function renderEditedCapture(
     columns = Math.ceil(out.width / 2048),
     rows = Math.ceil(out.height / 1024),
     total = columns * rows;
-  const matrix = outputMatrix(document).translate(-c.x, -c.y),
-    inverse = matrix.inverse(),
-    sorted = [...tiles].sort((a, b) => a.index - b.index);
+  const matrix = outputMatrix(document).translate(-c.x, -c.y);
+  const raster = await prepareResamplingRaster(
+    [...tiles].sort((a, b) => a.index - b.index),
+    c,
+    matrix,
+  );
+  // Pointwise color adjustments apply to the composed source, including alpha
+  // overlaps in imported projects, just as they do in the grouped preview.
+  const filter = neutral ? "none" : effectFilter(document),
+    compositeEffects = !neutral && tilesOverlap(raster.tiles);
   const blurs = document.objects.filter((s) => s.type === "blur"),
     pad = blurs.length
       ? Math.ceil(3 * Math.max(...blurs.map((s) => s.radius || 12)))
@@ -1046,45 +1309,15 @@ export async function renderEditedCapture(
         ph = height + 2 * pad;
       const source = new OffscreenCanvas(pw, ph),
         ctx = source.getContext("2d", { alpha: true });
-      const corners = [
-        [left - pad, top - pad],
-        [left + width + pad, top - pad],
-        [left - pad, top + height + pad],
-        [left + width + pad, top + height + pad],
-      ].map(([x, y]) => inverse.transformPoint(new DOMPoint(x, y)));
-      const x1 = Math.min(...corners.map((p) => p.x)),
-        x2 = Math.max(...corners.map((p) => p.x)),
-        y1 = Math.min(...corners.map((p) => p.y)),
-        y2 = Math.max(...corners.map((p) => p.y));
-      ctx.setTransform(
-        new DOMMatrix().translate(pad - left, pad - top).multiply(matrix),
+      await paintRasterWindow(
+        ctx,
+        raster.tiles,
+        raster.crop,
+        raster.matrix,
+        { left: left - pad, top: top - pad, width: pw, height: ph },
+        filter,
+        compositeEffects,
       );
-      ctx.beginPath();
-      ctx.rect(c.x, c.y, c.width, c.height);
-      ctx.clip();
-      ctx.filter = effectFilter(document);
-      ctx.imageSmoothingQuality = "high";
-      for (const tile of sorted) {
-        if (
-          tile.destXPx > x2 ||
-          tile.destXPx + tile.widthPx < x1 ||
-          tile.destYPx > y2 ||
-          tile.destYPx + tile.heightPx < y1
-        )
-          continue;
-        const bitmap = await createImageBitmap(tile.blob);
-        try {
-          ctx.drawImage(
-            bitmap,
-            tile.destXPx,
-            tile.destYPx,
-            tile.widthPx,
-            tile.heightPx,
-          );
-        } finally {
-          bitmap.close();
-        }
-      }
       const canvas = new OffscreenCanvas(width, height),
         outputContext = canvas.getContext("2d", { alpha: true });
       outputContext.drawImage(source, -pad, -pad);

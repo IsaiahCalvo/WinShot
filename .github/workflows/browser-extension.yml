@@ -22,11 +22,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-2022]
     runs-on: ${{ matrix.os }}
-    # Windows runs the 41-case rendering smoke plus the 115-case full suite.
-    # The verified run needed 23.7 minutes for tests before setup/artifact time.
+    # Windows runs both the rendering smoke and the full capture/editor suite.
+    # Leave room for software rendering plus setup and artifact upload.
     timeout-minutes: 35
     env:
       WINSHOT_TEST_SOFTWARE_GL: ${{ matrix.os == 'windows-2022' && '1' || '0' }}
+      # Real native focus, rather than Windows headless's contradictory window flags.
+      WINSHOT_TEST_WINDOW_FOCUS_HEADED: ${{ matrix.os == 'windows-2022' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -143,6 +143,9 @@
     current.observer?.disconnect();
     const failures = [];
 
+    // Keep static covers in place until pending GPU work has completed. The
+    // session/watchdog are already cleared; the normal restoration order follows.
+    drainFrozenCanvasWork(current);
     for (const snapshot of current.surfaceSnapshots.values()) snapshot.remove();
 
     for (const [element, properties] of [...current.changedStyles].reverse()) {
@@ -531,6 +534,9 @@
   }
 
   async function waitForStable(timeoutMs) {
+    // GPU synchronization precedes the unchanged DOM-settling budget, like the
+    // native screenshot readback that follows these stability checks.
+    drainFrozenCanvasWork(session);
     const start = performance.now();
     let previous = "";
     let repeats = 0;
@@ -568,6 +574,25 @@
     return [...new Set(session.roots.flatMap(root => root === document
       ? document.getAnimations()
       : [...root.querySelectorAll("*")].flatMap(node => node.getAnimations())))];
+  }
+
+  function drainFrozenCanvasWork(capture) {
+    // Hidden WebGL canvases can keep drawing without compositor backpressure.
+    // A real CPU readback bounds that work before each tile and before unfreezing.
+    // Chromium implements WebGL finish() as flush(), so it cannot supply this wait.
+    for (const canvas of capture.surfaceSnapshots.keys()) {
+      if (!canvas.isConnected || !canvas.width || !canvas.height) continue;
+      try {
+        const fence = document.createElement("canvas");
+        fence.width = 1; fence.height = 1;
+        const context = fence.getContext("2d", { willReadFrequently: true });
+        context.drawImage(canvas, 0, 0, 1, 1, 0, 0, 1, 1);
+        context.getImageData(0, 0, 1, 1);
+      } catch {
+        // Tainted, transferred, or unavailable surfaces retain their existing
+        // browser capture and restoration checks; never replace their context.
+      }
+    }
   }
 
   function snapshotVisibleCanvases() {
