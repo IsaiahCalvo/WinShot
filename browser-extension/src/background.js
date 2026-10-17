@@ -921,7 +921,7 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
     let tabs;
     if (kind === "all-tabs") {
       const query = settings.batchScope === "all-windows" ? {} : { windowId: original.windowId, ...(settings.batchScope === "selected-tabs" ? { highlighted: true } : {}) };
-      const candidates = await chrome.tabs.query(query);
+      const candidates = (await chrome.tabs.query(query)).filter((tab) => tab.incognito === original.incognito);
       const supported = candidates.filter((tab) => supportedBatchUrl(tab.url));
       tabs = supported.slice(0, 20);
       for (const tab of candidates.filter((tab) => !supportedBatchUrl(tab.url))) {
@@ -978,7 +978,13 @@ async function runBatch(kind, urls = [], batchOptions = {}) {
 
   const summary = { id: batchId, kind, mode, cancelled: cancelled || controller.signal.aborted, scope: settings.batchScope, output: settings.batchOutput, combinePdf: Boolean(batchOptions.combinePdf || settings.batchOutput === "combined-pdf"), createdAt: new Date().toISOString(), results, skipped };
   await chrome.storage.local.set({ [`batch:${batchId}`]: summary });
-  await chrome.tabs.create({ windowId: original.windowId, active: !controller.signal.aborted, url: chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`) });
+  const resultsUrl = chrome.runtime.getURL(`src/batch.html?id=${encodeURIComponent(batchId)}`);
+  try {
+    await chrome.tabs.create({ windowId: original.windowId, active: !controller.signal.aborted, url: resultsUrl });
+  } catch {
+    // Cleanup already treats the source window as gone; still open results in a live window.
+    await chrome.tabs.create({ active: !controller.signal.aborted, url: resultsUrl });
+  }
   return {
     batchId,
     complete: results.filter((item) => item.state === SessionState.COMPLETE).length,
