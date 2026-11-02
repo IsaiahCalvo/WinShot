@@ -107,6 +107,9 @@ public partial class HistoryWindow : Window
             StopWatcher();
             // History is going away; a preview left fading has nothing to fade in front of.
             _preview?.CloseNow();
+            // Full-size neighbours decoded for Quick Look are only worth their memory while
+            // History is open to step through them.
+            FastQuickPreviewWindow.ClearPrefetch();
             _windowFade?.Dispose();
             _windowFade = null;
             _emptyStateFade?.Dispose();
@@ -1216,6 +1219,13 @@ public partial class HistoryWindow : Window
         preview.Show();
         // Keep keyboard focus on History so Left/Right stepping continues to work.
         Activate();
+
+        // Decode the neighbours now, so the next arrow press opens without a beat.
+        int index = _items.IndexOf(target);
+        if (index > 0)
+            FastQuickPreviewWindow.Prefetch(_items[index - 1].FilePath);
+        if (index >= 0 && index + 1 < _items.Count)
+            FastQuickPreviewWindow.Prefetch(_items[index + 1].FilePath);
     }
 
     private void ClosePreview()
