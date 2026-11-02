@@ -119,7 +119,7 @@ public partial class EditorWindow
         _quickBarDividerB = Divider();
         row.Children.Add(_quickBarDividerB);
 
-        _quickBarDuplicateBtn = QuickBarButton(Icon("SurveyIcon.Copy"), "Duplicate (Ctrl+D)", DuplicateSelectedAnnotations);
+        _quickBarDuplicateBtn = QuickBarButton(Icon("SurveyIcon.Duplicate"), "Duplicate (Ctrl+D)", DuplicateSelectedAnnotations);
         _quickBarDeleteBtn = QuickBarButton(Icon("SurveyIcon.Trash"), "Delete (Del)", DeleteSelected);
         _quickBarMoreBtn = QuickBarButton(Icon("SurveyIcon.More"), "More", OpenQuickBarMoreMenu);
         row.Children.Add(_quickBarDuplicateBtn);

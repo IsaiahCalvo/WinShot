@@ -92,4 +92,14 @@ public class PinnedToolsTests
     [Fact]
     public void UnknownSide_FallsBackToLeft() =>
         Assert.Equal(PinDockSide.Left, PinnedTools.ParseSide("nowhere"));
+
+    [Fact]
+    public void EveryPinKindIsListedUnderOneOfTheMenuGroups()
+    {
+        foreach (PinKind kind in PinnedTools.Kinds)
+            Assert.Contains(PinnedTools.Group(kind), PinnedTools.MenuGroups);
+        Assert.Equal("Shapes", PinnedTools.Group(PinnedTools.Kind("cloud")!));
+        Assert.Equal("Draw", PinnedTools.Group(PinnedTools.Kind("eraser")!));
+        Assert.Equal("Text", PinnedTools.Group(PinnedTools.Kind("callout")!));
+    }
 }

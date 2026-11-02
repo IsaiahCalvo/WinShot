@@ -316,6 +316,7 @@ public partial class EditorWindow : Window
 
         WireSelectionQuickBar();
         WireBrushAdjust();
+        WireSurveyRow();
         WirePinnedDock();
         Viewport.LostMouseCapture += (_, _) =>
         {
@@ -1045,6 +1046,50 @@ public partial class EditorWindow : Window
     {
         if (sender is not RadioButton rb || rb.Tag is not string tag || !Enum.TryParse(tag, out EditorTool tool))
             return;
+        if (_syncingShapeButtons) return;
+        ArmTool(rb, tool);
+        // Survey cloudShapeTool.js: pressing Rectangle while the cloud border is on goes back
+        // to a solid rectangle — Cloud and Rectangle are two buttons for one tool.
+        if (IsLoaded && ReferenceEquals(rb, RectangleToolBtn) && _lineStyle == LineBorderStyle.Cloud)
+        {
+            ApplyQuickBarLineStyle(LineBorderStyle.Solid);
+            UpdateContextPanels();
+        }
+    }
+
+    /// <summary>
+    /// Survey's Shape row Cloud button: Rectangle with the cloud border
+    /// (utils/cloudShapeTool.js resolveShapeToolPick).
+    /// </summary>
+    private void OnCloudToolChecked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingShapeButtons || sender is not RadioButton rb) return;
+        ArmTool(rb, EditorTool.Rectangle);
+        if (!IsLoaded) return;
+        ApplyQuickBarLineStyle(LineBorderStyle.Cloud);
+        UpdateContextPanels();
+    }
+
+    private bool _syncingShapeButtons;
+
+    /// <summary>
+    /// Cloud shows pressed exactly while Rectangle is armed with the cloud border, and
+    /// Rectangle never shows pressed then (cloudShapeTool.js isShapeToolButtonActive). Keys,
+    /// pins and the line-style menu can all get there without pressing either button.
+    /// </summary>
+    private void SyncCloudButton()
+    {
+        if (CloudToolBtn is null || RectangleToolBtn is null || _tool != EditorTool.Rectangle) return;
+        bool cloud = _lineStyle == LineBorderStyle.Cloud;
+        RadioButton want = cloud ? CloudToolBtn : RectangleToolBtn;
+        if (want.IsChecked == true) return;
+        _syncingShapeButtons = true;
+        try { want.IsChecked = true; }
+        finally { _syncingShapeButtons = false; }
+    }
+
+    private void ArmTool(RadioButton rb, EditorTool tool)
+    {
         // Checked also fires while XAML is parsing, before sibling elements exist.
         if (IsLoaded)
         {
@@ -1066,8 +1111,11 @@ public partial class EditorWindow : Window
                 EyedropSwatch.Visibility = Visibility.Collapsed;
         }
         RememberGroupTool(tool);
+        // Survey closes the group row when Pan or Select is armed (PDFViewer.jsx "Close
+        // secondary toolbar when pan or select tools are active").
+        if (tool is EditorTool.Select or EditorTool.Pan) _imageGroupOpen = false;
         _tool = tool;
-        if (ReferenceEquals(rb, RectangleToolBtn))
+        if (ReferenceEquals(rb, RectangleToolBtn) || ReferenceEquals(rb, CloudToolBtn))
         {
             _fillMode = ShapeFillMode.None;
             if (FillNoneBtn is not null) FillNoneBtn.IsChecked = true;
@@ -1100,43 +1148,42 @@ public partial class EditorWindow : Window
             foreach (var rb in ShapeGroupPanel.Children.OfType<RadioButton>()) yield return rb;
         if (TextGroupPanel is not null)
             foreach (var rb in TextGroupPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (EffectsGroupPanel is not null)
+            foreach (var rb in EffectsGroupPanel.Children.OfType<RadioButton>()) yield return rb;
     }
 
     private void OnDrawGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Draw")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastDrawTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Draw" || _imageGroupOpen)
+            CheckToolButton(_lastDrawTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnShapeGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Shapes")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastShapeTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Shapes" || _imageGroupOpen)
+            CheckToolButton(_lastShapeTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnTextGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Text")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastTextTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Text" || _imageGroupOpen)
+            CheckToolButton(_lastTextTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
@@ -1148,11 +1195,11 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnImageGroupClick(object sender, RoutedEventArgs e)
     {
+        // The one chip that still toggles: its row is mostly one-shot actions and it arms
+        // nothing, so closing it never leaves a live tool with no row on screen.
         if (EditorShellContract.GroupFor(_tool, false) == "Image")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            _groupRowOpen = true;
-        _imageGroupOpen = _groupRowOpen && EditorShellContract.GroupFor(_tool, false) != "Image";
+            return;
+        _imageGroupOpen = !_imageGroupOpen;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
@@ -1166,13 +1213,12 @@ public partial class EditorWindow : Window
 
     private void OnEffectsGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Effects")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastEffectsTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Effects" || _imageGroupOpen)
+            CheckToolButton(_lastEffectsTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
@@ -1231,6 +1277,7 @@ public partial class EditorWindow : Window
         Paint(ShapeGroupBtn, group == "Shapes");
         Paint(TextGroupBtn, group == "Text");
         Paint(EffectsGroupBtn, group == "Effects");
+        Paint(ImageGroupBtn, _imageGroupOpen || group == "Image");
         PaintCropChrome(_tool == EditorTool.Crop);
     }
 
@@ -1337,17 +1384,20 @@ public partial class EditorWindow : Window
         if (Has(EditorContextControls.Magnification)) SyncMagnifySlider();
         if (Has(EditorContextControls.LineStyle)) SyncSketchCheck();
 
-        // Survey's `activeCategoryDropdown` follows the ARMED tool only: it starts null, is
-        // force-cleared whenever activeTool becomes pan/select/text-select (PDFViewer.jsx:4340,
-        // :4558-4568), and no call site anywhere reads the selection. Selecting a committed mark
-        // must therefore never re-open the 34px strip. GroupFor returns "" for Select and Pan.
-        string group = EditorShellContract.GroupFor(_tool, false);
-        if (group.Length > 0 && group != "Image") _imageGroupOpen = false;
-        DrawGroupPanel.Visibility = Show(_groupRowOpen && group == "Draw");
-        ShapeGroupPanel.Visibility = Show(_groupRowOpen && group == "Shapes");
-        TextGroupPanel.Visibility = Show(_groupRowOpen && group == "Text");
-        EffectsGroupPanel.Visibility = Show(_groupRowOpen && group == "Effects");
-        ImageGroupPanel.Visibility = Show(_groupRowOpen && (group == "Image" || _imageGroupOpen));
+        // Row 1, right of the group chips (Survey toolbarRows.js resolveToolBarGroup): the
+        // armed tool's group; under Select or Pan with a mark picked, THAT mark's group, so a
+        // picked pen stroke reads pen / highlighter / eraser up top (pressing one arms it);
+        // under Select with nothing picked (or a mark no group makes), Box / Lasso.
+        string group = ToolBarGroup(chrome);
+        DrawGroupPanel.Visibility = Show(group == "Draw");
+        ShapeGroupPanel.Visibility = Show(group == "Shapes");
+        TextGroupPanel.Visibility = Show(group == "Text");
+        EffectsGroupPanel.Visibility = Show(group == "Effects");
+        ImageGroupPanel.Visibility = Show(group == "Image");
+        bool selectModes = group.Length == 0 && _tool == EditorTool.Select;
+        if (SelectModePanel is not null) SelectModePanel.Visibility = Show(selectModes);
+        if (ToolSlotDivider is not null) ToolSlotDivider.Visibility = Show(group.Length > 0 || selectModes);
+        SyncCloudButton();
 
         EditorColorBar.Visibility = Visibility.Visible;
         if (SizeEffectHost is not null)
@@ -1361,18 +1411,61 @@ public partial class EditorWindow : Window
         if (SecondaryToolPanel is not null)
             SecondaryToolPanel.Visibility = Show(props);
         EditorFormatBar.Visibility = Visibility.Visible;
-        // Survey portals the rich-text strip into the 34px sub-row and suppresses the
-        // category portal for as long as it is up (AppShell.jsx:1756-1772, 2009).
+        // The text formatting sits IN row 2 after Aa (Survey first-run walk 2026-10-21 #10),
+        // not in a bar of its own, so it never leaves its home in the format row.
         bool richText = TextStylePanel.Visibility == Visibility.Visible;
-        HostRichTextRow(richText);
-        EditorGroupToolsHost.Visibility = Show(_groupRowOpen && !richText && group is "Draw" or "Shapes" or "Text" or "Effects" or "Image");
-        // Survey PORTALS the 34px strip in only while something occupies it
-        // (PDFViewer.jsx:32015, AppShell.jsx:1756-1772); with Pan/Select active or the chip
-        // toggled shut there is no band and no hairline at all — the top bar butts straight
-        // onto the canvas. Collapsing the Border (not just its children) reproduces that,
-        // and because the band overlays the canvas the viewport never resizes or re-fits.
-        EditorGroupBar.Visibility = Show(EditorGroupToolsHost.Visibility == Visibility.Visible || richText);
+        HostRichTextRow(false);
+        // Row 2 is on screen exactly when it has settings to show (toolbarRows.js
+        // showsFormatRow): Pan, and Select with nothing picked, have none, and then there is
+        // no band and no hairline — the top bar butts straight onto the canvas. The band
+        // overlays the canvas, so the picture never moves when it comes and goes.
+        bool formatRow = props || richText;
+        EditorFormatHost.Visibility = Show(formatRow);
+        EditorGroupBar.Visibility = Show(formatRow);
+        SyncSurveyRow();
+        if (_pinDock is not null) Dispatcher.BeginInvoke(PlacePinDock, DispatcherPriority.Loaded);
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// Which group's tools row 1 shows right of the chips ("" for none). Survey
+    /// toolbarRows.js resolveToolBarGroup: an open chip first (WinShot's Image chip, which
+    /// arms nothing), then the armed tool's group, then — under Select or Pan — the picked
+    /// mark's.
+    /// </summary>
+    private string ToolBarGroup(EditorTool chrome)
+    {
+        string armed = EditorShellContract.GroupFor(_tool, false);
+        if (armed.Length > 0 && armed != "Image") _imageGroupOpen = false;
+        if (_imageGroupOpen) return "Image";
+        if (armed.Length > 0) return armed;
+        if (_tool is EditorTool.Select or EditorTool.Pan && _selected is not null && _activeText is null)
+        {
+            string picked = EditorShellContract.GroupFor(chrome, false);
+            if (picked is "Draw" or "Shapes" or "Text" or "Effects") return picked;
+        }
+        return "";
+    }
+
+    private bool _syncingSelectMode;
+
+    /// <summary>Row 1's Box / Lasso pair under Select (Survey w46 "select modes in top bar").</summary>
+    private void OnSelectModeChecked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _syncingSelectMode || sender is not RadioButton rb) return;
+        SetLassoSelect(rb.Tag as string == "Lasso");
+    }
+
+    private void SyncSelectModeButtons()
+    {
+        if (SelectBoxModeBtn is null || SelectLassoModeBtn is null) return;
+        _syncingSelectMode = true;
+        try
+        {
+            SelectBoxModeBtn.IsChecked = !_lassoSelect;
+            SelectLassoModeBtn.IsChecked = _lassoSelect;
+        }
+        finally { _syncingSelectMode = false; }
     }
 
     /// <summary>
@@ -1466,19 +1559,17 @@ public partial class EditorWindow : Window
     /// </summary>
     private double MeasureFormatSlack()
     {
-        double inner = TopToolbar is { ActualWidth: > 0 } top
-            ? top.ActualWidth
-            : Math.Max(0, ActualWidth - 24);
-        double tools = MeasureWidth(ToolPanel);
-        // Tools are centred; the props block gets the star column to their right.
-        // Pan/Select hang off the cluster's left inside that same star column, so they eat
-        // slack even though they are not part of the centred measure.
-        double right = 64 + MeasureWidth(PanSelectPanel); // divider, panel margins, bar padding
+        // The settings own row 2 (Survey w44): the whole band less its 48px centring margin
+        // and a gutter each side, less what always stays (colour and size) and the "..." button.
+        double inner = EditorGroupBar is { ActualWidth: > 0 } bar
+            ? bar.ActualWidth - 48
+            : Math.Max(0, (Viewport?.ActualWidth ?? ActualWidth) - 48);
+        double right = 24 + 40;
         if (ColorPanel?.Visibility == Visibility.Visible)
             right += MeasureWidth(ColorPanel);
         if (SizeEffectHost?.Visibility == Visibility.Visible)
             right += MeasureWidth(SizeEffectHost);
-        double slack = (inner - tools) / 2 - right;
+        double slack = inner - right;
         // Letters and Apply crop stay on the strip even if tools walk a few DIP.
         if (TextStylePanel?.Visibility == Visibility.Visible && TextFormatButtons is not null)
             slack = Math.Max(slack, MeasureWidth(TextFormatButtons) + 4);
@@ -1530,10 +1621,7 @@ public partial class EditorWindow : Window
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) == "Apply crop")
                     yield return inner;
-        // While the strip is portalled into the 34px sub-row it owns a full-width row of
-        // its own, so nothing in it can overflow the top bar.
-        if (TextStylePanel?.Visibility == Visibility.Visible
-            && !ReferenceEquals(EditorRichTextHost?.Child, TextStylePanel))
+        if (TextStylePanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in TextStylePanel.Children.OfType<FrameworkElement>())
             {
                 if (inner is Popup) continue;
@@ -1892,6 +1980,8 @@ public partial class EditorWindow : Window
         // never needs measuring.
         FitComboToLongestItem(ArrowStyleBox);
         FitComboToLongestItem(LineStyleBox);
+        // Room for the 28px stroke sample and its 8px gap in front of each style name.
+        if (LineStyleBox is not null) LineStyleBox.Width += 36;
         FitComboToLongestItem(FontFamilyBox);
         FitComboToLongestItem(FontSizeBox);
         FitComboToLongestItem(AlignBox);
@@ -1901,7 +1991,9 @@ public partial class EditorWindow : Window
 
     }
 
-    private double ActiveSize() => ChromeTool() switch
+    private double ActiveSize() => SizeForTool(ChromeTool());
+
+    private double SizeForTool(EditorTool tool) => tool switch
     {
         // Survey has no highlighter width of its own: the Width box shows the shared
         // strokeWidth (default 3) and the highlighter draws at max(that, 8).
@@ -2015,6 +2107,7 @@ public partial class EditorWindow : Window
     private void SyncColorWellIndicator()
     {
         if (CurrentColorIndicator is null) return;
+        SyncSurveyRow();
         EditorTool chrome = ChromeTool();
         bool fillTabs = EditorShellContract.ContextFor(chrome, ChromeFilledRectangle())
             .HasFlag(EditorContextControls.FillStrokeTabs);
@@ -2471,6 +2564,7 @@ public partial class EditorWindow : Window
     private void SetEraserPartial(bool partial)
     {
         _eraserPartial = partial;
+        SyncSurveyRow();
         // The selected row keeps Survey's #1f2430 wash (PDFViewer.jsx:32170).
         var selectedRow = new SolidColorBrush(Color.FromRgb(0x1F, 0x24, 0x30));
         if (EraserPartialItem is not null)
@@ -2479,11 +2573,13 @@ public partial class EditorWindow : Window
             EraserFullItem.Background = partial ? Brushes.Transparent : selectedRow;
 
         // Survey never shows a static "Eraser": the chip IS the mode (PDFViewer.jsx:32080-32082).
-        string label = partial ? "Partial erase" : "Full stroke erase";
+        // Survey PASS 7 (2026-09-22 review): the tool is called "Eraser" whatever kind is live —
+        // the Partial / Whole toggle in row 2 shows the kind, and two controls must not answer
+        // to one name.
         if (EraserToolBtn is not null)
         {
-            EraserToolBtn.ToolTip = ToolTipWithKey(label, partial ? "Shift+E" : "E");
-            System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, label);
+            EraserToolBtn.ToolTip = ToolTipWithKey("Eraser", "E");
+            System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, "Eraser");
         }
         // The combo's XAML SelectedIndex fires this before the ctor has assigned _settings.
         if (_settings is not null && _settings.Current.EraserPartial != partial)

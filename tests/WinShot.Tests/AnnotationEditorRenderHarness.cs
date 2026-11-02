@@ -1132,7 +1132,7 @@ public class AnnotationEditorRenderHarness
                 // (AppShell.jsx:1344). WinShot has only the right rail, so the sub-row's host
                 // carries a 48px left margin to restore that symmetry. Both centres must match.
                 {
-                    var toolsHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
+                    var toolsHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
                     var chips = (FrameworkElement)editor.FindName("ToolPanel")!;
                     editor.UpdateLayout();
                     double subL = toolsHost.TransformToAncestor(editor).Transform(new Point(0, 0)).X;

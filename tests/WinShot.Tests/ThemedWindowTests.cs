@@ -1288,9 +1288,11 @@ public class ThemedWindowTests
 
         Assert.Null(editor.FindName("EditorStyleBar"));
         var groupBar = (Border)editor.FindName("EditorGroupBar")!;
-        // Survey PORTALS the 34px sub-row in only while a category is open
-        // (PDFViewer.jsx:32015) and OVERLAYS it on the canvas (AppShell.jsx:2727-2740).
-        var groupHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
+        // Survey (RULED 2026-09-26 w44 "flip rows"): row 1 holds the group's TOOLS right of
+        // the chips; row 2 — the 34px band that OVERLAYS the canvas — holds the settings, and
+        // is only on screen when there are settings to show.
+        var groupHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
+        var formatRow = (FrameworkElement)editor.FindName("EditorFormatRow")!;
         var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
@@ -1345,20 +1347,27 @@ public class ThemedWindowTests
         Assert.Equal(10d, divider.Margin.Left + select.Margin.Right);
         Assert.Equal(12d, divider.Margin.Right + panSelect.Margin.Right
             + ((Button)editor.FindName("DrawGroupBtn")!).Margin.Left);
-        Assert.True(IsLogicalDescendant(topToolbar, formatBar),
-            "Format chrome must sit on the primary row next to color and size, like Survey.");
+        Assert.True(IsLogicalDescendant(groupBar, formatBar),
+            "The settings sit in row 2, the band under the tool bar, like Survey (w44).");
+        Assert.True(IsLogicalDescendant(groupBar, secondary),
+            "Colour and width sit in row 2 with the rest of the settings.");
+        Assert.True(IsLogicalDescendant(topToolbar, groupTools),
+            "A group's tools sit in the tool bar right of the chips, like Survey (w44).");
         Assert.False(IsLogicalDescendant(topToolbar, groupBar),
-            "Group tools sit in a chrome strip over the canvas so they do not shrink the image.");
+            "Row 2 lies over the canvas so it does not shrink the image.");
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
         Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
             el => el.Name is "EditorStyleBar");
 
-        // The pointer tool has no controls of its own, so the sub-row disappears entirely.
+        // The pointer tool has no settings of its own, so row 2 disappears entirely, and
+        // row 1 shows Select's Box / Lasso modes where a group's tools go (Survey w46).
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
         Assert.Equal(Visibility.Collapsed, groupHost.Visibility);
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("SelectModePanel")!).Visibility);
+        Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("SelectModePanel")!));
         // No category open -> no band and no hairline at all: the top bar butts straight
         // onto the canvas, which is why both are #181c24 in Survey.
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
@@ -1383,34 +1392,31 @@ public class ThemedWindowTests
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupHost.Visibility);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
-        // AppShell.jsx:1637-1641: the chip is a TOGGLE — clicking the ACTIVE category
-        // closes the sub-row and leaves the tool alone; the derive-from-tool effect
-        // (PDFViewer.jsx:4535-4555) does not re-open it because the tool never changed.
+        // Survey (UX 2026-09-22): a second click on the LIT chip is a no-op. While one of a
+        // group's tools is armed its tools stay on screen, so the armed tool is never live
+        // and unseeable; Pan, Select or Escape is how it is put down.
         var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
-        shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        editor.UpdateLayout();
-        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
-        Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
-        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
-            "Opening or closing the sub-row must not resize the canvas — it overlays it.");
         shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         editor.UpdateLayout();
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
-        // Survey's sub-row centres on the WINDOW, not on the canvas column: the strip is
-        // justifyContent:'center' (PDFViewer.jsx:32026) inside a centre column that is
-        // symmetric because BOTH rails are 48px (AppShell.jsx:2692/:2841), so it lands on
-        // the same x as the top bar's centred cluster (AppShell.jsx:1344) and the sub-row
-        // tools sit under the chip that opened them. WinShot has only the right rail, so
-        // the sub-row host carries a 48px left margin to restore that symmetry — which
-        // means the strip is NOT centred in its own bar; it is centred on the chips.
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            "Row 2 coming and going must not resize the canvas — it overlays it.");
+        // Row 1: the group's tools hang off the chips' right edge, so the chips never move.
         double arrowToolsW = groupTools.ActualWidth;
-        double arrowToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X
-            + arrowToolsW / 2;
+        double chipsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor).X;
+        Assert.True(groupTools.TranslatePoint(new Point(0, 0), editor).X >= chipsRight - 0.5,
+            "The group's tools must sit right of the chips, not over them.");
+        // Row 2 is centred under the chips (Survey w48 "rows 2/3 centred"). WinShot has only
+        // the right rail, so the band's host carries a 48px left margin to put its centre on
+        // the window's centre, where the chips are.
         double chipsCentre = primary.TranslatePoint(new Point(0, 0), editor).X
             + primary.ActualWidth / 2;
-        Assert.True(Math.Abs(arrowToolsCentre - chipsCentre) < 1,
-            $"Shape sub-row is not under the chips that opened it: sub-row={arrowToolsCentre:0.##} chips={chipsCentre:0.##}");
+        double arrowRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
+        Assert.True(Math.Abs(arrowRowCentre - chipsCentre) < 1,
+            $"Row 2 is not centred under the chips: row={arrowRowCentre:0.##} chips={chipsCentre:0.##}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
@@ -1425,11 +1431,10 @@ public class ThemedWindowTests
         Assert.Equal("WIDTH", sizeHeading.Text);
 
         Assert.Null(editor.FindName("EraserPartialBtn"));
-        // Survey keeps eraser mode in the tool's OWN split menu inside the Draw sub-row
-        // (PDFViewer.jsx:32095-32135), not in a top-row combo.
+        // Survey PASS 7 (board 13): the eraser's kind is a Partial / Whole toggle in row 2,
+        // not a combo and not a chevron menu inside the eraser button.
         Assert.Null(editor.FindName("EraserModeBox"));
-        Assert.NotNull(editor.FindName("EraserModePopup"));
-        Assert.NotNull(editor.FindName("EraserCaretBtn"));
+        Assert.Equal(Visibility.Collapsed, ((FrameworkElement)editor.FindName("EraserCaretBtn")!).Visibility);
         typeof(EditorWindow).GetMethod("FitEditorCombos",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, null);
@@ -1501,17 +1506,18 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
-        // Same rule as the Shape sub-row above: centred on the top bar's chips, not on the bar.
+        // Same rule as the Shape row above: row 2 centred under the chips.
         double textToolsW = groupTools.ActualWidth;
-        double textToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X + textToolsW / 2;
-        Assert.True(Math.Abs(textToolsCentre - chipsCentre) < 1,
-            $"Text sub-row is not under the chips that opened it: sub-row={textToolsCentre:0.##} chips={chipsCentre:0.##}");
+        double textRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
+        Assert.True(Math.Abs(textRowCentre - chipsCentre) < 1,
+            $"Text row 2 is not centred under the chips: row={textRowCentre:0.##} chips={chipsCentre:0.##}");
         Assert.True(textToolsW < arrowToolsW - 8,
             $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
         var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
         Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
         Point sizeOrigin = sizeField.TranslatePoint(new Point(0, 0), editor);
-        Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 16,
+        // Survey's rule between the colour and the width sits in this gap (showsColourRule).
+        Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 24,
             $"Color well and size field have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Text vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
@@ -1565,7 +1571,8 @@ public class ThemedWindowTests
         Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
         Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
             $"Done overflows the window: done={doneOrigin.X}+{done.ActualWidth} win={editor.ActualWidth}");
-        Assert.Equal(Visibility.Visible, overflowBtn.Visibility);
+        // Row 2 has the whole band to itself, so the callout's settings may well all fit; if
+        // anything did go into "...", it is never the B / I / U / S letters.
         Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name is "TextFormatButtons" or "BoldBtn");
         Assert.True(IsLogicalDescendant(formatBar, textButtons));
@@ -1591,12 +1598,12 @@ public class ThemedWindowTests
         // annotation is merely selected (AppShell.jsx:1756 gates on bottomToolbarApi.richTextEditor).
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
-        // The 34px category strip follows the ARMED tool only: `activeCategoryDropdown` starts
-        // null and is force-cleared whenever activeTool becomes pan/select/text-select
-        // (PDFViewer.jsx:4340, :4558-4568) — selecting a committed mark never re-opens it. The
-        // format chrome above still follows the selection (contextTool), hence color stays up.
-        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
-        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        // Survey toolbarRows.js: in Select mode a picked mark brings ITS group's tools into
+        // row 1 and its settings into row 2, so a picked text box reads Text / Callout up top
+        // and its colour and width below. Box / Lasso give way to them.
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("SelectModePanel")!).Visibility);
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
         // No category chip is gold under Select either (AppShell.jsx:1647/1666/1685/1719).
         Assert.Equal(
             ((SolidColorBrush)editor.FindResource("ChromeTextBrush")).Color,
@@ -1672,9 +1679,6 @@ public class ThemedWindowTests
             $"Apply crop runs off the top bar: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
         Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name == "CropCancelBtn");
-        Point toolsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor);
-        Assert.True(applyOrigin.X + 0.5 >= toolsRight.X - 8,
-            $"Apply crop covers tools: apply={applyOrigin.X:0} toolsRight={toolsRight.X:0}");
 
         // A group chip opens its own strip and arms that strip's first tool; Image is the
         // one that arms nothing, so clicking it cannot drop the user into a crop.

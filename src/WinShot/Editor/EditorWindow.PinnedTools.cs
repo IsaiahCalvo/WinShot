@@ -8,11 +8,13 @@ using WinShot.Core;
 namespace WinShot.Editor;
 
 /// <summary>
-/// Survey's pinned tools dock (PinnedToolsDock.jsx) on the editor canvas. "+" pins the armed tool
-/// with its current colour, size, fill and line style; clicking a pin arms that tool with those
-/// settings. Right-click a pin to replace or remove it. The dock sits on the left, right or bottom
-/// of the canvas and is dragged between them by its grip. Pins are saved for every editor window.
-/// The pure rules are in <see cref="PinnedTools"/>.
+/// Survey's pinned tools dock (PinnedToolsDock.jsx) on the editor canvas, laid out as Survey's
+/// is: the pins, then "+" (Pin a tool), a rule, "…" (the dock menu), and the grip last. "+"
+/// opens a menu that pins the tool in use with its current colour, size, fill and line style,
+/// or any tool from the Draw / Shapes / Text lists; clicking a pin arms that tool with those
+/// settings; right-click a pin to duplicate it, move it to the start or unpin it. "…" docks it
+/// left, right or bottom, and so does dragging the grip. Pins are saved for every editor
+/// window. The pure rules are in <see cref="PinnedTools"/>.
 /// </summary>
 public partial class EditorWindow
 {
@@ -66,29 +68,144 @@ public partial class EditorWindow
     {
         if (_pinDock is null || _pinDockRow is null) return;
         _pinDockRow.Children.Clear();
-        _pinDockRow.Orientation = PinSide == PinDockSide.Bottom ? Orientation.Horizontal : Orientation.Vertical;
+        bool horizontal = PinSide == PinDockSide.Bottom;
+        _pinDockRow.Orientation = horizontal ? Orientation.Horizontal : Orientation.Vertical;
 
-        _pinDockRow.Children.Add(BuildPinGrip());
         foreach (PinnedToolSetting pin in Pins.ToList())
             if (PinnedTools.Kind(pin.Kind) is PinKind kind)
                 _pinDockRow.Children.Add(BuildPinButton(pin, kind));
 
-        var add = new Button
+        Button add = DockButton("SurveyIcon.Plus", "Pin a tool");
+        add.Click += (_, e) => { e.Handled = true; OpenPinAddMenu(add); };
+        _pinDockRow.Children.Add(add);
+
+        _pinDockRow.Children.Add(new Border
+        {
+            Background = (Brush)FindResource("ChromeHairlineBrush"),
+            Width = horizontal ? 1 : 18,
+            Height = horizontal ? 18 : 1,
+            Margin = horizontal ? new Thickness(3, 0, 3, 0) : new Thickness(0, 3, 0, 3),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        Button more = DockButton("SurveyIcon.MoreHorizontal", "Pinned tools menu");
+        more.Click += (_, e) => { e.Handled = true; OpenPinDockMenu(more); };
+        _pinDockRow.Children.Add(more);
+
+        _pinDockRow.Children.Add(BuildPinGrip());
+        PlacePinDock();
+    }
+
+    private Button DockButton(string icon, string name)
+    {
+        var btn = new Button
         {
             Style = (Style)FindResource("CompactToolIconButton"),
-            Content = new ContentControl { Content = FindResource("SurveyIcon.Plus"), IsHitTestVisible = false },
-            ToolTip = "Pin the current tool with its settings",
+            Content = new ContentControl { Content = FindResource(icon), IsHitTestVisible = false },
+            ToolTip = name,
             Focusable = false,
             Margin = new Thickness(1),
         };
-        System.Windows.Automation.AutomationProperties.SetName(add, "Pin the current tool");
-        add.Click += (_, e) => { e.Handled = true; PinCurrentTool(); };
-        _pinDockRow.Children.Add(add);
-        PlacePinDock();
+        System.Windows.Automation.AutomationProperties.SetName(btn, name);
+        return btn;
+    }
+
+    private ContextMenu DockMenu(UIElement anchor)
+    {
+        var menu = new ContextMenu
+        {
+            Style = (Style)FindResource("DarkContextMenu"),
+            PlacementTarget = anchor,
+            Placement = PinSide switch
+            {
+                PinDockSide.Left => System.Windows.Controls.Primitives.PlacementMode.Right,
+                PinDockSide.Right => System.Windows.Controls.Primitives.PlacementMode.Left,
+                _ => System.Windows.Controls.Primitives.PlacementMode.Top,
+            },
+        };
+        return menu;
+    }
+
+    private MenuItem DockItem(string header, Action click, string? icon = null, bool? check = null)
+    {
+        var item = new MenuItem { Header = header, Style = (Style)FindResource("DarkMenuItem") };
+        if (check is bool on) { item.IsCheckable = true; item.IsChecked = on; }
+        else if (icon is not null) item.Icon = new ContentControl { Content = FindResource(icon), Width = 14, Height = 14 };
+        item.Click += (_, _) => click();
+        return item;
+    }
+
+    private static MenuItem DockHeading(string text) => new()
+    {
+        Header = new TextBlock { Text = text.ToUpperInvariant(), FontSize = 10, FontWeight = FontWeights.SemiBold, Opacity = 0.6 },
+        IsEnabled = false,
+        Focusable = false,
+    };
+
+    /// <summary>Survey's "Pin a tool" menu: the tool in use first, then every pinnable tool by group.</summary>
+    private void OpenPinAddMenu(UIElement anchor)
+    {
+        ContextMenu menu = DockMenu(anchor);
+        if (CurrentToolAsPin() is PinnedToolSetting current)
+        {
+            menu.Items.Add(DockItem($"Pin the tool in use ({PinnedTools.Describe(current)})", PinCurrentTool, "SurveyIcon.Pin"));
+            menu.Items.Add(new Separator());
+        }
+        foreach (string group in PinnedTools.MenuGroups)
+        {
+            menu.Items.Add(DockHeading(group));
+            foreach (PinKind kind in PinnedTools.Kinds.Where(k => PinnedTools.Group(k) == group))
+            {
+                PinKind k = kind;
+                menu.Items.Add(DockItem(kind.Label, () => AddPin(MakePinFor(k)), kind.Icon));
+            }
+        }
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Survey's dock menu: where it docks.</summary>
+    private void OpenPinDockMenu(UIElement anchor)
+    {
+        ContextMenu menu = DockMenu(anchor);
+        menu.Items.Add(DockHeading("Dock"));
+        foreach (PinDockSide side in new[] { PinDockSide.Left, PinDockSide.Bottom, PinDockSide.Right })
+        {
+            PinDockSide target = side;
+            menu.Items.Add(DockItem(side.ToString(), () => MovePinDock(target), check: PinSide == side));
+        }
+        menu.IsOpen = true;
+    }
+
+    private void MovePinDock(PinDockSide side)
+    {
+        if (_settings is null || side == PinSide) return;
+        _settings.Current.EditorPinDock = side.ToString();
+        _settings.Save();
+        RebuildPinDock();
+    }
+
+    /// <summary>A pin of the given kind with the toolbar's colour, fill and line style and that tool's own size.</summary>
+    private PinnedToolSetting MakePinFor(PinKind kind)
+    {
+        Color fill = CurrentFillBrush();
+        string? fillHex = _fillMode == ShapeFillMode.None || fill.A == 0 ? null : AnnotationStyle.ToRgbHex(fill);
+        return PinnedTools.Make(kind, AnnotationStyle.ToRgbHex(_color), _opacity * 100, SizeForTool(kind.Tool),
+            fillHex, fill.A / 2.55, _lineStyle);
+    }
+
+    private void AddPin(PinnedToolSetting pin)
+    {
+        if (_settings is null) return;
+        if (Pins.Any(p => PinnedTools.SameAs(p, pin))) return;
+        _settings.Current.EditorPinnedTools.Add(pin);
+        _settings.Save();
+        RebuildPinDock();
     }
 
     private UIElement BuildPinGrip()
     {
+        bool horizontal = PinSide == PinDockSide.Bottom;
         var grip = new Border
         {
             Background = Brushes.Transparent,
@@ -96,15 +213,18 @@ public partial class EditorWindow
             Padding = new Thickness(4),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = "Drag to move the dock to the left, right or bottom",
+            ToolTip = "Drag to dock left, right or bottom",
             Child = new ContentControl
             {
-                Content = FindResource("SurveyIcon.Grip"),
+                Content = FindResource("SurveyIcon.GripDots"),
                 IsHitTestVisible = false,
                 Foreground = (Brush)FindResource("ChromeTextMutedBrush"),
-                LayoutTransform = PinSide == PinDockSide.Bottom ? new RotateTransform(90) : Transform.Identity,
+                // Survey GripIcon: two columns of three dots on a side dock, three columns of
+                // two along the bottom.
+                LayoutTransform = horizontal ? new RotateTransform(90) : Transform.Identity,
             },
         };
+        System.Windows.Automation.AutomationProperties.SetName(grip, "Move pinned tools");
         grip.MouseLeftButtonDown += (_, e) =>
         {
             _pinGripDragging = grip.CaptureMouse();
@@ -116,13 +236,7 @@ public partial class EditorWindow
             _pinGripDragging = false;
             grip.ReleaseMouseCapture();
             Point p = e.GetPosition(Viewport);
-            PinDockSide side = PinnedTools.NearestSide(p.X, p.Y, Viewport.ActualWidth, Viewport.ActualHeight);
-            if (side != PinSide && _settings is not null)
-            {
-                _settings.Current.EditorPinDock = side.ToString();
-                _settings.Save();
-                RebuildPinDock();
-            }
+            MovePinDock(PinnedTools.NearestSide(p.X, p.Y, Viewport.ActualWidth, Viewport.ActualHeight));
             e.Handled = true;
         };
         grip.LostMouseCapture += (_, _) => _pinGripDragging = false;
@@ -170,14 +284,17 @@ public partial class EditorWindow
         System.Windows.Automation.AutomationProperties.SetName(btn, description);
         btn.Click += (_, e) => { e.Handled = true; ArmPin(pin); };
 
+        // Survey's pin menu: Duplicate, Move to start (not on the first pin), Unpin.
         var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu") };
-        var itemStyle = (Style)FindResource("DarkMenuItem");
-        var replace = new MenuItem { Header = "Replace with current settings", Style = itemStyle };
-        replace.Click += (_, _) => ReplacePin(pin);
-        var remove = new MenuItem { Header = "Remove pin", Style = itemStyle };
-        remove.Click += (_, _) => RemovePin(pin);
-        menu.Items.Add(replace);
-        menu.Items.Add(remove);
+        menu.Opened += (_, _) =>
+        {
+            menu.Items.Clear();
+            menu.Items.Add(DockItem("Duplicate", () => DuplicatePin(pin), "SurveyIcon.Duplicate"));
+            if (Pins.IndexOf(pin) > 0)
+                menu.Items.Add(DockItem("Move to start", () => MovePinToStart(pin), "SurveyIcon.ChevronUp"));
+            menu.Items.Add(DockItem("Unpin", () => RemovePin(pin), "SurveyIcon.Close"));
+        };
+        menu.Items.Add(new MenuItem());
         btn.ContextMenu = menu;
         return btn;
     }
@@ -226,13 +343,33 @@ public partial class EditorWindow
         RebuildPinDock();
     }
 
-    private void ReplacePin(PinnedToolSetting old)
+    /// <summary>Survey: a copy of the pin, right after it (a second pen to restyle).</summary>
+    private void DuplicatePin(PinnedToolSetting pin)
     {
         if (_settings is null) return;
-        if (CurrentToolAsPin() is not PinnedToolSetting pin) return;
-        int i = _settings.Current.EditorPinnedTools.IndexOf(old);
+        var list = _settings.Current.EditorPinnedTools;
+        int i = list.IndexOf(pin);
         if (i < 0) return;
-        _settings.Current.EditorPinnedTools[i] = pin;
+        list.Insert(i + 1, new PinnedToolSetting
+        {
+            Kind = pin.Kind,
+            StrokeColor = pin.StrokeColor,
+            StrokeOpacity = pin.StrokeOpacity,
+            StrokeWidth = pin.StrokeWidth,
+            FillColor = pin.FillColor,
+            FillOpacity = pin.FillOpacity,
+            LineStyle = pin.LineStyle,
+        });
+        _settings.Save();
+        RebuildPinDock();
+    }
+
+    private void MovePinToStart(PinnedToolSetting pin)
+    {
+        if (_settings is null) return;
+        var list = _settings.Current.EditorPinnedTools;
+        if (!list.Remove(pin)) return;
+        list.Insert(0, pin);
         _settings.Save();
         RebuildPinDock();
     }

@@ -51,6 +51,12 @@ internal static class PinnedTools
 
     public static PinKind? Kind(string? id) => Kinds.FirstOrDefault(k => k.Id == id);
 
+    /// <summary>The groups the "+" menu lists pinnable tools under, in Survey's order.</summary>
+    public static readonly string[] MenuGroups = { "Draw", "Shapes", "Text" };
+
+    /// <summary>The toolbar group a pin kind's tool belongs to (Draw, Shapes or Text).</summary>
+    public static string Group(PinKind kind) => EditorShellContract.GroupFor(kind.Tool);
+
     /// <summary>The pin kind for an armed tool and line style (Rectangle + Cloud = the Cloud pin).</summary>
     public static PinKind? KindForTool(EditorTool tool, LineBorderStyle lineStyle)
     {

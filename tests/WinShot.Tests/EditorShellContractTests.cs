@@ -27,7 +27,7 @@ public class EditorShellContractTests
         // Survey's own order (PDFViewer.jsx:34035-34045): Polygon and Polyline sit between the
         // closed shapes and the open ones, because that is what they bridge — a polygon is a
         // many-sided Rectangle, a polyline a many-segment Line.
-        Assert.Equal(new[] { "Rectangle", "Ellipse", "Polygon", "Polyline", "Line", "Arrow", "Step" },
+        Assert.Equal(new[] { "Rectangle", "Ellipse", "Polygon", "Cloud", "Polyline", "Line", "Arrow", "Step" },
             EditorShellContract.ToolsIn(EditorToolCategory.Shapes));
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
         // One redaction tool, not Survey's two: pixelate and blur are STYLES on the mark it
@@ -58,8 +58,8 @@ public class EditorShellContractTests
         {
             foreach (string name in EditorShellContract.ToolsIn(category))
             {
-                // FilledRectangle is a second button for the Rectangle tool.
-                string toolName = name == "FilledRectangle" ? "Rectangle" : name;
+                // Cloud is a second button for the Rectangle tool (Rectangle + cloud border).
+                string toolName = name is "FilledRectangle" or "Cloud" ? "Rectangle" : name;
                 var tool = Enum.Parse<EditorTool>(toolName);
                 Assert.Equal(category, EditorShellContract.CategoryOf(tool));
             }

@@ -49,6 +49,7 @@ public partial class EditorWindow
     private void SetLassoSelect(bool lasso)
     {
         _lassoSelect = lasso;
+        SyncSelectModeButtons();
         CheckToolButton(EditorTool.Select);
         string label = lasso ? "Lasso select" : "Select";
         SelectToolBtn.ToolTip = ToolTipWithKey(label, lasso ? "Alt+V" : "V");

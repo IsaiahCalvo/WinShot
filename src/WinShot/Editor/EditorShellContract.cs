@@ -112,8 +112,10 @@ internal static class EditorShellContract
         EditorToolCategory.Shapes => new[]
         {
             // Survey's order (PDFViewer.jsx:34035-34045): Polygon and Polyline sit between
-            // the closed shapes and the open ones because that is what they bridge.
-            "Rectangle", "Ellipse", "Polygon", "Polyline", "Line", "Arrow", "Step",
+            // the closed shapes and the open ones because that is what they bridge. Cloud is
+            // Rectangle with the cloud border (Drawboard Shape > Cloud), a second button for
+            // the Rectangle tool, right after Polygon as Survey has it.
+            "Rectangle", "Ellipse", "Polygon", "Cloud", "Polyline", "Line", "Arrow", "Step",
         },
         EditorToolCategory.Text => new[] { "Text", "Callout" },
         EditorToolCategory.Redact => new[] { "Redact", "Spotlight", "Magnifier" },
