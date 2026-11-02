@@ -2984,15 +2984,14 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
         if (e.Button != WF.MouseButtons.Left) return;
 
+        // A press on a button arms the drag too. The buttons sit on top of the thumbnail,
+        // so a drag that happened to start over Copy did nothing at all — the user had to
+        // aim for the bare image between them. Now the press only decides what a release
+        // without travel does: run the button it started on, or nothing on the body.
         int buttonIndex = _hovering ? HitTestButton(e.Location) : -1;
-        if (buttonIndex >= 0)
+        if (buttonIndex >= 0 || _cardRect.Contains(e.Location))
         {
             SetPressed(buttonIndex);
-            return;
-        }
-
-        if (_cardRect.Contains(e.Location))
-        {
             _dragArmed = true;
             _dragStart = e.Location;
             return;
@@ -3018,6 +3017,11 @@ public sealed class FastQuickActionsWindow : WF.Form
             return;
 
         _dragArmed = false;
+        // The drag owns the press now: the button it started on must not run on release,
+        // and its hover tooltip must not open over the ghost — the tooltip timer keeps
+        // ticking inside DoDragDrop's modal pump.
+        SetPressed(-1);
+        SetHover(-1);
         DragPreview? ghost = null;
         try
         {
@@ -3115,20 +3119,24 @@ public sealed class FastQuickActionsWindow : WF.Form
     {
         if (e.Button != WF.MouseButtons.Left) return;
         // Still armed means the pointer never travelled far enough to start a drag.
-        bool onTheBody = _dragArmed;
+        bool clicked = _dragArmed;
+        int pressedButton = _pressedButton;
         _dragArmed = false;
         SetPressed(-1);
 
-        int buttonIndex = _hovering ? HitTestButton(e.Location) : -1;
-        if (buttonIndex >= 0)
+        if (pressedButton >= 0)
         {
-            _buttons[buttonIndex].Action();
+            // A click is a press and release on the same button. A release after a drag,
+            // or on a button the press never started on, runs nothing.
+            if (clicked && pressedButton < _buttons.Count && _buttons[pressedButton].Bounds.Contains(e.Location))
+                _buttons[pressedButton].Action();
             return;
         }
+        bool onTheBody = clicked;
 
         // The thumbnail is the biggest target on the card and did nothing at all. Double
         // rather than single click, so the drag gesture stays unambiguous.
-        if (!onTheBody || e.Clicks != 2 || !_cardRect.Contains(e.Location))
+        if (!onTheBody || e.Clicks != 2 || !_cardRect.Contains(e.Location) || (_hovering && HitTestButton(e.Location) >= 0))
             return;
         RequestEdit();
     }

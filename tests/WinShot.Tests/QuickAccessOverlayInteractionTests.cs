@@ -1470,6 +1470,47 @@ public class QuickAccessOverlayInteractionTests
         });
     }
 
+    [Fact]
+    public void APressOnAButtonArmsTheDragAndAClickWithoutTravelStillRunsIt()
+    {
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            var settings = new SettingsService();
+            settings.Current.OverlayMoveToActiveScreen = false;
+            using var overlay = new FastQuickActionsWindow(bitmap, settings);
+            int edits = 0;
+            overlay.EditRequested += _ => edits++;
+            Invoke(overlay, "SetHovering", true);
+            SD.Rectangle annotate = Button(GetButtons(overlay), "Annotate").Bounds;
+            var onButton = new SD.Point(annotate.X + annotate.Width / 2, annotate.Y + annotate.Height / 2);
+            var dragArmed = typeof(FastQuickActionsWindow)
+                .GetField("_dragArmed", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            // The buttons cover the thumbnail, so a drag that starts over one has to be
+            // armed exactly like a drag that starts on the bare image.
+            Invoke(overlay, "OnOverlayMouseDown", overlay, MouseArgs(onButton, 1));
+            Assert.True((bool)dragArmed.GetValue(overlay)!);
+
+            // No travel: the release is a click, and the button does its job.
+            Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(onButton, 1));
+            Assert.Equal(1, edits);
+
+            // A release after the drag took the press runs nothing.
+            Invoke(overlay, "OnOverlayMouseDown", overlay, MouseArgs(onButton, 1));
+            dragArmed.SetValue(overlay, false);
+            Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(onButton, 1));
+            Assert.Equal(1, edits);
+
+            // Nor does a release that ends off the button the press started on.
+            Invoke(overlay, "OnOverlayMouseDown", overlay, MouseArgs(onButton, 1));
+            Invoke(overlay, "OnOverlayMouseUp", overlay, MouseArgs(new SD.Point(annotate.Right + 40, annotate.Bottom + 40), 1));
+            Assert.Equal(1, edits);
+
+            PumpUntil(() => Motion.Holders == 0, 4000);
+        });
+    }
+
     private static void Click(FastQuickActionsWindow overlay, SD.Point at, int clicks)
     {
         Invoke(overlay, "OnOverlayMouseDown", overlay, MouseArgs(at, 1));
