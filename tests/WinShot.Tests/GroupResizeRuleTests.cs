@@ -59,4 +59,13 @@ public class GroupResizeRuleTests
         Assert.Equal(0, ObjectSnap.EdgeOffset(120, others, axisX: true, tolerance: 6), 6);
         Assert.Equal(1, ObjectSnap.EdgeOffset(89, others, axisX: false, tolerance: 6), 6);
     }
+
+    [Fact]
+    public void KScalesLineWidthsByTheSmallerScale()
+    {
+        Assert.Equal(6, EditorWindow.ScaledGroupLineWidth(3, 2, 2.5), 6);
+        Assert.Equal(1.5, EditorWindow.ScaledGroupLineWidth(3, 0.5, 4), 6);
+        Assert.Equal(0.1, EditorWindow.ScaledGroupLineWidth(1, 0.01, 0.01), 6);
+        Assert.Equal(0, EditorWindow.ScaledGroupLineWidth(0, 2, 2), 6);
+    }
 }

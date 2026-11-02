@@ -406,6 +406,31 @@ public class FixCheckRenderHarness
                 markMenu.IsOpen = false; Pump(3);
                 Invoke(editor, "ToggleSelectionLock", null); Pump(3);
 
+                // 13. K held during a group resize scales line widths by the smaller scale.
+                Deselect();
+                Tool(EditorTool.Select);
+                Drag(260, 455, 30, 365); // leftward: takes touching marks
+                Pump(4);
+                string Widths()
+                {
+                    var parts = new List<string>();
+                    foreach (UIElement el in canvas.Children)
+                        if (el is FrameworkElement { Tag: AnnotationData d } fe
+                            && ((System.Collections.IList)typeof(EditorWindow).GetField("_selection", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!).Contains(el))
+                            parts.Add($"{d.Type}:w={d.Thickness}");
+                    return string.Join(" ", parts);
+                }
+                Rect k0 = Frame();
+                log.AppendLine($"13 before frame={k0} {Widths()}");
+                Down(k0.Right, k0.Bottom);
+                Field("_groupLineKey", true);
+                for (int i = 1; i <= 8; i++) Move(k0.Right + 120.0 * i / 8, k0.Bottom + 60.0 * i / 8);
+                Up(k0.Right + 120, k0.Bottom + 60);
+                log.AppendLine($"13 after frame={Frame()} {Widths()} (widths x min scale)");
+                WindowShot("13-group-k-widths.png");
+                Invoke(editor, "UndoAsync", null); Pump(4);
+                log.AppendLine($"13 undone {Widths()}");
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }

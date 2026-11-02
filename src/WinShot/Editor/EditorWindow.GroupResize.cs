@@ -42,9 +42,15 @@ public partial class EditorWindow
         public CalloutLayout? Callout { get; init; }
         public Vector Offset { get; init; }
         public double FontSize { get; init; }
+        /// <summary>The line look at the press, for marks whose width K may scale; null otherwise.</summary>
+        public StyleSnapshot? Style { get; init; }
+        /// <summary>True while the mark shows a K-scaled width.</summary>
+        public bool WidthScaled { get; set; }
     }
 
     private List<GroupMember>? _groupResize;
+    /// <summary>Survey groupResizeLineKeyRef: K is held during this group resize.</summary>
+    private bool _groupLineKey;
 
     // Group rotate (Survey 'group-rotate', useSVGInteraction.js:2754-2850): every member's
     // centre orbits the union centre and its own angle takes the same turn, so the group
@@ -217,6 +223,10 @@ public partial class EditorWindow
                 Callout = callout,
                 Offset = off,
                 FontSize = CurrentFontSize(fe) ?? meta.FontSize ?? CalloutLayout.DefaultFontSize,
+                // A pen or highlighter stroke is left out, as Survey leaves out a 'path'.
+                Style = meta.Type is not (AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter)
+                    && CanRestyle(fe, null, 1, null) && (meta.Thickness ?? 0) > 0
+                    ? SnapshotStyle(fe, meta) : null,
             });
         }
         if (members.Count < 2) return;
@@ -315,7 +325,11 @@ public partial class EditorWindow
         double savedAngle = _resizeAngle;
         try
         {
-            foreach (var m in members) ApplyGroupMember(m, handle, sx, sy, Scale);
+            foreach (var m in members)
+            {
+                ApplyGroupMember(m, handle, sx, sy, Scale);
+                ApplyGroupLineWidth(m, sx, sy);
+            }
         }
         finally
         {
@@ -325,6 +339,32 @@ public partial class EditorWindow
         }
         UpdateSelectionVisual();
         ShowSnapGuides();
+    }
+
+    /// <summary>
+    /// Survey scaledGroupLineWidth: with K held the line width takes the smaller of the two
+    /// scales (rounded to 0.01, at least 0.1); without it the width stays as it was.
+    /// </summary>
+    internal static double ScaledGroupLineWidth(double width, double sx, double sy)
+    {
+        double k = Math.Min(Math.Abs(sx), Math.Abs(sy));
+        if (!(width > 0) || !double.IsFinite(k) || k <= 0) return width;
+        return Math.Max(0.1, Math.Round(width * k * 100) / 100);
+    }
+
+    private void ApplyGroupLineWidth(GroupMember m, double sx, double sy)
+    {
+        if (m.Style is not { } style) return;
+        if (_groupLineKey)
+        {
+            ApplyStyleSnapshot(m.Element, style.With(null, ScaledGroupLineWidth(style.Thickness, sx, sy), null));
+            m.WidthScaled = true;
+        }
+        else if (m.WidthScaled)
+        {
+            ApplyStyleSnapshot(m.Element, style);
+            m.WidthScaled = false;
+        }
     }
 
     private void ApplyGroupMember(GroupMember m, int handle, double sx, double sy, Func<Point, Point> scale)
@@ -448,22 +488,36 @@ public partial class EditorWindow
         _snapOthers = null;
         HideSnapGuides();
         if (members is null) return;
+        _groupLineKey = false;
         var changes = new List<(UIElement El, ResizeSnapshot Before, ResizeSnapshot After)>();
+        var widths = new List<(UIElement El, StyleSnapshot Before, StyleSnapshot After)>();
         foreach (var m in members)
         {
             if (m.Element.Tag is not AnnotationData meta) continue;
             var after = CaptureResizeSnapshot(m.Element, meta);
             if (!after.NearlyEquals(m.Before)) changes.Add((m.Element, m.Before, after));
+            if (m.WidthScaled && m.Style is { } style)
+                widths.Add((m.Element, style, SnapshotStyle(m.Element, meta)));
         }
-        if (changes.Count == 0)
+        if (changes.Count == 0 && widths.Count == 0)
         {
             UpdateSelectionVisual();
             return;
         }
         _justDraggedAt = Environment.TickCount64;
         Push(new EditorAction(
-            undo: () => { foreach (var c in changes) ApplyResizeSnapshot(c.El, c.Before); UpdateSelectionVisual(); },
-            redo: () => { foreach (var c in changes) ApplyResizeSnapshot(c.El, c.After); UpdateSelectionVisual(); }),
+            undo: () =>
+            {
+                foreach (var c in changes) ApplyResizeSnapshot(c.El, c.Before);
+                foreach (var w in widths) ApplyStyleSnapshot(w.El, w.Before);
+                UpdateSelectionVisual();
+            },
+            redo: () =>
+            {
+                foreach (var c in changes) ApplyResizeSnapshot(c.El, c.After);
+                foreach (var w in widths) ApplyStyleSnapshot(w.El, w.After);
+                UpdateSelectionVisual();
+            }),
             apply: false);
         UpdateSelectionVisual();
     }
@@ -476,7 +530,12 @@ public partial class EditorWindow
         _resizeBefore = null;
         _snapOthers = null;
         HideSnapGuides();
+        _groupLineKey = false;
         if (members is null) return;
-        foreach (var m in members) ApplyResizeSnapshot(m.Element, m.Before);
+        foreach (var m in members)
+        {
+            ApplyResizeSnapshot(m.Element, m.Before);
+            if (m.WidthScaled && m.Style is { } style) ApplyStyleSnapshot(m.Element, style);
+        }
     }
 }

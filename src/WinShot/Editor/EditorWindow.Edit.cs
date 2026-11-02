@@ -286,6 +286,16 @@ public partial class EditorWindow : Window
             if (e.Key == Key.Escape) { CancelCounterDrag(); e.Handled = true; return; }
             if (e.Key is Key.LeftShift or Key.RightShift) { FreezeCounterTip(); e.Handled = true; return; }
         }
+        // Survey isGroupLineWidthKey: K held during a group resize also scales line widths.
+        // It is the Polyline key, so while a group resize runs it is taken here and never
+        // switches the tool.
+        if (e.Key == Key.K && _groupResize is not null && !_groupRotating
+            && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0)
+        {
+            _groupLineKey = true;
+            e.Handled = true;
+            return;
+        }
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
 
@@ -464,6 +474,7 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
         base.OnPreviewKeyUp(e);
+        if (e.Key == Key.K) _groupLineKey = false;
         if (_counterDrag is not null && e.Key is Key.LeftShift or Key.RightShift)
         {
             // Releasing Shift hands the body back to the cursor with the offset it had at
