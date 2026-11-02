@@ -13,7 +13,7 @@ namespace WinShot.SettingsUi;
 /// </summary>
 public sealed class HotkeyBox : TextBox
 {
-    private const string Prompt = "Press shortcut...";
+    private const string Prompt = "Press a shortcut…";
 
     /// <summary>The last value the user actually committed, restored if they cancel.</summary>
     private string _committed = "";
