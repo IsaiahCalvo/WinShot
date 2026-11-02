@@ -1,0 +1,46 @@
+name: visual-audit
+
+# Renders every WPF surface (editor included) at 96/120/144/192 DPI and measures the ink of
+# each text-bearing control: clipped, off-centre, lopsided or tiny labels. Runs on Claude
+# work branches so polish passes are checked against pixels, not just XAML numbers. The
+# flagged rows are printed to the log; the PNGs are uploaded for a look by eye.
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-audit:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install Windows 10 SDK 10.0.19041 (UAP Platform.xml for CsWinRT)
+        shell: pwsh
+        run: choco install windows-sdk-10-version-2004-all -y --no-progress
+      - name: Render and measure
+        shell: pwsh
+        env:
+          WINSHOT_VISUAL_AUDIT: '1'
+          WINSHOT_VISUAL_AUDIT_OUT: ${{ github.workspace }}\visual-audit
+        run: dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter "FullyQualifiedName~VisualAuditHarness"
+      - name: Print flagged controls
+        if: always()
+        shell: pwsh
+        run: |
+          $tsv = "visual-audit\audit.tsv"
+          if (-not (Test-Path $tsv)) { Write-Host "no audit.tsv"; exit 0 }
+          $rows = Get-Content $tsv
+          Write-Host "rows: $($rows.Count)"
+          $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1] -ne '' } | ForEach-Object { Write-Host "FLAG`t$_" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-audit
+          path: visual-audit
