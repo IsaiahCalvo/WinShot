@@ -963,6 +963,10 @@ public partial class EditorWindow : Window
             }
             _calloutDragStart = null;
             _calloutDragInvalid = false;
+            _snapOthers = null;
+            if (_resizeAngle == 0 && meta.Type is not (AnnotationData.TypeStep
+                    or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter))
+                CollectResizeSnapTargets(fe);
             if (_handleKind == HandleKind.Callout && _selected is CalloutAnnotation dragged)
             {
                 _calloutDragStart = dragged.Layout;
@@ -1058,6 +1062,48 @@ public partial class EditorWindow : Window
             // but does keep growing at the full drag rate past the anchor.
             bool supportsFlip = meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
+            bool alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+            // Survey canvas audit chunk 2 (Drawboard): the dragged edge(s) of an UPRIGHT mark
+            // pull to other marks' edges within 6 screen px - not with Shift (proportions
+            // win), Alt, a counter, a tilted mark, ink, or a photo's corner.
+            if (angle == 0 && SnappingOn && !alt && !ShapeConstraint.ShiftHeld && _snapOthers is { } snapTo
+                && meta.Type is not (AnnotationData.TypeStep or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter)
+                && !(meta.Type == AnnotationData.TypeImage && _activeHandle < 4))
+            {
+                double tol = MoveSnapScreenPx / Math.Max(0.01, _zoom);
+                if (_activeHandle is not (4 or 6)) local.X += ObjectSnap.EdgeOffset(local.X, snapTo, axisX: true, tol);
+                if (_activeHandle is not (5 or 7)) local.Y += ObjectSnap.EdgeOffset(local.Y, snapTo, axisX: false, tol);
+            }
+            // Survey canvas audit chunk 3 (Drawboard): Alt grows the mark from its centre -
+            // the opposite side moves out by the same amount. A counter keeps its own rule.
+            if (alt && meta.Type != AnnotationData.TypeStep)
+            {
+                double cx = oldBounds.Left + oldBounds.Width / 2, cy = oldBounds.Top + oldBounds.Height / 2;
+                bool ax = _activeHandle is not (4 or 6), ay = _activeHandle is not (5 or 7);
+                double floor = supportsFlip ? 0.01 : 0.1;
+                double hx = ax ? Math.Max(Math.Abs(local.X - cx), oldBounds.Width / 2 * floor) : oldBounds.Width / 2;
+                double hy = ay ? Math.Max(Math.Abs(local.Y - cy), oldBounds.Height / 2 * floor) : oldBounds.Height / 2;
+                if (ShapeConstraint.ShiftHeld || meta.Type == AnnotationData.TypeImage)
+                {
+                    double kx = oldBounds.Width > 1e-6 ? hx / (oldBounds.Width / 2) : 1;
+                    double ky = oldBounds.Height > 1e-6 ? hy / (oldBounds.Height / 2) : 1;
+                    double k = !ax ? ky : !ay ? kx : (Math.Abs(kx - 1) >= Math.Abs(ky - 1) ? kx : ky);
+                    hx = oldBounds.Width / 2 * k;
+                    hy = oldBounds.Height / 2 * k;
+                }
+                var centred = new Rect(cx - hx, cy - hy, 2 * hx, 2 * hy);
+                // The pointer handed on must sit on the dragged side of the far anchor, so
+                // ink scales without mirroring.
+                Point grow = BoxHandlePoints(centred)[_activeHandle];
+                ApplyBoxResize(fe, meta, centred, grow);
+                if (angle != 0)
+                {
+                    fe.UpdateLayout();
+                    AnnotationTransform.SetAngle(fe, angle);
+                }
+                UpdateSelectionVisual();
+                return;
+            }
             local = FloorScale(oldBounds, _activeHandle, local, meta.Type switch
             {
                 AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter => 0,
@@ -1120,6 +1166,20 @@ public partial class EditorWindow : Window
         }
 
         UpdateSelectionVisual();
+        if (_snapOthers is not null && _handleKind == HandleKind.Box) ShowSnapGuides();
+    }
+
+    /// <summary>The other marks' boxes and the image edge, for a resize's edge snap.</summary>
+    private void CollectResizeSnapTargets(FrameworkElement resizing)
+    {
+        _snapOthers = new List<Rect> { new(0, 0, AnnotationCanvas.ActualWidth, AnnotationCanvas.ActualHeight) };
+        foreach (UIElement child in AnnotationCanvas.Children)
+        {
+            if (ReferenceEquals(child, resizing) || child is not FrameworkElement { Tag: AnnotationData } other) continue;
+            if (other.Visibility != Visibility.Visible) continue;
+            Rect b = GetCanvasBounds(child);
+            if (!b.IsEmpty) _snapOthers.Add(b);
+        }
     }
 
     /// <summary>Live rotation from the grip: bearing, grab offset, then the snap rules.</summary>
@@ -1160,6 +1220,7 @@ public partial class EditorWindow : Window
             Dispatcher.BeginInvoke(OpenRotationBoxFromClick, DispatcherPriority.Input);
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
+        if (_groupResize is null) { _snapOthers = null; HideSnapGuides(); }
         // The rate limiter lets a resize skip repaints; the gesture is over, so pay them.
         FlushRedactionRefresh();
         if (_selected is not null) RefreshRedaction(_selected);
@@ -1224,6 +1285,8 @@ public partial class EditorWindow : Window
         if (_groupResize is not null) AbortGroupResize();
         else if (!_adjustingCrop && _selected is not null && _resizeBefore is { } snap)
             ApplyResizeSnapshot(_selected, snap);
+        _snapOthers = null;
+        HideSnapGuides();
         _calloutDragStart = null;
         _calloutDragInvalid = false;
         _adjustingCrop = false;

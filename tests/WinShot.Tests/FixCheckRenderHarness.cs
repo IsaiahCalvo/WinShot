@@ -245,6 +245,16 @@ public class FixCheckRenderHarness
                 Invoke(editor, "UndoAsync", null); Pump(4);
                 log.AppendLine($"group undone frame={Frame()} marks={Boxes()}");
 
+                // 9. A single resize pulls its edge to a neighbour: the rectangle's right side
+                // dragged to 3 px short of the ellipse's left edge (740) should land on it.
+                Deselect();
+                Tool(EditorTool.Select);
+                Down(640, 330); Up(640, 330);
+                Pump(3);
+                Drag(720, 330, 737, 330);
+                log.AppendLine($"single snap marks={Boxes()}");
+                WindowShot("9-single-snap.png");
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
