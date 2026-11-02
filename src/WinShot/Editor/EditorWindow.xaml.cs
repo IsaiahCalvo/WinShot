@@ -538,6 +538,8 @@ public partial class EditorWindow : Window
         AnnotationCanvas.Height = h;
         InteractionCanvas.Width = w;
         InteractionCanvas.Height = h;
+        ChromeCanvas.Width = w;
+        ChromeCanvas.Height = h;
     }
 
     // --------------------------------------------------------- view (zoom/pan)
