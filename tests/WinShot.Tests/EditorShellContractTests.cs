@@ -9,8 +9,9 @@ public class EditorShellContractTests
     /// Every tool has a home in the one-row toolbar: the two pointer tools sit outside the
     /// categories, everything else is in exactly one category's sub-row. Nothing is behind
     /// an overflow popup any more, so a tool missing from this set is a tool no click can
-    /// reach. CurvedArrow is the one deliberate exception — it is the Curved row of the
-    /// arrow-style menu, not a button.
+    /// reach. Two deliberate exceptions: Crop is the single crop button beside Undo, and
+    /// CurvedArrow has no button at all (Survey has none) and stays only so curved arrows in
+    /// older projects still edit.
     /// </summary>
     [Fact]
     public void EveryToolIsReachableFromThePointerPairOrOneCategory()
@@ -44,7 +45,8 @@ public class EditorShellContractTests
 
         string[] reachable = buttons
             .Append(nameof(EditorTool.Eyedropper))     // inside the colour picker
-            .Append(nameof(EditorTool.CurvedArrow))    // the Curved row of the arrow menu
+            .Append(nameof(EditorTool.CurvedArrow))    // no button: kept so older curved arrows still edit
+            .Append(nameof(EditorTool.Crop))           // the one crop button, beside Undo
             .ToArray();
         Assert.DoesNotContain(nameof(EditorTool.Emoji), reachable);
         Assert.All(Enum.GetNames<EditorTool>().Where(name => name != nameof(EditorTool.Emoji)),

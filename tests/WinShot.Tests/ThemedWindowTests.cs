@@ -1525,7 +1525,9 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
-        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
+        // Survey's Style pill sits on the text tool and styles the box border (AppShell.jsx
+        // 'style' slot lists contextTool 'text').
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         // Same rule as the Shape row above: row 2 centred under the chips.
         double textToolsW = groupTools.ActualWidth;
         double textRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
