@@ -1457,15 +1457,24 @@ public partial class EditorWindow : Window
                 : null;
         if (geo is null) return false;
 
-        // An arrow's heads are fill-only figures (unstroked segments) in the same Path as
-        // the stroked shaft, so a stroked halo traced the shaft and skipped the head. Survey
-        // glows the head too (SVGAnnotationLayer.jsx hover halo: line + arrowhead spec), so
-        // every segment is stroked in the halo's copy.
-        if (meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeLine)
-            geo = StrokeEverySegment(geo);
-
         double sw = meta.Thickness ?? (fe is Shape sh ? sh.StrokeThickness : 1);
         double inv = 1 / _zoom;
+
+        // Lines and arrows: Survey's halo (SVGAnnotationLayer.jsx:6547-6585) is the shaft at
+        // max(6, sw + 4) PLUS every head's outline at max(3, sw + 2), painted as ONE shape so
+        // the two never stack into a darker seam. WinShot stroked the Path's geometry, and
+        // the heads are fill-only figures, so the glow ran down the shaft and stopped short
+        // of the head (Isaiah: "only the line part gets highlighted, not the circle").
+        if (meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeLine
+            && fe is Path { Data: PathGeometry body } && body.Figures.Count > 0
+            && LineHaloGeometry(body, sw) is { } lineHalo)
+        {
+            halo.Data = ToCanvasSpace(fe, lineHalo);
+            halo.StrokeThickness = 0;
+            halo.Fill = halo.Stroke;
+            halo.Visibility = Visibility.Visible;
+            return true;
+        }
         bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
         halo.Data = geo;
         if (ink)
@@ -1521,15 +1530,41 @@ public partial class EditorWindow : Window
         }
     }
 
-    private static Geometry StrokeEverySegment(Geometry geo)
+    /// <summary>
+    /// The line / arrow hover halo in the mark's own space: figure 0 of the body is the shaft
+    /// (AnnotationFactory.ArrowGeometry), every later figure a head. A solid triangle is its
+    /// own three-point figure and grows by (sw + 2) / 2; the other heads are already their
+    /// max(2, sw) outline, so one more pixel each side lands on the same band.
+    /// </summary>
+    private static Geometry? LineHaloGeometry(PathGeometry body, double sw)
     {
-        // Clone keeps the canvas transform ToCanvasSpace put on it, untouched.
-        if (geo is not PathGeometry path) return geo;
-        var copy = path.Clone();
-        foreach (var fig in copy.Figures)
-            foreach (var seg in fig.Segments)
-                seg.IsStroked = true;
-        return copy;
+        static Pen Round(double w) => new(Brushes.Black, w)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round,
+        };
+        PathFigure Stroked(PathFigure f)
+        {
+            var c = f.Clone();
+            foreach (var seg in c.Segments) seg.IsStroked = true;
+            return c;
+        }
+
+        var shaft = new PathGeometry();
+        shaft.Figures.Add(Stroked(body.Figures[0]));
+        Geometry halo = shaft.GetWidenedPathGeometry(Round(Math.Max(6, sw + 4)));
+        for (int i = 1; i < body.Figures.Count; i++)
+        {
+            PathFigure fig = body.Figures[i];
+            bool solidTriangle = fig.Segments.Count == 2 && fig.Segments.All(seg => seg is LineSegment);
+            var head = new PathGeometry { FillRule = body.FillRule };
+            head.Figures.Add(Stroked(fig));
+            var grown = head.GetWidenedPathGeometry(Round(solidTriangle ? Math.Max(3, sw + 2) : 2));
+            halo = Geometry.Combine(halo, grown, GeometryCombineMode.Union, null);
+            halo = Geometry.Combine(halo, head, GeometryCombineMode.Union, null);
+        }
+        return halo;
     }
 
     /// <summary>The counter's pin outline in canvas space (its badge Grid holds the Path).</summary>
