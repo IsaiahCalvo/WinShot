@@ -119,7 +119,10 @@ public class ArrowheadParityTests
     public void TheTriangleHeadIsSurveysShape(ArrowheadStyle style)
     {
         var pg = (PathGeometry)Arrow(style);
-        var head = new PathGeometry { Figures = { pg.Figures[1] } };
+        // An open head is a flattened outline, so it may span more than one figure
+        // (outer and inner edge): measure every figure after the shaft.
+        var head = new PathGeometry();
+        foreach (var f in pg.Figures.Skip(1)) head.Figures.Add(f.Clone());
         double pen = style == ArrowheadStyle.OpenTriangle ? Math.Max(2, Thickness) : 0;
         // The line ends at x = 300; the point is 2h/3 past it, the base h/3 short of it.
         Assert.InRange(head.Bounds.Right, 300 + HeadSize * 2 / 3 - 0.01, 300 + HeadSize * 2 / 3 + pen + 0.01);
