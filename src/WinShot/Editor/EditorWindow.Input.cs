@@ -1559,7 +1559,9 @@ public partial class EditorWindow : Window
             PathFigure fig = body.Figures[i];
             bool solidTriangle = fig.Segments.Count == 2 && fig.Segments.All(seg => seg is LineSegment);
             var head = new PathGeometry { FillRule = body.FillRule };
-            head.Figures.Add(Stroked(fig));
+            var closedHead = Stroked(fig);
+            closedHead.IsClosed = true;   // heads are stored open so their base is not stroked
+            head.Figures.Add(closedHead);
             var grown = head.GetWidenedPathGeometry(Round(solidTriangle ? Math.Max(3, sw + 2) : 2));
             halo = Geometry.Combine(halo, grown, GeometryCombineMode.Union, null);
             halo = Geometry.Combine(halo, head, GeometryCombineMode.Union, null);

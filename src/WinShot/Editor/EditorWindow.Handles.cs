@@ -2034,7 +2034,33 @@ public partial class EditorWindow : Window
                 return HitTestResultBehavior.Continue;
             },
             new GeometryHitTestParameters(new EllipseGeometry(pos, r, r)));
-        return found;
+        return found ?? HitTestLineHead(pos, r);
+    }
+
+    /// <summary>
+    /// Survey's line hit band runs the whole way to the tip (SVGAnnotationLayer.jsx:6590-6626),
+    /// so pointing into an open circle or open triangle end still picks the mark. WinShot's
+    /// ink hit test fell through the hollow middle: hovering the circle end did nothing.
+    /// </summary>
+    private UIElement? HitTestLineHead(Point pos, double r)
+    {
+        for (int i = AnnotationCanvas.Children.Count - 1; i >= 0; i--)
+        {
+            if (AnnotationCanvas.Children[i] is not Path { Tag: AnnotationData meta, Data: PathGeometry body } p
+                || meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeLine)
+                || body.Figures.Count < 2 || p.Visibility != Visibility.Visible)
+                continue;
+            Point local;
+            try { local = AnnotationCanvas.TranslatePoint(pos, p); }
+            catch (InvalidOperationException) { continue; }
+            for (int f = 1; f < body.Figures.Count; f++)
+            {
+                Rect box = new PathGeometry { Figures = { body.Figures[f].Clone() } }.Bounds;
+                box.Inflate(r, r);
+                if (box.Contains(local)) return p;
+            }
+        }
+        return null;
     }
 
     /// <summary>Walks up to the direct AnnotationCanvas child owning a hit visual; null for non-annotations.</summary>

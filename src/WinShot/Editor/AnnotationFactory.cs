@@ -334,7 +334,10 @@ internal static class AnnotationFactory
             double half = headSize / 2;
             Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
             Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
-            var solid = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = true };
+            // NOT IsClosed: WPF strokes a closed figure's implicit closing edge with the Path's
+            // pen even when every segment is unstroked, which drew the base as a fat bar with
+            // round ends across the head (seen in the 8 px render). A fill closes itself.
+            var solid = new PathFigure { StartPoint = left, IsClosed = false, IsFilled = true };
             solid.Segments.Add(new LineSegment(apex, isStroked: false));
             solid.Segments.Add(new LineSegment(right, isStroked: false));
             geometry.Figures.Add(solid);
@@ -433,11 +436,17 @@ internal static class AnnotationFactory
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round,
         };
-        var widened = outline.GetWidenedPathGeometry(pen);
+        // GetOutlinedPathGeometry: the raw widened outline overlaps itself at the joins, and
+        // under the arrow's even-odd fill those overlaps cancelled into white slivers inside
+        // the open triangle (seen in the render). The outlined form has no overlaps.
+        var widened = outline.GetWidenedPathGeometry(pen).GetOutlinedPathGeometry();
         foreach (var fig in widened.Figures)
         {
             var copy = fig.Clone();
             copy.IsFilled = true;
+            // Same as the solid triangle: an IsClosed figure gets its closing edge stroked by
+            // the Path's pen, so the fill closes it instead.
+            copy.IsClosed = false;
             // The head shares the arrow's Path, whose Stroke paints the SHAFT. Leaving the
             // outline stroked as well would re-widen it by the shaft pen and fill the open
             // circle's / open triangle's hole back in, so the outline is fill-only.

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using WinShot.Editor;
 using Xunit;
@@ -25,7 +25,8 @@ public class ArrowheadGeometryTests
         var pg = Assert.IsType<PathGeometry>(g);
         Assert.Equal(2, pg.Figures.Count);
         Assert.True(pg.Figures[1].IsFilled);
-        Assert.True(pg.Figures[1].IsClosed);
+        // Not IsClosed: WPF would stroke the closing edge with the shaft's pen.
+        Assert.False(pg.Figures[1].IsClosed);
         Assert.True(pg.Bounds.Contains(new Point(100, 0)) || pg.Bounds.Right >= 100);
     }
 
@@ -53,7 +54,8 @@ public class ArrowheadGeometryTests
             new Point(0, 0), new Point(50, 0), 3, ArrowheadStyle.VShape);
         var pg = Assert.IsType<PathGeometry>(g);
         Assert.Equal(2, pg.Figures.Count);
-        Assert.True(pg.Figures[1].IsClosed);
+        // Not IsClosed: WPF would stroke the closing edge with the shaft's pen.
+        Assert.False(pg.Figures[1].IsClosed);
         Assert.True(pg.Figures[1].IsFilled);
         // The V's arms still meet AT the tip, which the outline wraps.
         Assert.True(pg.Bounds.Right >= 50);
@@ -96,7 +98,8 @@ public class ArrowheadGeometryTests
             new Point(0, 0), new Point(40, 40), 5, ArrowheadStyle.OpenTriangle);
         var pg = Assert.IsType<PathGeometry>(g);
         Assert.Equal(2, pg.Figures.Count);
-        Assert.True(pg.Figures[1].IsClosed);
+        // Not IsClosed: WPF would stroke the closing edge with the shaft's pen.
+        Assert.False(pg.Figures[1].IsClosed);
         Assert.True(pg.Figures[1].IsFilled);
         // Unlike the solid triangle, the shaft is trimmed by headSize/3 for BOTH triangles,
         // so the outline still reaches the tip.

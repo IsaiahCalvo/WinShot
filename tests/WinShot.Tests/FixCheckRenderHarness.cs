@@ -169,6 +169,7 @@ public class FixCheckRenderHarness
                 Pump(6);
                 WindowShot("5a-quickbar-top.png");
                 Deselect();
+                Tool(EditorTool.Rectangle);
                 Drag(300, 400, 460, 470);
                 Tool(EditorTool.Select);
                 Down(300, 430); Up(300, 430);
@@ -181,7 +182,9 @@ public class FixCheckRenderHarness
                 {
                     var bmp = new RenderTargetBitmap((int)(editor.ActualWidth * 2), (int)(editor.ActualHeight * 2), 192, 192, PixelFormats.Pbgra32);
                     bmp.Render(editor);
-                    var r = new Int32Rect((int)((pin.X - 40) * 2), (int)((pin.Y - 10) * 2), 220 * 2, 50 * 2);
+                    int rx = Math.Max(0, (int)((pin.X - 120) * 2));
+                    int ry = Math.Max(0, (int)((pin.Y - 10) * 2));
+                    var r = new Int32Rect(rx, ry, Math.Min(bmp.PixelWidth - rx, 220 * 2), Math.Min(bmp.PixelHeight - ry, 50 * 2));
                     Save(new CroppedBitmap(bmp, r), Path.Combine(outDir, "6-bottom-bar.png"));
                 }
 
