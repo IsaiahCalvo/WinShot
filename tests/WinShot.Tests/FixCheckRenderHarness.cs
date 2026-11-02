@@ -249,10 +249,20 @@ public class FixCheckRenderHarness
                 // dragged to 3 px short of the ellipse's left edge (740) should land on it.
                 Deselect();
                 Tool(EditorTool.Select);
-                Down(640, 330); Up(640, 330);
+                string State()
+                {
+                    object? F(string n) => typeof(EditorWindow).GetField(n, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(editor);
+                    var selList = (System.Collections.IList)F("_selection")!;
+                    return $"sel={selList.Count} kind={F("_handleKind")} active={F("_activeHandle")} moving={F("_movingSelection")} moveTotal={F("_moveTotal")} marks={Boxes()}";
+                }
+                log.AppendLine($"9 start {State()}");
+                Down(640, 330); log.AppendLine($"9 down-on-rect {State()}");
+                Up(640, 330); log.AppendLine($"9 up {State()}");
                 Pump(3);
-                Drag(720, 330, 737, 330);
-                log.AppendLine($"single snap marks={Boxes()}");
+                Down(720, 330); log.AppendLine($"9 down-on-handle {State()}");
+                for (int i = 1; i <= 8; i++) { Move(720 + 17.0 * i / 8, 330); if (i == 1 || i == 8) log.AppendLine($"9 move{i} {State()}"); }
+                Up(737, 330);
+                log.AppendLine($"single snap {State()}");
                 WindowShot("9-single-snap.png");
 
                 // 10. Group rotate: the same three marks turned by the frame's grip, mid-drag
