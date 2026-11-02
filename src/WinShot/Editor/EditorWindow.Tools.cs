@@ -26,14 +26,17 @@ public partial class EditorWindow : Window
             descender: fontSize * CalloutLayout.DescenderRatio);
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
         double thickness = AnnotationStyle.ClampSize(_shapeSize);
-        var lineStyle = _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle;
+        // Survey w43: a callout's box may be clouded; its leader stays straight.
+        var lineStyle = _lineStyle;
         // Survey seeds a new callout's fontColor from the picker (Callout creation commit),
         // and the field stays independent of the border colour from then on.
         Color? fontColor = _textFontColor;
         var visual = AnnotationFactory.CreateCallout(
-            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor);
+            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor,
+            _cloudIntensity);
         visual.Tag = AnnotationData.ForCallout(
             layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor);
+        if (lineStyle == LineBorderStyle.Cloud) ((AnnotationData)visual.Tag).CloudIntensity = _cloudIntensity;
         AnnotationCanvas.Children.Add(visual);
 
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(fontColor ?? stroke), fontSize);
@@ -422,7 +425,11 @@ public partial class EditorWindow : Window
         // TextBlock] (AnnotationFactory.cs:507-526), so hiding the inner child is exactly that
         // render. Outline (Path) and Pill (Border) carry no chrome of their own, so they hide
         // whole and the preview rectangle stands in.
-        _reeditHiddenGlyphs = label is Grid grid && grid.Children.Count > 1 ? grid.Children[1] : label;
+        // The glyphs are the one child that is not a Shape (a Cloud border adds a Path).
+        _reeditHiddenGlyphs = label is Grid grid
+            && grid.Children.OfType<UIElement>().FirstOrDefault(c => c is not Shape) is { } glyphs
+            ? glyphs
+            : label;
         _reeditHiddenGlyphs.Visibility = Visibility.Collapsed;
         _reeditBox = ReferenceEquals(_reeditHiddenGlyphs, label) ? null : label;
 
@@ -701,7 +708,7 @@ public partial class EditorWindow : Window
             fillColor = Colors.Transparent; // Survey pins backgroundColor '' for new text
             strokeWidth = NewTextStrokeWidth;
             // Survey's Style pill sits on the text tool and styles the box border.
-            lineStyle = _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle;
+            lineStyle = _lineStyle; // Survey w43: Cloud clouds the box border too
         }
 
         // Survey keeps a Textbox's border colour (`stroke`) and its glyph colour (`fill`)
@@ -721,11 +728,13 @@ public partial class EditorWindow : Window
             topLeft.X -= dh / 2 * Math.Sin(rad);
             topLeft.Y -= dh / 2 * (1 - Math.Cos(rad));
         }
+        double cloudIntensity = (reeditSource?.Tag as AnnotationData)?.CloudIntensity ?? _cloudIntensity;
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
             _textBold, _textItalic, _textUnderline, _textStrike,
             AnnotationFactory.ParseAlign(_textAlign), _textVerticalAlign,
-            boxW, boxH, fillColor, strokeWidth, lineStyle, new SolidColorBrush(borderColor));
+            boxW, boxH, fillColor, strokeWidth, lineStyle, new SolidColorBrush(borderColor),
+            cloudIntensity);
         Canvas.SetLeft(label, topLeft.X);
         Canvas.SetTop(label, topLeft.Y);
         var textMeta = AnnotationData.ForText(topLeft, text, style, tb.FontSize, borderColor,
@@ -733,6 +742,7 @@ public partial class EditorWindow : Window
             _textVerticalAlign, new Rect(topLeft.X, topLeft.Y, boxW, boxH),
             fillColor, strokeWidth, lineStyle);
         textMeta.FontColor = ToHex(glyphColor);
+        if (lineStyle == LineBorderStyle.Cloud) textMeta.CloudIntensity = cloudIntensity;
         textMeta.Angle = reeditAngle;
         label.Tag = textMeta;
         // The committed box stayed on the canvas for the whole edit, so the commit is ONE

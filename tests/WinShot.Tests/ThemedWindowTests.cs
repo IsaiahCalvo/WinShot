@@ -110,6 +110,7 @@ public class ThemedWindowTests
                 clickEditor.Show();
                 EditorEveryButtonClicksCleanly(clickEditor);
                 clickEditor.Close();
+                TextAndCalloutCloudBorderSmoke();
 
                 var composer = new BackgroundComposerWindow(NewBitmap(), settings, history);
                 composer.Show();
@@ -2742,6 +2743,48 @@ public class ThemedWindowTests
             editor.Dispatcher.UnhandledException -= OnUnhandled;
         }
         Assert.True(pressed > 60, $"only {pressed} editor buttons found to press");
+    }
+
+    /// <summary>
+    /// Survey w43: a text box and a callout box take a Cloud border. The box keeps its fill
+    /// and its whole-box hit area, a scalloped path draws the edge and follows a resize, and
+    /// a callout's leader stays a straight line.
+    /// </summary>
+    private static void TextAndCalloutCloudBorderSmoke()
+    {
+        var red = new SolidColorBrush(Colors.Red);
+        var label = (Grid)AnnotationFactory.CreateStyledTextLabel(
+            "Cloud", Brushes.Black, 16, TextStyle.Plain, AnnotationFactory.DefaultTextFontFamily,
+            false, false, false, false, TextAlignment.Left, "top", 200, 60,
+            Colors.Transparent, 2, LineBorderStyle.Cloud, red);
+        var chrome = label.Children.OfType<System.Windows.Shapes.Rectangle>().Single();
+        var cloud = label.Children.OfType<System.Windows.Shapes.Path>().Single();
+        Assert.Equal(Colors.Transparent, ((SolidColorBrush)chrome.Stroke).Color);
+        Assert.Same(red, cloud.Stroke);
+        Assert.Equal(2, cloud.StrokeThickness);
+        Rect first = cloud.Data.Bounds;
+        Assert.True(first.Width > 150 && first.Width <= 200.5, $"cloud does not fit the box: {first}");
+        Assert.IsType<TextBlock>(label.Children[label.Children.Count - 1]);
+
+        label.Width = 320;
+        label.Measure(new Size(320, 60));
+        label.Arrange(new Rect(0, 0, 320, 60));
+        label.UpdateLayout();
+        Assert.True(cloud.Data.Bounds.Width > first.Width + 80, $"cloud did not follow the resize: {cloud.Data.Bounds}");
+
+        AnnotationFactory.SyncTextCloud(label, cloud: false, AnnotationFactory.DefaultTextCloudIntensity);
+        Assert.Empty(label.Children.OfType<System.Windows.Shapes.Path>());
+        Assert.Same(red, chrome.Stroke);
+
+        var layout = CalloutLayout.FromDrag(new Point(0, 0), new Point(120, 80), descender: 4);
+        var callout = AnnotationFactory.CreateCallout(layout, "Note", Colors.Blue, Colors.Transparent, 2,
+            ArrowheadStyle.SolidTriangle, LineBorderStyle.Cloud, 14);
+        var paths = callout.Children.OfType<System.Windows.Shapes.Path>()
+            .Where(p => p.Visibility == Visibility.Visible && p.Data is { } d && !d.IsEmpty() && p.Stroke is SolidColorBrush { Color.A: > 0 })
+            .ToList();
+        Assert.Equal(Colors.Transparent, ((SolidColorBrush)callout.Box.Stroke).Color);
+        Assert.Contains(paths, p => p.StrokeDashArray is null or { Count: 0 } && p.Data.Bounds.Width >= layout.Box.Width * 0.75
+            && Math.Abs(Canvas.GetLeft(p) - layout.Box.X) < 0.5 && Math.Abs(Canvas.GetTop(p) - layout.Box.Y) < 0.5);
     }
 
     private static void PumpDispatcherOnce()

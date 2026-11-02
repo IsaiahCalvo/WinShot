@@ -1356,8 +1356,9 @@ public partial class EditorWindow : Window
         // cloud can mark. All four are live: CloudPath.For takes an arbitrary ring for the two
         // poly tools, and CloudPath.ForBox picks the rectangle or ellipse walk for the two
         // sized ones.
+        // w43: the text box and callout cloud their box border too (textCloudBorder.js).
         bool cloudCapable = chrome is EditorTool.Rectangle or EditorTool.Ellipse
-            or EditorTool.Polygon or EditorTool.Polyline;
+            or EditorTool.Polygon or EditorTool.Polyline or EditorTool.Text or EditorTool.Callout;
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(cloudCapable);
         // Survey gates the Bump field on a cloud-capable tool + the cloud border (AppShell.jsx:2590).
@@ -2516,7 +2517,8 @@ public partial class EditorWindow : Window
         // The bump is per-annotation, so stamp it on the selection before the restyle
         // rebuilds their geometry from it.
         foreach (UIElement el in SelectionList())
-            if (el is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeRectangle } m })
+            if (el is FrameworkElement { Tag: AnnotationData m }
+                && AnnotationStyle.LineStyleFrom(m) == LineBorderStyle.Cloud)
                 m.CloudIntensity = _cloudIntensity;
         RestyleSelectedLineStyle(_lineStyle);
     }

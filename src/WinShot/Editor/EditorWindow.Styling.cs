@@ -262,7 +262,7 @@ public partial class EditorWindow : Window
                     callout.Apply(layout, snap.Meta.Text ?? callout.Text, snap.StrokeColor, snap.FillColor,
                         snap.Thickness, head, AnnotationStyle.LineStyleFrom(snap.Meta),
                         snap.Meta.FontSize ?? CalloutLayout.DefaultFontSize, snap.Meta.FontFamily,
-                        CalloutFontColor(snap.Meta));
+                        CalloutFontColor(snap.Meta), snap.Meta.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
                     ApplyTextFormat(callout, snap.Meta);
                 }
                 break;
@@ -289,6 +289,9 @@ public partial class EditorWindow : Window
                                     : AnnotationStyle.LineStyleFrom(snap.Meta));
                         }
                     }
+                    AnnotationFactory.SyncTextCloud(textBox,
+                        AnnotationStyle.LineStyleFrom(snap.Meta) == LineBorderStyle.Cloud,
+                        snap.Meta.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
                 }
                 break;
             case AnnotationData.TypeStep:
@@ -577,7 +580,7 @@ public partial class EditorWindow : Window
             a.Italic == true, a.Underline == true, a.Strike == true,
             AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
             boxW, boxH, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
-            new SolidColorBrush(stroke));
+            new SolidColorBrush(stroke), a.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
         label.Tag = a;
         return label;
     }
@@ -626,7 +629,7 @@ public partial class EditorWindow : Window
         callout.Apply(layout, liveText ?? meta.Text ?? callout.Text, stroke,
             AnnotationStyle.FillColorFrom(meta, stroke), meta.Thickness ?? 2, head,
             AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? CalloutLayout.DefaultFontSize,
-            meta.FontFamily, CalloutFontColor(meta));
+            meta.FontFamily, CalloutFontColor(meta), meta.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
         ApplyTextFormat(callout, meta);
     }
 
@@ -1476,6 +1479,8 @@ public partial class EditorWindow : Window
             foreach (var child in textGrid.Children)
                 if (child is Shape chrome)
                     AnnotationFactory.ApplyDash(chrome, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
+            AnnotationFactory.SyncTextCloud(textGrid, style == LineBorderStyle.Cloud,
+                after.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
         }
         if (fe is CalloutAnnotation callout)
             ApplyStyleSnapshot(callout, SnapshotStyle(callout, after));

@@ -301,12 +301,13 @@ internal static class EditorShellContract
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.TextStyle | EditorContextControls.Opacity |
-            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
+            EditorContextControls.CloudBump, // w43: the box border can be a cloud
         EditorTool.Callout =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
             EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
-            EditorContextControls.TextStyle,
+            EditorContextControls.TextStyle | EditorContextControls.CloudBump,
         EditorTool.Step =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,

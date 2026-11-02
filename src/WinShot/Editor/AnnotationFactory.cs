@@ -722,7 +722,8 @@ internal static class AnnotationFactory
         string text, Brush foreground, double fontSize, TextStyle style,
         string fontFamily, bool bold, bool italic, bool underline, bool strike, TextAlignment align,
         string? verticalAlign, double? boxWidth, double? boxHeight,
-        Color fill, double strokeThickness, LineBorderStyle lineStyle, Brush? chromeStroke = null)
+        Color fill, double strokeThickness, LineBorderStyle lineStyle, Brush? chromeStroke = null,
+        double cloudIntensity = DefaultTextCloudIntensity)
     {
         // Survey has no `style` pseudo-property on a Textbox and nothing ORs boldness in from
         // one: bold is exactly fontWeight === 'bold' (textEditCommit.js:26-62, :91-104).
@@ -766,7 +767,77 @@ internal static class AnnotationFactory
         inner.Margin = new Thickness(
             TextPadding, TextPadding, TextPadding, TextPadding - fontSize * TextDescenderRatio);
         box.Children.Add(inner);
+        if (lineStyle == LineBorderStyle.Cloud) SyncTextCloud(box, cloud: true, cloudIntensity);
         return box;
+    }
+
+    /// <summary>Survey's DEFAULT_TEXT_CLOUD_INTENSITY (textCloudBorder.js).</summary>
+    public const double DefaultTextCloudIntensity = 2;
+
+    /// <summary>Marks the scalloped border path inside a text box and carries its bump size.</summary>
+    private sealed class TextCloudInfo
+    {
+        public double Intensity;
+    }
+
+    /// <summary>
+    /// Survey w43: a text box may take a Cloud border. Survey draws it as its rectangle
+    /// cloud fitted to the box's own frame, and the box still picks by its whole area
+    /// (textCloudBorder.js). Here the chrome Rectangle keeps the fill and the hit area and
+    /// gives its stroke to a scalloped Path laid over it; switching back hands the stroke
+    /// back. Call it after anything restyles the chrome, so the stroke lands on the cloud.
+    /// </summary>
+    public static void SyncTextCloud(Grid box, bool cloud, double intensity)
+    {
+        var chrome = box.Children.OfType<Rectangle>().FirstOrDefault();
+        if (chrome is null) return;
+        var path = box.Children.OfType<Path>().FirstOrDefault(p => p.Tag is TextCloudInfo);
+        bool chromeStrokes = chrome.Stroke is not null
+            && !(chrome.Stroke is SolidColorBrush { Color.A: 0 });
+        if (!cloud)
+        {
+            if (path is null) return;
+            if (!chromeStrokes && path.Stroke is not null) chrome.Stroke = path.Stroke;
+            box.Children.Remove(path);
+            return;
+        }
+        if (path is null)
+        {
+            path = new Path
+            {
+                Tag = new TextCloudInfo(),
+                IsHitTestVisible = false,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                StrokeLineJoin = PenLineJoin.Round,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+            };
+            box.Children.Insert(box.Children.IndexOf(chrome) + 1, path);
+            box.SizeChanged -= OnTextCloudBoxSizeChanged;
+            box.SizeChanged += OnTextCloudBoxSizeChanged;
+        }
+        ((TextCloudInfo)path.Tag).Intensity = CloudPath.ClampIntensity(intensity);
+        if (chromeStrokes) path.Stroke = chrome.Stroke;
+        path.StrokeThickness = chrome.StrokeThickness;
+        path.Fill = null;
+        path.StrokeDashArray = null;
+        chrome.Stroke = Brushes.Transparent;
+        RebuildTextCloud(box, path);
+    }
+
+    private static void OnTextCloudBoxSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is Grid box && box.Children.OfType<Path>().FirstOrDefault(p => p.Tag is TextCloudInfo) is { } path)
+            RebuildTextCloud(box, path);
+    }
+
+    private static void RebuildTextCloud(Grid box, Path path)
+    {
+        double w = box.Width is > 0 and not double.NaN ? box.Width : box.ActualWidth;
+        double h = box.Height is > 0 and not double.NaN ? box.Height : box.ActualHeight;
+        path.Data = CloudPath.ForRectangle(new Rect(0, 0, Math.Max(1, w), Math.Max(1, h)),
+            ((TextCloudInfo)path.Tag).Intensity, Math.Max(1, path.StrokeThickness));
     }
 
     private static Path CreateOutlineGlyph(
@@ -1159,10 +1230,11 @@ internal static class AnnotationFactory
     public static CalloutAnnotation CreateCallout(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
         ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null,
-        Color? fontColor = null)
+        Color? fontColor = null, double cloudIntensity = DefaultTextCloudIntensity)
     {
         var visual = new CalloutAnnotation();
-        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize, fontFamily, fontColor);
+        visual.Apply(layout, text, stroke, fill, thickness, head, lineStyle, fontSize, fontFamily, fontColor,
+            cloudIntensity);
         return visual;
     }
 }

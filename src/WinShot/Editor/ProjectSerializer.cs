@@ -675,7 +675,8 @@ internal static class ProjectSerializer
                     : null;
                 return AnnotationFactory.CreateCallout(
                     layout, a.Text ?? "", stroke, fill, RequireThickness(a),
-                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily, fontColor);
+                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily, fontColor,
+                    a.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
             }
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
@@ -710,7 +711,7 @@ internal static class ProjectSerializer
                     a.Italic == true, a.Underline == true, a.Strike == true,
                     AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
                     box?.Width, box?.Height, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
-                    new SolidColorBrush(stroke));
+                    new SolidColorBrush(stroke), a.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
                 SetPos(label, pts[0]);
                 return label;
             }
