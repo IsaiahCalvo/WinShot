@@ -184,9 +184,9 @@
 
                         <Button x:Name="ImageGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnImageGroupClick" Tag="Image" ToolTip="Image"
-                                Content="{StaticResource SurveyIcon.Crop}"
+                                Content="{StaticResource SurveyIcon.Photo}"
                                 AutomationProperties.Name="Image tools"
-                                AutomationProperties.HelpText="Crop, add an image or another capture, add a background, extract text, export a before/after GIF."/>
+                                AutomationProperties.HelpText="Add an image or another capture, add a background, extract text, export a before/after GIF."/>
 
 
                         <RadioButton x:Name="CurvedArrowToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
@@ -382,11 +382,6 @@
                              user already looks for a tool, and it keeps the top row from
                              growing a second overflow. -->
                         <StackPanel x:Name="ImageGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                            <RadioButton x:Name="CropToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
-                                         Tag="Crop" Content="{StaticResource SurveyIcon.Crop}" Checked="OnToolChecked"
-                                         ToolTip="Crop &amp; resize (C)"
-                                         AutomationProperties.Name="Crop and resize"
-                                         AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut Shift+C."/>
                             <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddImage}"
                                     Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                     AutomationProperties.Name="Add screenshot or image"
@@ -938,12 +933,10 @@
                                                     
 
                                                     <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <!-- Width 112 is Survey's own trigger size, measured on the running app
-                                                             2026-09-17. Letting the ComboBox size itself to its widest row made it
-                                                             257 DIP, and a control more than twice as wide as it should be is what
-                                                             pushed the arrowhead into the overflow flyout at a 1400 DIP window. -->
+                                                        <!-- Survey's chrome-field-w-arrowhead: the pill and its card are both 90 DIP
+                                                             (AppShell.jsx width / contentWidth). Six heads, then Both ends, nothing else. -->
                                                         <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="4"
-                                                                  Width="112"
+                                                                  Width="90"
                                                                   SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
                                                             <!-- Survey PASS 7 (board 15) offers SIX heads, in board order, each drawn as the head it puts on
                                                                  the line, with the short words of ARROWHEAD_SHORT_LABELS ("Filled", not "Solid triangle").
@@ -958,11 +951,6 @@
                                                             <ComboBoxItem Content="Circle" Tag="openCircle"/>
                                                             <ComboBoxItem Content="Square" Tag="square"/>
                                                             <ComboBoxItem Content="Bar" Tag="horizontalLine"/>
-                                                            <!-- WinShot's own whole-arrow looks, under Survey's heads: Fancy is one filled silhouette,
-                                                                 Curved arms the curved tool. -->
-                                                            <Separator/>
-                                                            <ComboBoxItem Content="Fancy" Tag="Fancy"/>
-                                                            <ComboBoxItem Content="Curved" Tag="Curved"/>
                                                         </ComboBox>
                                                         <!-- Survey's "Both ends" toggle (AppShell.jsx:2747-2782): one ending picker
                                                              plus a toggle that MIRRORS the picked ending onto the start, rather than

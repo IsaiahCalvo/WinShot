@@ -1041,7 +1041,7 @@ public class ThemedWindowTests
         foreach (string name in new[]
         {
             "SelectToolBtn", "PanToolBtn", "RectangleToolBtn", "RedactToolBtn",
-            "SpotlightToolBtn", "MagnifierToolBtn", "CropToolBtn", "EyedropperToolBtn",
+            "SpotlightToolBtn", "MagnifierToolBtn", "EyedropperToolBtn",
         })
         {
             if (editor.FindName(name) is not RadioButton rb) continue;
@@ -1233,7 +1233,7 @@ public class ThemedWindowTests
             "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "EyedropperToolBtn",
-            "CropUtilityBtn", "CropToolBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
             "OcrRegionBtn", "ExportGifBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "SnapToEdgesCheck", "RedactTextOnlyCheck", "MagnifySlider",
@@ -1259,7 +1259,7 @@ public class ThemedWindowTests
             "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "EyedropperToolBtn",
-            "CropUtilityBtn", "CropToolBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
             "OcrRegionBtn", "ExportGifBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "SnapToEdgesCheck", "RedactTextOnlyCheck",

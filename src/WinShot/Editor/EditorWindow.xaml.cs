@@ -2029,12 +2029,10 @@ public partial class EditorWindow : Window
     {
         // SizeField is a fixed-width composite (43px input + 24px chevron), so it
         // never needs measuring.
-        FitComboToLongestItem(ArrowStyleBox);
-        // Room for the 28px arrow sample and its 6px gap in front of each head's name.
-        if (ArrowStyleBox is not null) ArrowStyleBox.Width += 34;
-        FitComboToLongestItem(LineStyleBox);
-        // Room for the 28px stroke sample and its 6px gap in front of each style name.
-        if (LineStyleBox is not null) LineStyleBox.Width += 34;
+        // The arrowhead (90) and line style (92) pills are Survey's fixed
+        // --chrome-field-w-arrowhead / --chrome-field-w-style; their cards match.
+        if (ArrowStyleBox is not null) { ArrowStyleBox.MinWidth = 90; ArrowStyleBox.Width = 90; }
+        if (LineStyleBox is not null) { LineStyleBox.MinWidth = 92; LineStyleBox.Width = 92; }
         FitComboToLongestItem(FontFamilyBox);
         FitComboToLongestItem(FontSizeBox);
         FitComboToLongestItem(AlignBox);

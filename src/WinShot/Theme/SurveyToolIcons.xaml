@@ -699,14 +699,15 @@
     <!-- History: the empty state. A picture, which is what is missing. The empty state hosts it
          larger than 18, and the stroke grows with it - which is what a hero-sized mark wants. -->
     <Viewbox x:Key="SurveyIcon.Photo" x:Shared="False" Width="16" Height="16">
+        <!-- Survey Icons.jsx `image`, verbatim. -->
         <Canvas Width="24" Height="24">
             <Path Style="{StaticResource SurveyIconStroke}">
-                <Path.Data><RectangleGeometry Rect="3,4.5,18,15" RadiusX="2" RadiusY="2"/></Path.Data>
+                <Path.Data><RectangleGeometry Rect="3,3,18,18" RadiusX="2" RadiusY="2"/></Path.Data>
             </Path>
             <Path Style="{StaticResource SurveyIconStroke}">
-                <Path.Data><EllipseGeometry Center="8.5,9.5" RadiusX="1.6" RadiusY="1.6"/></Path.Data>
+                <Path.Data><EllipseGeometry Center="9,9" RadiusX="2" RadiusY="2"/></Path.Data>
             </Path>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M3.6,17.6 L9,12.2 L13,16.2 L15.8,13.4 L20.4,18"/>
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M21 15 17.5 11.5 6 21"/>
         </Canvas>
     </Viewbox>
 

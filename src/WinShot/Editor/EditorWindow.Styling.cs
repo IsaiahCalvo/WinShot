@@ -718,14 +718,6 @@ public partial class EditorWindow : Window
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
             item.Tag is not string tag)
             return;
-        if (string.Equals(tag, nameof(ArrowStyle.Curved), StringComparison.Ordinal))
-        {
-            // Curved is not a head at all: it is the other arrow TOOL, which is why it has
-            // no button of its own — picking it here is how you reach it.
-            _arrowStyle = ArrowStyle.Curved;
-            CheckToolButton(EditorTool.CurvedArrow);
-            return;
-        }
         if (Enum.TryParse(tag, out ArrowStyle legacy))
         {
             _arrowStyle = legacy;
