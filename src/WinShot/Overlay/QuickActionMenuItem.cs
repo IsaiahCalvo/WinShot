@@ -1,5 +1,6 @@
 ﻿using System.Drawing.Drawing2D;
 using WinShot.Core;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 
@@ -11,6 +12,11 @@ namespace WinShot.Overlay;
 /// every row's text, so the menu reads as two left edges. Here every row's leading
 /// content — a glyph, or the text on the rows that have no glyph — starts on the same
 /// left edge, and only an iconed row's text is indented past its glyph.
+///
+/// The sizes below are the 100% sizes. Every one is multiplied by the menu's
+/// <see cref="QuickActionsContextMenu.UiScale"/>, so on a 150% or 200% display the glyph,
+/// insets and row height grow with the text instead of leaving 17 px icons and 19 px rows
+/// around text twice that size.
 /// </summary>
 internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 {
@@ -23,7 +29,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     private const int MinHeight = 19;
 
     private readonly Action _action;
-    private readonly SD.Bitmap? _glyph;
+    private readonly string? _icon;
     private SD.Size? _ownSize;
 
     internal QuickActionMenuItem(string id, string text, Action action)
@@ -31,14 +37,25 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     {
         Id = id;
         _action = action;
-        if (QuickActionsMenu.IconFor(id) is { } icon)
-            _glyph = SvgIcons.Get(icon, GlyphSize, ThemePalette.TextPrimary);
+        _icon = QuickActionsMenu.IconFor(id);
     }
 
     internal string Id { get; }
 
+    private double Scale => Owner is QuickActionsContextMenu menu ? menu.UiScale : 1d;
+
+    private int Px(int logical) => RecordingMonitorDpi.Px(logical, Scale);
+
+    private int GlyphPx => Px(GlyphSize);
+
+    /// <summary>The glyph at this row's size. SvgIcons caches by size, so this is a lookup.</summary>
+    private SD.Bitmap? Glyph => _icon is null ? null : SvgIcons.Get(_icon, GlyphPx, ThemePalette.TextPrimary);
+
     /// <summary>How far this row's text sits from the menu's left edge.</summary>
-    internal int TextLeft => PadLeft + (_glyph is null ? 0 : GlyphSize + GlyphGap);
+    internal int TextLeft => Px(PadLeft) + (_icon is null ? 0 : GlyphPx + Px(GlyphGap));
+
+    /// <summary>Drops the measured size; the menu calls this when its scale changes.</summary>
+    internal void Rescale() => _ownSize = null;
 
     private string Shortcut => ShowShortcutKeys ? ShortcutKeyDisplayString ?? string.Empty : string.Empty;
 
@@ -72,12 +89,12 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
         if (_ownSize is { } cached)
             return cached;
         SD.Size text = Measure(Text ?? string.Empty);
-        int width = TextLeft + text.Width + PadRight;
+        int width = TextLeft + text.Width + Px(PadRight);
         if (Shortcut.Length > 0)
-            width += ShortcutGap + Measure(Shortcut).Width;
+            width += Px(ShortcutGap) + Measure(Shortcut).Width;
         if (HasDropDownItems)
-            width += ShortcutGap + ArrowWidth;
-        _ownSize = new SD.Size(width, Math.Max(MinHeight, text.Height + 2));
+            width += Px(ShortcutGap) + Px(ArrowWidth);
+        _ownSize = new SD.Size(width, Math.Max(Px(MinHeight), text.Height + Px(2)));
         return _ownSize.Value;
     }
 
@@ -87,8 +104,11 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
         var g = e.Graphics;
         DrawHighlight(g);
 
-        if (_glyph is not null)
-            g.DrawImage(_glyph, PadLeft, (Height - GlyphSize) / 2, GlyphSize, GlyphSize);
+        if (Glyph is { } glyph)
+        {
+            int size = GlyphPx;
+            g.DrawImage(glyph, Px(PadLeft), (Height - size) / 2, size, size);
+        }
 
         SD.Color color = Enabled ? ThemePalette.TextPrimary : ThemePalette.TextSecondary;
         var flags = WF.TextFormatFlags.NoPrefix | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Left;
@@ -96,7 +116,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
             g,
             Text,
             Font,
-            new SD.Rectangle(TextLeft, 0, Math.Max(0, Width - TextLeft - PadRight), Height),
+            new SD.Rectangle(TextLeft, 0, Math.Max(0, Width - TextLeft - Px(PadRight)), Height),
             color,
             flags);
 
@@ -110,7 +130,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
                 g,
                 Shortcut,
                 Font,
-                new SD.Rectangle(TextLeft, 0, Math.Max(0, Width - TextLeft - PadRight), Height),
+                new SD.Rectangle(TextLeft, 0, Math.Max(0, Width - TextLeft - Px(PadRight)), Height),
                 ThemePalette.TextSecondary,
                 WF.TextFormatFlags.NoPrefix | WF.TextFormatFlags.VerticalCenter | WF.TextFormatFlags.Right);
         }
@@ -132,7 +152,7 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
 
         SmoothingMode previous = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = GdiPaths.RoundedRect(bounds, Math.Min(6, bounds.Height / 2));
+        using var path = GdiPaths.RoundedRect(bounds, Math.Min(Px(6), bounds.Height / 2));
         using var fill = new SD.SolidBrush(SD.Color.FromArgb(66, 66, 70));
         g.FillPath(fill, path);
         g.SmoothingMode = previous;
@@ -147,20 +167,21 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
     /// </summary>
     private SD.Rectangle HighlightBounds()
     {
-        int gutter = QuickActionsContextMenu.HighlightGutter;
-        return new SD.Rectangle(gutter, 1, Math.Max(0, Width - gutter * 2), Height - 2);
+        int gutter = Px(QuickActionsContextMenu.HighlightGutter);
+        int inset = Px(1);
+        return new SD.Rectangle(gutter, inset, Math.Max(0, Width - gutter * 2), Height - inset * 2);
     }
 
     /// <summary>The chevron that says this row expands. Drawn here because the row opts out
     /// of the stock layout, which would otherwise have drawn it.</summary>
     private void DrawSubmenuArrow(SD.Graphics g, SD.Color color)
     {
-        const int arm = 4;
-        int x = Width - PadRight - ArrowWidth / 2;
+        float arm = (float)(4 * Scale);
+        int x = Width - Px(PadRight) - Px(ArrowWidth) / 2;
         int y = Height / 2;
         SmoothingMode previous = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var pen = new SD.Pen(color, 1.4f)
+        using var pen = new SD.Pen(color, (float)(1.4 * Scale))
         {
             StartCap = SD.Drawing2D.LineCap.Round,
             EndCap = SD.Drawing2D.LineCap.Round,
@@ -168,9 +189,9 @@ internal sealed class QuickActionMenuItem : WF.ToolStripMenuItem
         };
         g.DrawLines(pen, new[]
         {
-            new SD.PointF(x - arm / 2f, y - arm),
-            new SD.PointF(x + arm / 2f, y),
-            new SD.PointF(x - arm / 2f, y + arm),
+            new SD.PointF(x - (arm / 2f), y - arm),
+            new SD.PointF(x + (arm / 2f), y),
+            new SD.PointF(x - (arm / 2f), y + arm),
         });
         g.SmoothingMode = previous;
     }
@@ -193,6 +214,7 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
 
     private int? _rowWidth;
     private bool _stretchingRows;
+    private SD.Font? _scaledFont;
 
     internal QuickActionsContextMenu()
     {
@@ -200,6 +222,55 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
         ShowImageMargin = false;
         Renderer = new RoundedMenuRenderer();
         Font = ThemePalette.UiFont(ThemePalette.PinnedMenuRowPt);
+    }
+
+    /// <summary>
+    /// The display scale the menu is drawn at: 1 at 100%, 2 at 200%. The card sets it from
+    /// the monitor it sits on before the menu opens. A point-sized font alone does not get
+    /// there: under PerMonitorV2 it resolves against whichever DC it was created on, and the
+    /// rows' glyphs and insets are pixels that never scaled at all, so on a 200% display the
+    /// menu came out as 100% rows with their text pressed against the edges.
+    /// </summary>
+    internal double UiScale { get; private set; } = 1d;
+
+    /// <summary>Sets <see cref="UiScale"/> on this menu and every submenu under it, and lays
+    /// the rows out again at the new size. Cheap when the scale has not changed.</summary>
+    internal void ApplyScale(double scale)
+    {
+        if (scale <= 0)
+            scale = 1d;
+        if (Math.Abs(scale - UiScale) < 0.001)
+            return;
+        UiScale = scale;
+
+        SD.Font? previous = _scaledFont;
+        _scaledFont = ThemePalette.ScaledUiFont(ThemePalette.PinnedMenuRowPt, scale);
+        Font = _scaledFont;
+        previous?.Dispose();
+
+        int pad = RecordingMonitorDpi.Px(2, scale);
+        Padding = new WF.Padding(0, pad, 0, pad);
+        _rowWidth = null;
+        foreach (WF.ToolStripItem item in Items)
+        {
+            if (item is QuickActionMenuItem row)
+            {
+                row.Rescale();
+                if (row.HasDropDownItems && row.DropDown is QuickActionsContextMenu child)
+                    child.ApplyScale(scale);
+            }
+        }
+        PerformLayout();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            _scaledFont?.Dispose();
+            _scaledFont = null;
+        }
     }
 
     /// <summary>
@@ -270,7 +341,7 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
         }
     }
 
-    private int Radius => (int)Math.Round(CornerRadius * DeviceDpi / 96.0);
+    private int Radius => RecordingMonitorDpi.Px(CornerRadius, UiScale);
 
     public override SD.Size GetPreferredSize(SD.Size proposedSize)
     {

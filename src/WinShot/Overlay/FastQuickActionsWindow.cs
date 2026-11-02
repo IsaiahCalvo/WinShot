@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using WinShot.History;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 using W = System.Windows;
@@ -1790,6 +1791,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
         _overflowMenu.Opening += (_, _) =>
         {
+            ScaleOverflowMenu();
             // Visible, not merely open: a card held off screen by the editor is not part of
             // the stack these rows act on, so advertising them over it reads as a lie.
             bool stacked = StackedCards().Length > 1;
@@ -1826,9 +1828,17 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void ShowOverflowMenu()
     {
         SetHovering(true);
+        ScaleOverflowMenu();
         _overflowMenu.Show(OverflowMenuOrigin(_overflowMenu.GetPreferredSize(SD.Size.Empty)),
             WF.ToolStripDropDownDirection.BelowRight);
     }
+
+    /// <summary>Sizes the menu for the monitor the card is on, where it opens. Before this it
+    /// kept 100% rows and glyphs on every display.</summary>
+    private void ScaleOverflowMenu() =>
+        _overflowMenu.ApplyScale(RecordingMonitorDpi.ScaleFor(IsHandleCreated
+            ? RectangleToScreen(_cardRect)
+            : new SD.Rectangle(Left + _cardRect.X, Top + _cardRect.Y, _cardRect.Width, _cardRect.Height)));
 
     private SD.Point OverflowMenuOrigin(SD.Size menuSize) =>
         QuickActionsMenu.MenuOrigin(
