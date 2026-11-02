@@ -170,15 +170,7 @@ internal static class AnnotationFactory
     }
 
     /// <summary>
-    /// The box a sketchy outline is generated in. 100 units keeps
-    /// <see cref="StrokeStyles.SketchAmplitude"/> reading as a percentage of the mark,
-    /// which is what makes the wobble look the same at every size.
-    /// </summary>
-    private const double SketchUnitBox = 100;
-
-    /// <summary>
-    /// One figure from a run of points, sketched or ruled — the shared spelling of "draw
-    /// these points in order".
+    /// One figure from a run of points — the shared spelling of "draw these points in order".
     /// </summary>
     private static PathFigure PolyFigure(IReadOnlyList<Point> points, bool closed, bool filled)
     {
@@ -194,7 +186,7 @@ internal static class AnnotationFactory
     /// mark keeps a crisp tail at any thickness instead of a round line cap.
     /// </summary>
     private static Geometry FancyArrowGeometry(
-        Point from, Point to, Vector dir, double thickness, bool sketchy, int seed)
+        Point from, Point to, Vector dir, double thickness)
     {
         double head = Math.Clamp(thickness * 3.5, 10, 30);
         var perp = new Vector(-dir.Y, dir.X);
@@ -213,30 +205,13 @@ internal static class AnnotationFactory
         };
 
         var geometry = new PathGeometry();
-        geometry.Figures.Add(PolyFigure(
-            sketchy ? StrokeStyles.SketchPath(silhouette, seed, closed: true) : silhouette,
-            closed: true, filled: true));
+        geometry.Figures.Add(PolyFigure(silhouette, closed: true, filled: true));
         return geometry;
     }
 
-    /// <summary>
-    /// A line or arrow SHAFT, straight or curved, in whichever line quality is asked for.
-    /// Clean hands straight back to <see cref="LineCurve.Stroke"/>; Sketchy flattens the
-    /// curve first so the wobble follows it instead of cutting the corner.
-    /// </summary>
-    public static PathGeometry LineGeometry(
-        Point from, Point to, Point? mid, StrokeRender render = StrokeRender.Clean, int seed = 0)
-    {
-        if (render != StrokeRender.Sketchy) return LineCurve.Stroke(from, to, mid);
-
-        IReadOnlyList<Point> run = LineCurve.IsCurved(mid, from, to)
-            ? StrokeStyles.FlattenQuadratic(from, LineCurve.ControlThroughMid(from, to, mid!.Value), to)
-            : new[] { from, to };
-        var geometry = new PathGeometry();
-        geometry.Figures.Add(PolyFigure(
-            StrokeStyles.SketchPath(run, seed, closed: false), closed: false, filled: false));
-        return geometry;
-    }
+    /// <summary>A line or arrow SHAFT, straight or curved.</summary>
+    public static PathGeometry LineGeometry(Point from, Point to, Point? mid) =>
+        LineCurve.Stroke(from, to, mid);
 
     /// <summary>Maps a stored <c>AnnotationData.Style</c> string to an <see cref="ArrowStyle"/> (default Straight).</summary>
     public static ArrowStyle ParseArrowStyle(string? name) =>
@@ -247,8 +222,7 @@ internal static class AnnotationFactory
     /// six-head vocabulary so old .winshot files keep their look.
     /// </summary>
     public static Geometry ArrowGeometry(
-        Point from, Point to, double thickness, ArrowStyle style,
-        StrokeRender render = StrokeRender.Clean, int seed = 0)
+        Point from, Point to, double thickness, ArrowStyle style)
     {
         // Fancy is not a head choice at all: it is one closed silhouette, so it never
         // reaches the head vocabulary below.
@@ -258,12 +232,12 @@ internal static class AnnotationFactory
             if (v.Length < 0.5) v = new Vector(0.5, 0);
             var dir = v;
             dir.Normalize();
-            return FancyArrowGeometry(from, to, dir, thickness, render == StrokeRender.Sketchy, seed);
+            return FancyArrowGeometry(from, to, dir, thickness);
         }
 
         var end = AnnotationStyle.ParseArrowhead(style.ToString(), out var start);
         return ArrowGeometry(from, to, thickness, end, start, thin: style == ArrowStyle.Thin,
-            mid: null, render: render, seed: seed);
+            mid: null);
     }
 
     /// <summary>
@@ -273,8 +247,7 @@ internal static class AnnotationFactory
     /// </summary>
     public static Geometry ArrowGeometry(
         Point from, Point to, double thickness, ArrowheadStyle end,
-        ArrowheadStyle start = ArrowheadStyle.None, bool thin = false, Point? mid = null,
-        StrokeRender render = StrokeRender.Clean, int seed = 0)
+        ArrowheadStyle start = ArrowheadStyle.None, bool thin = false, Point? mid = null)
     {
         double headSize = Math.Max(8, thickness * (thin ? 2.6 : 3));
         bool curved = LineCurve.IsCurved(mid, from, to);
@@ -294,7 +267,7 @@ internal static class AnnotationFactory
         Point endBase = to - endDir * ShaftTrim(end, headSize, thickness);
         Point startBase = from + startDir * ShaftTrim(start, headSize, thickness);
 
-        var geometry = LineGeometry(startBase, endBase, curved ? mid : null, render, seed);
+        var geometry = LineGeometry(startBase, endBase, curved ? mid : null);
         AppendHead(geometry, to, endAngle, headSize, thickness, end);
         if (start != ArrowheadStyle.None)
             AppendHead(geometry, from, startAngle + Math.PI, headSize, thickness, start);
@@ -485,8 +458,7 @@ internal static class AnnotationFactory
     /// oriented along the curve's end tangent. Same head sizing as the straight arrow.
     /// </summary>
     public static Geometry CurvedArrowGeometry(
-        Point from, Point control, Point to, double thickness,
-        StrokeRender render = StrokeRender.Clean, int seed = 0)
+        Point from, Point control, Point to, double thickness)
     {
         var tangent = to - control;
         if (tangent.Length < 0.5) tangent = to - from;
@@ -500,26 +472,12 @@ internal static class AnnotationFactory
 
         var geometry = new PathGeometry();
 
-        if (render == StrokeRender.Sketchy)
-        {
-            geometry.Figures.Add(PolyFigure(
-                StrokeStyles.SketchPath(
-                    StrokeStyles.FlattenQuadratic(from, control, headBase), seed, closed: false),
-                closed: false, filled: false));
-        }
-        else
-        {
-            var shaft = new PathFigure { StartPoint = from, IsFilled = false };
-            shaft.Segments.Add(new QuadraticBezierSegment(control, headBase, isStroked: true));
-            geometry.Figures.Add(shaft);
-        }
+        var shaft = new PathFigure { StartPoint = from, IsFilled = false };
+        shaft.Segments.Add(new QuadraticBezierSegment(control, headBase, isStroked: true));
+        geometry.Figures.Add(shaft);
 
         Point[] triangle = { to, headBase + perp, headBase - perp };
-        geometry.Figures.Add(PolyFigure(
-            render == StrokeRender.Sketchy
-                ? StrokeStyles.SketchPath(triangle, unchecked(seed + 1), closed: true)
-                : triangle,
-            closed: true, filled: true));
+        geometry.Figures.Add(PolyFigure(triangle, closed: true, filled: true));
 
         return geometry;
     }
@@ -1080,8 +1038,7 @@ internal static class AnnotationFactory
     /// (annotationCreationCommit.js:270-273).</param>
     public static Path CreatePolyShape(
         IReadOnlyList<Point> points, bool closed, Color stroke, Color fill, double thickness,
-        LineBorderStyle lineStyle, double cloudIntensity = CloudPath.DefaultIntensity,
-        StrokeRender render = StrokeRender.Clean, int seed = 0)
+        LineBorderStyle lineStyle, double cloudIntensity = CloudPath.DefaultIntensity)
     {
         Geometry data;
         if (lineStyle == LineBorderStyle.Cloud)
@@ -1092,11 +1049,8 @@ internal static class AnnotationFactory
         }
         else
         {
-            IReadOnlyList<Point> run = render == StrokeRender.Sketchy
-                ? StrokeStyles.SketchPolygon(points, seed)
-                : points;
             var geometry = new PathGeometry();
-            if (run.Count >= 2) geometry.Figures.Add(PolyFigure(run, closed, filled: closed));
+            if (points.Count >= 2) geometry.Figures.Add(PolyFigure(points, closed, filled: closed));
             data = geometry;
         }
 
@@ -1123,8 +1077,7 @@ internal static class AnnotationFactory
 
     public static Shape CreateBoxShape(
         string type, Rect bounds, Color stroke, Color fill, double thickness, LineBorderStyle lineStyle,
-        double cloudIntensity = CloudPath.DefaultIntensity,
-        StrokeRender render = StrokeRender.Clean, int seed = 0)
+        double cloudIntensity = CloudPath.DefaultIntensity)
     {
         Shape shape;
         if (type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
@@ -1136,21 +1089,6 @@ internal static class AnnotationFactory
                     new Rect(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height)),
                     cloudIntensity, thickness),
             };
-        }
-        else if (render == StrokeRender.Sketchy)
-        {
-            // Jitter is generated in a fixed unit box and stretched to the mark's real size:
-            // sizing the wobble with the mark would make a big rectangle wildly shaky and a
-            // small one perfectly straight. Stretch.Fill keeps every caller that sets
-            // Width/Height working, and leaves the stroke at the asked-for thickness.
-            var box = new Rect(0, 0, SketchUnitBox, SketchUnitBox);
-            var outline = type == AnnotationData.TypeEllipse
-                ? StrokeStyles.SketchPolygon(StrokeStyles.EllipsePoints(box), seed)
-                : StrokeStyles.SketchPolygon(StrokeStyles.RectCorners(box), seed);
-            var sketch = new PathGeometry();
-            sketch.Figures.Add(PolyFigure(outline, closed: true, filled: true));
-            sketch.Freeze();
-            shape = new Path { Data = sketch, Stretch = Stretch.Fill };
         }
         else
         {

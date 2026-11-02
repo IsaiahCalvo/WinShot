@@ -219,8 +219,7 @@ public partial class EditorWindow : Window
                     var rebuilt = AnnotationFactory.CreatePolyShape(
                         run, closed, snap.StrokeColor, polyFill, snap.Thickness,
                         AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.CloudIntensity ?? _cloudIntensity,
-                        StrokeStyles.ParseRender(snap.Meta.Sketch), snap.Meta.Seed ?? 0);
+                        snap.Meta.CloudIntensity ?? _cloudIntensity);
                     poly.Data = rebuilt.Data;
                     poly.Stroke = stroke;
                     poly.StrokeThickness = snap.Thickness;
@@ -843,21 +842,18 @@ public partial class EditorWindow : Window
             Point from = new(pts[0][0], pts[0][1]);
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
-            var render = StrokeStyles.ParseRender(meta.Sketch);
-            int seed = meta.Seed ?? 0;
             var whole = AnnotationFactory.ParseArrowStyle(meta.Style);
             if (whole == ArrowStyle.Fancy)
             {
                 // A filled silhouette, so it carries no stroke: a stroked one rounds the tail.
-                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, ArrowStyle.Fancy, render, seed);
+                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, ArrowStyle.Fancy);
                 arrow.StrokeThickness = 0;
             }
             else
             {
                 var (end, start) = AnnotationStyle.HeadsFrom(meta);
                 arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start,
-                    thin: whole == ArrowStyle.Thin, mid: LineCurve.ParseMid(meta.Mid),
-                    render: render, seed: seed);
+                    thin: whole == ArrowStyle.Thin, mid: LineCurve.ParseMid(meta.Mid));
                 arrow.StrokeThickness = thickness;
             }
         }
@@ -1106,82 +1102,6 @@ public partial class EditorWindow : Window
             MagnifySlider.Value = value;
             MagnifyValueLabel.Text = string.Create(CultureInfo.InvariantCulture, $"{value:0.#}x");
         }
-        finally { _syncingContext = wasSyncing; }
-    }
-
-    /// <summary>
-    /// The hand-drawn line quality. Orthogonal to Survey's LINE STYLE dropdown: a sketchy
-    /// outline can still be dashed, so the two controls sit side by side rather than one
-    /// menu trying to spell both.
-    /// </summary>
-    private void OnSketchClick(object sender, RoutedEventArgs e)
-    {
-        if (_syncingContext) return;
-        _strokeRender = SketchCheck.IsChecked == true ? StrokeRender.Sketchy : StrokeRender.Clean;
-        RestyleSelectedSketch(_strokeRender);
-    }
-
-    /// <summary>
-    /// Repaints the selected outline in the chosen line quality, as one undo entry. The
-    /// mark is rebuilt rather than mutated because the wobble lives in the GEOMETRY: a
-    /// ruled rectangle is a <c>Rectangle</c> and a sketched one is a <c>Path</c>, and the
-    /// two cannot be turned into each other in place. Same swap-and-push shape as
-    /// <see cref="RestyleSelectedLineStyle"/>.
-    /// </summary>
-    private void RestyleSelectedSketch(StrokeRender render)
-    {
-        if (RestyleTargets().FirstOrDefault() is not FrameworkElement fe ||
-            fe.Tag is not AnnotationData meta) return;
-        if (meta.Type is not (AnnotationData.TypeLine or AnnotationData.TypeArrow
-            or AnnotationData.TypeCurvedArrow or AnnotationData.TypeRectangle
-            or AnnotationData.TypeEllipse
-            or AnnotationData.TypePolygon or AnnotationData.TypePolyline))
-            return;
-
-        var before = meta.Clone();
-        var after = meta.Clone();
-        after.Sketch = render == StrokeRender.Clean ? null : render.ToString();
-        // A mark that has never been sketched has no seed; give it one and keep it, so
-        // toggling hand-drawn off and on again reproduces the same wobble.
-        after.Seed = meta.Seed ?? ToolRandom.Next();
-
-        var rebuilt = (FrameworkElement)ProjectSerializer.CreateElement(
-            after, Array.Empty<BitmapSource>(), _source);
-        rebuilt.Tag = after;
-        AnnotationTransform.Apply(rebuilt, AnnotationTransform.OffsetOf(fe), AnnotationTransform.AngleOf(fe));
-
-        FrameworkElement original = fe;
-        ReplaceCanvasElement(original, rebuilt);
-        Push(new EditorAction(
-            undo: () =>
-            {
-                ReplaceCanvasElement(rebuilt, original);
-                original.Tag = before;
-                if (ReferenceEquals(_selected, rebuilt) || ReferenceEquals(_selected, original))
-                    Select(original);
-            },
-            redo: () =>
-            {
-                ReplaceCanvasElement(original, rebuilt);
-                rebuilt.Tag = after;
-                if (ReferenceEquals(_selected, original) || ReferenceEquals(_selected, rebuilt))
-                    Select(rebuilt);
-            }),
-            apply: false);
-        Select(rebuilt);
-    }
-
-    /// <summary>Pulls the selected outline's own line quality into the checkbox.</summary>
-    private void SyncSketchCheck()
-    {
-        if (SketchCheck is null) return;
-        StrokeRender render = _selected is FrameworkElement fe && fe.Tag is AnnotationData meta
-            ? StrokeStyles.ParseRender(meta.Sketch)
-            : _strokeRender;
-
-        bool wasSyncing = _syncingContext;
-        _syncingContext = true;
-        try { SketchCheck.IsChecked = render == StrokeRender.Sketchy; }
         finally { _syncingContext = wasSyncing; }
     }
 
