@@ -8,7 +8,7 @@ namespace WinShot.Tests;
 /// <summary>
 /// Page-edge rules (docs/PAGE-EDGE-RULES.md, Isaiah 2026-11-02): the selection chrome draws
 /// over the image edge, the rotate button can always be reached, marks are cut at the edge,
-/// and a move stops at the edge.
+/// and a move, a resize and a turn stop at the edge.
 /// </summary>
 public class PageEdgeRulesTests
 {
@@ -104,6 +104,34 @@ public class PageEdgeRulesTests
         Assert.Equal(0, PageEdgeMove.ClampDelta(start, new Vector(0, 7), 600, 400).X, 6);
         Assert.Equal(7, PageEdgeMove.ClampDelta(start, new Vector(0, 7), 600, 400).Y, 6);
         Assert.Equal(15, PageEdgeMove.ClampDelta(start, new Vector(15, 0), 600, 400).X, 6);
+    }
+
+    [Fact]
+    public void Resize_MayReachTheEdgeButNotPassIt()
+    {
+        var start = new Rect(100, 100, 50, 50);
+        Assert.True(PageEdgeMove.WithinAllowance(start, new Rect(0, 0, 600, 400), 600, 400));
+        Assert.False(PageEdgeMove.WithinAllowance(start, new Rect(-3, 100, 153, 50), 600, 400));
+        Assert.False(PageEdgeMove.WithinAllowance(start, new Rect(100, 100, 50, 310), 600, 400));
+    }
+
+    [Fact]
+    public void Resize_OfAMarkThatAlreadyHangsOver_MayNotGoFurtherOut()
+    {
+        // 20 px off the left edge at the start: it may stay there or come in, never go further.
+        var start = new Rect(-20, 100, 50, 50);
+        Assert.True(PageEdgeMove.WithinAllowance(start, new Rect(-20, 100, 80, 80), 600, 400));
+        Assert.True(PageEdgeMove.WithinAllowance(start, new Rect(5, 100, 25, 50), 600, 400));
+        Assert.False(PageEdgeMove.WithinAllowance(start, new Rect(-30, 100, 60, 50), 600, 400));
+    }
+
+    [Fact]
+    public void LastGood_FindsWhereTheGestureMeetsTheEdge()
+    {
+        // A box whose right side sits at 500 + 200 t: it meets a 600 px edge at t = 0.5.
+        double t = PageEdgeMove.LastGood(x => 500 + 200 * x <= 600, steps: 12);
+        Assert.InRange(t, 0.499, 0.5);
+        Assert.Equal(0, PageEdgeMove.LastGood(_ => false), 6);
     }
 
     [Fact]

@@ -968,6 +968,8 @@ public partial class EditorWindow : Window
             _rotateTravelled = false;
         }
         Viewport.CaptureMouse();
+        _edgeStart = null;
+        _edgeLastGood = null;
         if (_adjustingCrop || _handleKind == HandleKind.Crop)
         {
             // Crop adjust: snapshot the pending rect so a cancel/abort can restore it.
@@ -977,6 +979,8 @@ public partial class EditorWindow : Window
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
         {
             _resizeBefore = CaptureResizeSnapshot(_selected, meta);
+            _edgeStart = AnnotationCanvas.Children.Contains(fe) ? GetCanvasBounds(fe) : null;
+            _edgeLastGood = pos;
             // Survey freezes originalProps.angle at pointer-down and never re-reads it during
             // the drag (useSVGInteraction.js:4220-4258). Reading it live mixes frames, and the
             // shape walks away under the cursor.
@@ -1018,6 +1022,56 @@ public partial class EditorWindow : Window
             DragCropHandle(pos);
             return;
         }
+        DragResizeTo(pos);
+        // Page-edge rule 4: a resize or turn stops at the image edge, the same as a move.
+        // Every branch of DragResizeTo works from the frozen pre-drag snapshot, so applying it
+        // again at an earlier pointer spot is exact. A callout keeps its own drop rules.
+        if (_edgeStart is not Rect start || _handleKind == HandleKind.Callout
+            || _selected is not FrameworkElement fe) return;
+        if (MarkWithinEdge(fe, start))
+        {
+            _edgeLastGood = pos;
+            return;
+        }
+        if (_edgeLastGood is not Point good)
+            return; // started outside what it may use (cannot happen); leave it alone
+        bool Fits(Point p)
+        {
+            DragResizeTo(p);
+            return MarkWithinEdge(fe, start);
+        }
+        Point Toward(Point from, Point to)
+        {
+            if (Fits(to)) return to;
+            return from + (to - from) * PageEdgeMove.LastGood(t => Fits(from + (to - from) * t));
+        }
+        // A turn backs off along the pointer's path. A grabber slides: the across-the-edge
+        // part of the move stops and the along-the-edge part still follows the pointer.
+        Point stop;
+        if (_activeHandle == RotateHandleIndex)
+            stop = Toward(good, pos);
+        else
+        {
+            Point acrossX = Toward(good, new Point(pos.X, good.Y));
+            stop = Toward(acrossX, new Point(acrossX.X, pos.Y));
+        }
+        DragResizeTo(stop);
+        _edgeLastGood = stop;
+    }
+
+    /// <summary>Page-edge rule 4: the box the mark had when the resize or turn began.</summary>
+    private Rect? _edgeStart;
+    /// <summary>The last pointer spot where the resize or turn stayed inside the edge.</summary>
+    private Point? _edgeLastGood;
+
+    private bool MarkWithinEdge(FrameworkElement fe, Rect start)
+    {
+        fe.UpdateLayout();
+        return PageEdgeMove.WithinAllowance(start, GetCanvasBounds(fe), _source.Width, _source.Height);
+    }
+
+    private void DragResizeTo(Point pos)
+    {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
             return;
 

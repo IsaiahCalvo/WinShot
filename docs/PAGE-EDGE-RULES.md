@@ -44,9 +44,13 @@ app is Drawboard PDF, and the same rules apply to Survey's PDF pages.
    one mark, for a group moved as one piece, and for the arrow keys. Nothing sails
    off the image and snaps back on release. A mark that already hangs over an edge
    is never pulled back in.
-4. **A resize or a turn may take part of a mark past the edge.** That part is cut
-   off (rule 2). The grabbers stay visible over the edge (rule 1), so the user can
-   pull it straight back. Nothing fights the pointer in the middle of a gesture.
+4. **A resize or a turn stops at the image edge too.** A grabber, a line or arrow
+   end, a polygon corner, a pen stroke's grabbers and the rotate button all stop
+   the mark at the edge, the same way a move does. A grabber slides: the part of
+   the drag across the edge stops and the part along it still follows the
+   pointer. A turn stops at the last angle that fits. As with a move, a mark that
+   already hangs over an edge may stay there or come in, never go further out.
+   (Decided 2026-11-02: everything stops at the edge the same way.)
 
 ## Where it lives
 
@@ -58,11 +62,13 @@ app is Drawboard PDF, and the same rules apply to Survey's PDF pages.
   `EditorWindow.Handles.cs`: rule 1b. `BeginResize` and `DragRotate` keep the grab
   offset.
 - `src/WinShot/Editor/PageEdgeMove.cs` and `ClampMoveToSurface`: rule 3.
+- `PageEdgeMove.WithinAllowance` / `LastGood` and `DragResize` in
+  `EditorWindow.Handles.cs`: rule 4. Every resize branch works from the frozen
+  pre-drag snapshot, so it can be re-applied at an earlier pointer spot exactly.
 - `tests/WinShot.Tests/PageEdgeRulesTests.cs`.
 
-## Open
+## Not covered
 
-- Rule 4 is our own call. Drawboard's resize at the edge was not measured, because
-  its app needs a sign-in. If Isaiah wants a resize to stop at the edge the way a
-  move does, the resize maths in `EditorWindow.Handles.cs` needs to change.
-- A callout's text box dragged on its own keeps its existing rules.
+- A callout's tip, knee and text box keep their own drop rules (an invalid drop
+  rolls the callout back).
+- An angle typed into the rotation box is applied as typed.
