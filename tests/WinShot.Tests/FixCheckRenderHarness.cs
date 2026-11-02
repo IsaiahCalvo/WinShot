@@ -255,6 +255,31 @@ public class FixCheckRenderHarness
                 log.AppendLine($"single snap marks={Boxes()}");
                 WindowShot("9-single-snap.png");
 
+                // 10. Group rotate: the same three marks turned by the frame's grip, mid-drag
+                // (frame turns rigidly) and after release.
+                Deselect();
+                Tool(EditorTool.Select);
+                Drag(625, 285, 870, 450);
+                Pump(4);
+                var grip = (FrameworkElement)typeof(EditorWindow).GetField("_rotateThumb", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+                Point g0 = new(Canvas.GetLeft(grip) + grip.Width / 2, Canvas.GetTop(grip) + grip.Height / 2);
+                Rect fr = Frame();
+                Point piv = new(fr.Left + fr.Width / 2, fr.Top + fr.Height / 2);
+                log.AppendLine($"rotate grip={g0} visible={grip.Visibility} pivot={piv}");
+                Down(g0.X, g0.Y);
+                double rad0 = Math.Atan2(g0.Y - piv.Y, g0.X - piv.X);
+                double radius = (g0 - piv).Length;
+                for (int i = 1; i <= 8; i++)
+                {
+                    double a = rad0 + (30.0 * Math.PI / 180) * i / 8;
+                    Move(piv.X + radius * Math.Cos(a), piv.Y + radius * Math.Sin(a));
+                }
+                WindowShot("10a-group-rotate-mid.png");
+                double aEnd = rad0 + 30.0 * Math.PI / 180;
+                Up(piv.X + radius * Math.Cos(aEnd), piv.Y + radius * Math.Sin(aEnd));
+                log.AppendLine($"rotate after marks={Boxes()}");
+                WindowShot("10b-group-rotate-after.png");
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }

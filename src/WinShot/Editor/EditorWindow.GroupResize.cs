@@ -45,6 +45,15 @@ public partial class EditorWindow
     }
 
     private List<GroupMember>? _groupResize;
+
+    // Group rotate (Survey 'group-rotate', useSVGInteraction.js:2754-2850): every member's
+    // centre orbits the union centre and its own angle takes the same turn, so the group
+    // turns as one rigid frame. The frame is drawn turned while the drag lasts.
+    private bool _groupRotating;
+    private Point _groupPivot;
+    private double _groupStartBearing;
+    private double _groupDelta;
+    private Rect _groupRotateBox;
     private Rect _groupFrame;            // the padded union the grabbers sit on, at press
     private double _groupMinScaleX, _groupMinScaleY;
     private bool _groupForcesProportions;
@@ -166,14 +175,23 @@ public partial class EditorWindow
         return union;
     }
 
-    /// <summary>The frame's grabbers: Survey shows all eight, and no rotate grip yet.</summary>
+    /// <summary>
+    /// The frame's eight grabbers and its rotate grip. Survey hides the grip when a callout
+    /// is in the selection: a callout has no turn of its own.
+    /// </summary>
     private void LayoutGroupHandles(Rect union)
     {
+        if (_groupRotating)
+        {
+            var c = new Point(_groupRotateBox.Left + _groupRotateBox.Width / 2, _groupRotateBox.Top + _groupRotateBox.Height / 2);
+            LayoutBoxHandles(_groupRotateBox, _groupDelta, GroupFramePadding, rotationCentre: c);
+            return;
+        }
         LayoutBoxHandles(union, 0, GroupFramePadding);
-        HideRotateThumb();
+        if (_selection.OfType<CalloutAnnotation>().Any()) HideRotateThumb();
     }
 
-    private void BeginGroupResize(int handle)
+    private void BeginGroupResize(int handle, Point pos)
     {
         var members = new List<GroupMember>();
         foreach (UIElement el in _selection)
@@ -204,6 +222,15 @@ public partial class EditorWindow
         if (members.Count < 2) return;
         _groupResize = members;
         Rect union = SelectionUnion();
+        if (handle == RotateHandleIndex)
+        {
+            _groupRotating = true;
+            _groupRotateBox = union;
+            _groupPivot = new Point(union.Left + union.Width / 2, union.Top + union.Height / 2);
+            _groupStartBearing = AnnotationRotation.AngleFromPointer(_groupPivot, pos);
+            _groupDelta = 0;
+            return;
+        }
         union.Inflate(GroupFramePadding, GroupFramePadding);
         _groupFrame = union;
         (_groupMinScaleX, _groupMinScaleY) = GroupMinimumScale(members.Select(m => m.Box));
@@ -220,9 +247,47 @@ public partial class EditorWindow
         }
     }
 
+    private void DragGroupRotate(Point pos)
+    {
+        if (_groupResize is not { } members) return;
+        if (!_rotateTravelled)
+        {
+            if ((pos - _rotatePressAt).Length * _zoom <= RotateDragThresholdPx) return;
+            _rotateTravelled = true;
+        }
+        // Survey: the group's turn from where the drag began pulls to quarter turns within
+        // 4 degrees; Shift = hard 15 degree steps; Alt = free - the same feel as one mark.
+        double raw = AnnotationRotation.AngleFromPointer(_groupPivot, pos) - _groupStartBearing;
+        double delta = AnnotationRotation.ResolveDrag(raw, ShapeConstraint.ShiftHeld,
+            free: (Keyboard.Modifiers & ModifierKeys.Alt) != 0);
+        _groupDelta = delta;
+        foreach (var m in members)
+        {
+            FrameworkElement fe = m.Element;
+            Point c = new(m.Box.Left + m.Box.Width / 2, m.Box.Top + m.Box.Height / 2);
+            Vector shift = AnnotationRotation.RotatePoint(c, _groupPivot, delta) - c;
+            if (m.Meta.Type == AnnotationData.TypeStep && fe is Grid badge)
+            {
+                // A counter's nub turns with the group; the badge itself stays upright.
+                double pointer = AnnotationRotation.Normalize(m.Before.Angle + delta);
+                AnnotationFactory.SetStepPointerAngle(badge, pointer);
+                m.Meta.PointerAngle = pointer;
+                AnnotationTransform.SetOffset(fe, m.Offset + shift);
+                continue;
+            }
+            double angle = AnnotationRotation.Normalize(m.Angle + delta);
+            // Rotate first about the element's own centre, then the move offset - the same
+            // order a single-mark turn uses, so the centre lands exactly on its orbit.
+            AnnotationTransform.Apply(fe, m.Offset + shift, angle, AnnotationTransform.LocalCentre(fe));
+            m.Meta.Angle = angle;
+        }
+        UpdateSelectionVisual();
+    }
+
     private void DragGroupResize(Point pos)
     {
         if (_groupResize is not { } members) return;
+        if (_groupRotating) { DragGroupRotate(pos); return; }
         Rect u = _groupFrame;
         int handle = _activeHandle;
         bool fromCentre = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
@@ -378,6 +443,7 @@ public partial class EditorWindow
     {
         var members = _groupResize;
         _groupResize = null;
+        _groupRotating = false;
         _resizeBefore = null;
         _snapOthers = null;
         HideSnapGuides();
@@ -406,6 +472,7 @@ public partial class EditorWindow
     {
         var members = _groupResize;
         _groupResize = null;
+        _groupRotating = false;
         _resizeBefore = null;
         _snapOthers = null;
         HideSnapGuides();

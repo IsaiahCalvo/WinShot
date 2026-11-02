@@ -1915,12 +1915,16 @@ public partial class EditorWindow : Window
                 return;
             }
             // Survey's overlay padding is 2 page units, so it scales with zoom like the mark.
-            Rect frame = union;
+            // While the group turns, its frame turns rigidly with it (Survey groupRotate).
+            Rect frame = _groupRotating ? _groupRotateBox : union;
             frame.Inflate(GroupFramePadding, GroupFramePadding);
             Canvas.SetLeft(SelectionRect, frame.X);
             Canvas.SetTop(SelectionRect, frame.Y);
             SelectionRect.Width = frame.Width;
             SelectionRect.Height = frame.Height;
+            SelectionRect.RenderTransform = _groupRotating && _groupDelta != 0
+                ? new RotateTransform(_groupDelta, frame.Width / 2, frame.Height / 2)
+                : Transform.Identity;
             SelectionRect.Visibility = Visibility.Visible;
             // Survey (2026-10-22): the group frame carries its eight resize grabbers when
             // every member can take a resize; otherwise it stays move-only.

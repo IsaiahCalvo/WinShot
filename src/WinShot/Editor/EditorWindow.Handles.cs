@@ -937,9 +937,9 @@ public partial class EditorWindow : Window
             _resizeBefore = null;
             return;
         }
-        if (_selection.Count > 1 && handle is >= 0 and < 8 && GroupCanResize())
+        if (_selection.Count > 1 && handle is >= 0 and <= RotateHandleIndex && GroupCanResize())
         {
-            BeginGroupResize(handle);
+            BeginGroupResize(handle, pos);
             return;
         }
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
@@ -1216,7 +1216,7 @@ public partial class EditorWindow : Window
 
     private void EndResize()
     {
-        if (_activeHandle == RotateHandleIndex && !_rotateTravelled && !_closed)
+        if (_activeHandle == RotateHandleIndex && !_rotateTravelled && !_closed && _groupResize is null)
             Dispatcher.BeginInvoke(OpenRotationBoxFromClick, DispatcherPriority.Input);
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
@@ -2460,6 +2460,8 @@ public partial class EditorWindow : Window
     private void PlaceRotationPill()
     {
         if (RotationPill is null || _rotateThumb is not { Visibility: Visibility.Visible }) return;
+        // The angle box edits ONE mark's turn; a group's grip turns by dragging only.
+        if (_selection.Count > 1) { HideRotationPill(); return; }
         Vector dir = _gripContent - _gripAnchorContent;
         if (dir.Length < 0.001) dir = new Vector(0, -1);
         dir.Normalize();
