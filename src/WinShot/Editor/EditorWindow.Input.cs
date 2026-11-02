@@ -255,11 +255,13 @@ public partial class EditorWindow : Window
                 return;
             }
             var posMove = e.GetPosition(AnnotationCanvas);
-            // Survey drags freely and applies constrainToPage on release, so an off-page
-            // drag snaps back inside on drop rather than sticking at the edge mid-gesture.
+            // Page-edge rule 3 (docs/PAGE-EDGE-RULES.md): the move stops at the image edge
+            // on every frame, the whole selection as one piece (Survey w59 clampMoveDelta),
+            // so nothing sails off the image and snaps back on release, and a mark already
+            // hanging over an edge is never pulled back in.
             _moveRaw += posMove - _moveLast;
             _moveLast = posMove;
-            var d = SnappedMove(_moveRaw) - _moveTotal;
+            var d = ClampMoveToSurface(SelectionList().ToArray(), _moveTotal, SnappedMove(_moveRaw)) - _moveTotal;
             if (d.X != 0 || d.Y != 0)
             {
                 foreach (UIElement el in SelectionList())
@@ -1617,15 +1619,8 @@ public partial class EditorWindow : Window
             }
             else
             {
-                // Survey constrainToPage (svgTransformMath.js:51-56): pull the selection's
-                // absolute bbox back inside the page before the commit is recorded.
-                Vector fix = ClampSelectionToSurface(moved);
-                if (fix.X != 0 || fix.Y != 0)
-                {
-                    foreach (UIElement el in moved) MoveElement(el, fix.X, fix.Y);
-                    _moveTotal += fix;
-                    UpdateSelectionVisual();
-                }
+                // The page clamp already ran on every frame of the drag (rule 3), so what
+                // was shown is what is saved: no snap on release.
                 // Only a REAL move arms the double-click guard. Stamping it on every release
                 // made the first click of a double-click block the second, so a counter, line
                 // or arrow never reached its edit frame and text never reopened.
@@ -1988,10 +1983,12 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Survey constrainToPage (svgTransformMath.js:51-56): the correction that brings the
-    /// union of <paramref name="elements"/> back inside the screenshot, or zero.
+    /// Page-edge rule 3 (PageEdgeMove): the total move to apply to <paramref name="elements"/>
+    /// when <paramref name="wanted"/> is asked for and <paramref name="applied"/> is already
+    /// on them - stopped at the image edge, the selection as one rigid piece, and never
+    /// pulling a mark that already hangs over an edge back in.
     /// </summary>
-    private Vector ClampSelectionToSurface(IReadOnlyList<UIElement> elements)
+    private Vector ClampMoveToSurface(IReadOnlyList<UIElement> elements, Vector applied, Vector wanted)
     {
         Rect union = Rect.Empty;
         foreach (UIElement el in elements)
@@ -2001,11 +1998,9 @@ public partial class EditorWindow : Window
             if (b.IsEmpty) continue;
             union = union.IsEmpty ? b : Rect.Union(union, b);
         }
-        if (union.IsEmpty) return default;
-        double w = _source.Width, h = _source.Height;
-        double dx = union.Left < 0 ? -union.Left : (union.Right > w ? w - union.Right : 0);
-        double dy = union.Top < 0 ? -union.Top : (union.Bottom > h ? h - union.Bottom : 0);
-        return new Vector(dx, dy);
+        if (union.IsEmpty) return wanted;
+        union.Offset(-applied.X, -applied.Y); // back to where the move started
+        return PageEdgeMove.ClampDelta(union, wanted, _source.Width, _source.Height);
     }
 
     /// <summary>Bounds of an annotation in canvas coordinates, including its own render transform.</summary>
