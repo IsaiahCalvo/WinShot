@@ -288,16 +288,21 @@ public class ThemedWindowTests
 
             // Search narrows the grid by what a capture is called, where it came from and what
             // kind it is; Escape clears it before it would close History.
+            // ApplySearch is called directly rather than waiting out the typing delay: pumping
+            // the dispatcher here lets the window's own on-show reload replace the fixtures.
             var search = (TextBox)window.FindName("SearchBox");
+            var applySearch = typeof(HistoryWindow).GetMethod("ApplySearch", NP)!;
             search.Text = "video";
-            WaitUntil(() => list.Items.Count == 1);
+            applySearch.Invoke(window, null);
+            Assert.Equal(1, list.Items.Count);
             Assert.Same(items[1], list.Items[0]);
             Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
             Assert.Equal(string.Empty, search.Text);
             Assert.Equal(items.Count, list.Items.Count);
             Assert.True(window.IsVisible, "Escape with a search should clear it, not close History");
             search.Text = "no-such-capture";
-            WaitUntil(() => list.Items.Count == 0);
+            applySearch.Invoke(window, null);
+            Assert.Equal(0, list.Items.Count);
             search.Clear();
             Assert.Equal(items.Count, list.Items.Count);
 

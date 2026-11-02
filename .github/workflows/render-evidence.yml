@@ -100,7 +100,8 @@ jobs:
           }
       # The artifact zip cannot always be fetched by whoever reads the run, so the frames
       # named in .github/render-peek.txt (paths under render-out, one per line) are printed
-      # as small JPEGs in base64: "PEEK <name> <w>x<h>" then "B64 <chunk>" lines, in order.
+      # as text pictures: "PEEK <name> <w>x<h>" then "ART |...|" rows, 140 columns wide, one
+      # character per cell from dark to light, enough to read layout, spacing and empty space.
       - name: Peek renders
         if: always()
         shell: pwsh
@@ -108,26 +109,32 @@ jobs:
           $list = Join-Path $env:GITHUB_WORKSPACE ".github\render-peek.txt"
           if (-not (Test-Path $list)) { exit 0 }
           Add-Type -AssemblyName System.Drawing
-          $jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
-          $params = New-Object System.Drawing.Imaging.EncoderParameters 1
-          $params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 62L
+          $ramp = " .:-=+*#%@"
           foreach ($rel in Get-Content $list) {
             $rel = $rel.Trim()
             if ($rel -eq '' -or $rel.StartsWith('#')) { continue }
             $p = Join-Path $env:OUT $rel
             if (-not (Test-Path $p)) { Write-Host "PEEK-MISSING $rel"; continue }
             $src = [System.Drawing.Image]::FromFile($p)
-            $w = [Math]::Min(720, $src.Width); $h = [int][Math]::Round($src.Height * $w / $src.Width)
-            $dst = New-Object System.Drawing.Bitmap $w, $h
-            $g = [System.Drawing.Graphics]::FromImage($dst)
+            $cols = 140
+            $rows = [int][Math]::Max(1, [Math]::Round($src.Height * $cols / $src.Width / 2.1))
+            $bmp = New-Object System.Drawing.Bitmap $cols, $rows
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.InterpolationMode = 'HighQualityBicubic'
-            $g.DrawImage($src, 0, 0, $w, $h)
-            $g.Dispose(); $src.Dispose()
-            $ms = New-Object System.IO.MemoryStream
-            $dst.Save($ms, $jpeg, $params); $dst.Dispose()
-            $b64 = [Convert]::ToBase64String($ms.ToArray())
-            Write-Host "PEEK $rel ${w}x${h}"
-            for ($i = 0; $i -lt $b64.Length; $i += 6000) { Write-Host ("B64 " + $b64.Substring($i, [Math]::Min(6000, $b64.Length - $i))) }
+            $g.DrawImage($src, 0, 0, $cols, $rows)
+            $g.Dispose()
+            Write-Host "PEEK $rel $($src.Width)x$($src.Height)"
+            $src.Dispose()
+            for ($y = 0; $y -lt $rows; $y++) {
+              $line = New-Object System.Text.StringBuilder
+              for ($x = 0; $x -lt $cols; $x++) {
+                $c = $bmp.GetPixel($x, $y)
+                $l = (0.2126 * $c.R + 0.7152 * $c.G + 0.0722 * $c.B) / 255.0
+                [void]$line.Append($ramp[[Math]::Min(9, [int]($l * 10))])
+              }
+              Write-Host ("ART |" + $line.ToString() + "|")
+            }
+            $bmp.Dispose()
           }
           Write-Host "PEEK-END"
       - uses: actions/upload-artifact@v4
