@@ -421,19 +421,10 @@ public class WinFormsAuditHarness
         {
             pin.CreateControl();
             Field(pin, "_scale").SetValue(pin, 1d);
-            // DeviceDpi has no setter, so the old "set it through the property" line did nothing
-            // and every pin row came out at 96 DPI whatever the step said. The backing field is
-            // what the property returns.
-            int stepDpi = (int)Math.Round(96 * scale);
-            var dpiSetter = typeof(WF.Control).GetProperty("DeviceDpi", BindingFlags.Instance | BindingFlags.Public)!
-                .GetSetMethod(true);
-            if (dpiSetter is not null)
-                dpiSetter.Invoke(pin, new object[] { stepDpi });
-            else
-                (typeof(WF.Control).GetField("_deviceDpi", BindingFlags.Instance | BindingFlags.NonPublic)
-                    ?? throw new InvalidOperationException("Control._deviceDpi not found"))
-                    .SetValue(pin, stepDpi);
-            Assert.Equal(stepDpi, pin.DeviceDpi);
+            // Control.DeviceDpi has no setter and reports the host's DPI, so the old
+            // "set it through the property" line did nothing and every pin row came out at
+            // 96 DPI whatever the step said.
+            pin.DpiOverride = (int)Math.Round(96 * scale);
             Invoke(pin, "ApplyScale");
             pin.ClientSize = new SD.Size(420, 280);
             Field(pin, "_mouseInside").SetValue(pin, true);

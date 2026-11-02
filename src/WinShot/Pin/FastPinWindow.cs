@@ -223,7 +223,7 @@ public sealed class FastPinWindow : WF.Form
             Size,
             cascadeIndex,
             CascadeOffsetLogical,
-            DeviceDpi);
+            Dpi);
 
         MouseEnter += (_, _) => { _mouseInside = true; UpdateChromeAlpha(); Invalidate(); };
         MouseLeave += (_, _) => { _mouseInside = false; SetHoverButton(-1); SetPressed(-1); UpdateChromeAlpha(); Invalidate(); };
@@ -561,7 +561,14 @@ public sealed class FastPinWindow : WF.Form
     private SD.Color Fade(SD.Color color, double chip = 1d) =>
         SD.Color.FromArgb((int)Math.Clamp(Math.Round(color.A * _chromeAlpha * chip), 0d, 255d), color);
 
-    private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, DeviceDpi);
+    /// <summary>The DPI the pin lays itself out for: the window's own, unless a test pins
+    /// one. Control.DeviceDpi has no setter and reports the host's DPI in a test run, so
+    /// without this every "200%" render of the pin chrome was a 100% render.</summary>
+    internal int? DpiOverride { get; set; }
+
+    private int Dpi => DpiOverride ?? DeviceDpi;
+
+    private int Ui(int logicalPixels) => PinInteraction.ScaleLogical(logicalPixels, Dpi);
 
     /// <summary>
     /// Which toolbar buttons are on offer. A locked pin shows only Lock and Close: everything
@@ -797,13 +804,13 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     private SD.Size ZoomChipTextSize(string text)
     {
-        if (_zoomChipTextFor == text && _zoomChipTextDpi == DeviceDpi)
+        if (_zoomChipTextFor == text && _zoomChipTextDpi == Dpi)
             return _zoomChipTextSize;
 
         using var font = ThemePalette.UiFont(ThemePalette.TextCaptionPt, SD.FontStyle.Bold);
         _zoomChipTextSize = WF.TextRenderer.MeasureText(text, font);
         _zoomChipTextFor = text;
-        _zoomChipTextDpi = DeviceDpi;
+        _zoomChipTextDpi = Dpi;
         return _zoomChipTextSize;
     }
 
@@ -1097,7 +1104,7 @@ public sealed class FastPinWindow : WF.Form
         if (IsDisposed || !Visible || !ToolbarVisible || _hoverButton < 0 || _hoverButton >= _toolbarButtons.Count)
             return;
 
-        var tooltip = new QuickAccessTooltipWindow(TooltipTextFor(_hoverButton), _visuals, DeviceDpi);
+        var tooltip = new QuickAccessTooltipWindow(TooltipTextFor(_hoverButton), _visuals, Dpi);
         _tooltipWindow = tooltip;
         tooltip.FormClosed += (_, _) =>
         {
@@ -1641,7 +1648,7 @@ public sealed class FastPinWindow : WF.Form
         SD.Region? next = null;
         if (_roundedCorners && ClientSize.Width > 0 && ClientSize.Height > 0)
         {
-            using var path = PinWindowGeometry.RoundedClipPath(ClientSize, DeviceDpi);
+            using var path = PinWindowGeometry.RoundedClipPath(ClientSize, Dpi);
             next = new SD.Region(path);
         }
 
@@ -1655,7 +1662,7 @@ public sealed class FastPinWindow : WF.Form
             graphics,
             pen,
             ClientSize,
-            DeviceDpi,
+            Dpi,
             _roundedCorners);
 
     // ----- Actions (reused by toolbar + context menu) ------------------------

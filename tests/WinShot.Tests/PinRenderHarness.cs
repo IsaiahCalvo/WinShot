@@ -229,8 +229,7 @@ public class PinRenderHarness
         // Scale and DPI pinned by hand: AutoScaleMode.Dpi never scales for the creation
         // monitor, and the run host's DPI is not the DPI under test.
         SetField(pin, "_scale", 1d);
-        typeof(WF.Control).GetProperty("DeviceDpi", BindingFlags.Instance | BindingFlags.Public)!
-            .GetSetMethod(true)?.Invoke(pin, new object[] { dpi });
+        pin.DpiOverride = dpi;
         typeof(FastPinWindow).GetMethod("ApplyScale", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(pin, null);
         pin.ClientSize = new SD.Size(width, height);
