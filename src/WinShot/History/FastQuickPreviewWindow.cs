@@ -185,7 +185,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
     private void DrawFallback(SD.Graphics g, SD.Rectangle content)
     {
         string fileName = string.IsNullOrWhiteSpace(_filePath) ? "Preview" : Path.GetFileName(_filePath);
-        string message = _looksLikeImage ? "Preview unavailable" : "Press Open to play";
+        string message = _looksLikeImage ? "Preview unavailable" : "Press Enter to play";
         // Pixel-unit fonts, not point: a GraphicsUnit.Point font drawn with TextRenderer
         // resolves against a different monitor's DPI than the one this card is on, which is
         // exactly the mismatch ThemePalette.UiFontPx exists to avoid.
