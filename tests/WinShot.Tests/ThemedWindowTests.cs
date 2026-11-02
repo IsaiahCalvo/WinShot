@@ -3418,7 +3418,7 @@ internal static class WsTrace
 {
     public static void T([System.Runtime.CompilerServices.CallerLineNumber] int line = 0, [System.Runtime.CompilerServices.CallerMemberName] string m = "")
     {
-        System.Console.Error.WriteLine($"TR {m}:{line}");
-        System.Console.Error.Flush();
+        if (m is "FindDescendantByName" or "PumpDispatcherOnce" or "WaitForTask") return;
+        System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ws-trace.txt"), $"TR {m}:{line}\n");
     }
 }

@@ -33,6 +33,10 @@ jobs:
         run: choco install innosetup -y --no-progress
       - name: Test
         run: dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --blame
+      - name: TEMP trace tail
+        if: failure()
+        shell: pwsh
+        run: Get-Content (Join-Path $env:TEMP 'ws-trace.txt') -Tail 80
       - name: Publish release package
         run: dotnet publish src/WinShot/WinShot.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:Version=0.0.0 -o publish/WinShot --nologo
       - name: Zip
