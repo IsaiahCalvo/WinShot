@@ -38,7 +38,10 @@ public partial class EditorWindow : Window
     /// Handle chrome lives in content units, so multiplying a Survey screen-px constant by
     /// this reproduces the same curve once the viewport scales it by <c>_zoom</c>.
     /// </summary>
-    private double HandleScale => Math.Sqrt(Math.Min(1.0 / _zoom, 3.0));
+    // Survey (Drawboard canvas audit 2026-10-13, selectionHandleVisibility.js
+    // getHandleZoomScale): handles keep ONE on-screen size at every zoom, capped only on
+    // extreme zoom-out. The old sqrt curve grew them ~1.4x per zoom doubling.
+    private double HandleScale => Math.Min(1.0 / _zoom, 3.0);
 
     /// <summary>
     /// The annotation currently in Survey's double-click "bbox" edit mode — box frame with
@@ -261,7 +264,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private HandleSpec AdaptiveHandleSpec(double width, double height)
     {
-        double rawIs = Math.Sqrt(1.0 / _zoom);
+        double rawIs = 1.0 / _zoom;
         const double padding = 2;
         double boxW = Math.Max(0, width) + padding * 2;
         double boxH = Math.Max(0, height) + padding * 2;
@@ -278,7 +281,8 @@ public partial class EditorWindow : Window
         double topHalf = allFit ? hPillH / 2 : cornerR;
         // Already in content units: Survey's metrics carry `is` and the offset is applied
         // straight to the bbox in page units (SVGSelectionOverlay.jsx:76-80).
-        double offset = Math.Max(AnnotationRotation.HandleOffsetScreenPx, 10 * rawIs + topHalf + minGap);
+        // 36 SCREEN px above the frame at every zoom (ROTATION_OFFSET_PX * metrics.scale).
+        double offset = Math.Max(AnnotationRotation.HandleOffsetScreenPx * rawIs, 10 * rawIs + topHalf + minGap);
         return new HandleSpec(allFit, cornersFit, offset);
     }
 
@@ -457,12 +461,22 @@ public partial class EditorWindow : Window
         _rotateStem.X2 = centre.X;
         _rotateStem.Y2 = centre.Y;
         _rotateStem.StrokeThickness = 1 * is_;
-        _rotateStem.Visibility = counterDot ? Visibility.Collapsed : Visibility.Visible;
+        // Survey UX 2026-10-02 (owner): no connector line to the box — the grabber floats
+        // on its own (SVGSelectionOverlay.jsx:482-483).
+        _rotateStem.Visibility = Visibility.Collapsed;
 
         _gripContent = centre;
         _gripAnchorContent = anchor;
         if (_activeHandle == RotateHandleIndex || RotationPill?.Visibility == Visibility.Visible)
             PlaceRotationPill();
+    }
+
+    private void OpenRotationBoxFromClick()
+    {
+        if (_closed || RotationPill is null || _rotateThumb is not { Visibility: Visibility.Visible }) return;
+        PlaceRotationPill();
+        RotationInput.Focus();
+        Keyboard.Focus(RotationInput);
     }
 
     private void HideRotateThumb()
@@ -684,6 +698,18 @@ public partial class EditorWindow : Window
         if (_handleKind == HandleKind.None || HandleLayer.Visibility != Visibility.Visible) return -1;
         int best = -1;
         double bestDist = double.MaxValue;
+        // Survey handleHitPad.js (w63): behind every grabber sits an invisible 20 x 20 SCREEN
+        // px square, shrunk so neighbouring pads tile instead of overlapping, and never
+        // smaller than the 11 px dot. A mouse that misses the dot by a few px still grabs it.
+        var centres = new List<Point>();
+        foreach (var t in _handleThumbs)
+            if (t.Visibility == Visibility.Visible)
+                centres.Add(new Point(Canvas.GetLeft(t) + t.Width / 2, Canvas.GetTop(t) + t.Height / 2));
+        double spacing = double.MaxValue;
+        for (int a = 0; a < centres.Count; a++)
+            for (int b = a + 1; b < centres.Count; b++)
+                spacing = Math.Min(spacing, (centres[a] - centres[b]).Length);
+        double pad = Math.Max(HandleScreenPx * HandleScale, Math.Min(20 * HandleScale, spacing));
         for (int i = 0; i < _handleThumbs.Count; i++)
         {
             var thumb = _handleThumbs[i];
@@ -696,9 +722,10 @@ public partial class EditorWindow : Window
             bool pill = Math.Abs(thumb.Width - thumb.Height) > 1e-6;
             double spin = thumb.RenderTransform is RotateTransform rt ? rt.Angle : 0;
             Vector v = (spin == 0 ? pos : AnnotationRotation.RotatePoint(pos, c, -spin)) - c;
-            bool hit = pill
-                ? Math.Abs(v.X) <= thumb.Width / 2 && Math.Abs(v.Y) <= thumb.Height / 2
-                : v.Length <= thumb.Width / 2;
+            bool hit = (pill
+                    ? Math.Abs(v.X) <= thumb.Width / 2 && Math.Abs(v.Y) <= thumb.Height / 2
+                    : v.Length <= thumb.Width / 2)
+                || (Math.Abs(v.X) <= pad / 2 && Math.Abs(v.Y) <= pad / 2);
             double d = v.Length;
             if (hit && d < bestDist) { bestDist = d; best = i; }
         }
@@ -718,11 +745,12 @@ public partial class EditorWindow : Window
     /// <summary>
     /// Survey getCursorForHandle (svgTransformMath.js:117-141): the 8 box thumbs walk an
     /// 8-entry cursor ring rotated by <c>round(angle / 45) % 8</c>, so the cursor follows the
-    /// annotation's own rotation. 'mtr' is crosshair; endpoint/bend/callout handles grab.
+    /// annotation's own rotation. 'mtr' is the pointing hand; endpoint/bend/callout handles grab.
     /// </summary>
     private static Cursor CursorForHandle(int index, double angleDegrees)
     {
-        if (index == RotateHandleIndex) return Cursors.Cross;
+        // Survey handleCursors.js ROTATE_HANDLE_CURSOR: the pointing hand (Drawboard).
+        if (index == RotateHandleIndex) return Cursors.Hand;
         // WinShot thumb order 0=TL 1=TR 2=BR 3=BL 4=T 5=R 6=B 7=L maps onto Survey's ring
         // indices tl:0 mt:1 tr:2 mr:3 br:4 mb:5 bl:6 ml:7.
         int[] baseIndex = { 0, 2, 4, 6, 1, 3, 5, 7 };
@@ -795,9 +823,23 @@ public partial class EditorWindow : Window
 
     // ---- resize drag lifecycle ----
 
+    /// <summary>
+    /// Survey useRotateHandleClick: a press on the rotate grabber that never travels past the
+    /// shape-drag threshold (6 px) is a CLICK, which opens the angle box with its number
+    /// selected; only a press that does travel rotates.
+    /// </summary>
+    private Point _rotatePressAt;
+    private bool _rotateTravelled;
+    private const double RotateDragThresholdPx = 6;
+
     private void BeginResize(int handle, Point pos)
     {
         _activeHandle = handle;
+        if (handle == RotateHandleIndex)
+        {
+            _rotatePressAt = pos;
+            _rotateTravelled = false;
+        }
         Viewport.CaptureMouse();
         if (_adjustingCrop || _handleKind == HandleKind.Crop)
         {
@@ -983,6 +1025,12 @@ public partial class EditorWindow : Window
     /// <summary>Live rotation from the grip: bearing, grab offset, then the snap rules.</summary>
     private void DragRotate(FrameworkElement fe, Point pos)
     {
+        if (!_rotateTravelled)
+        {
+            // Content units to screen px: the threshold is a distance on screen.
+            if ((pos - _rotatePressAt).Length * _zoom <= RotateDragThresholdPx) return;
+            _rotateTravelled = true;
+        }
         // Counter: aim the pointer at the cursor (Survey's counterRotateDrag). The badge
         // itself never turns, so the number stays upright.
         if (fe is Grid badge && fe.Tag is AnnotationData step && step.Type == AnnotationData.TypeStep)
@@ -1000,13 +1048,16 @@ public partial class EditorWindow : Window
         }
 
         double bearing = AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos);
-        double angle = AnnotationRotation.ResolveDrag(bearing, ShapeConstraint.ShiftHeld);
+        double angle = AnnotationRotation.ResolveDrag(bearing, ShapeConstraint.ShiftHeld,
+            free: (Keyboard.Modifiers & ModifierKeys.Alt) != 0);
         AnnotationTransform.SetAngle(fe, angle);
         if (fe.Tag is AnnotationData meta) meta.Angle = angle;
     }
 
     private void EndResize()
     {
+        if (_activeHandle == RotateHandleIndex && !_rotateTravelled && !_closed)
+            Dispatcher.BeginInvoke(OpenRotationBoxFromClick, DispatcherPriority.Input);
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
         // The rate limiter lets a resize skip repaints; the gesture is over, so pay them.
