@@ -267,7 +267,7 @@
     <!-- Glyph size inside a `.btn-icon` toggle (Pan, Select, the fill radios), read off
          live Survey: its Pan mask span is 20x20 in the same 28x28 box. Select overrides
          this to 22 at its use site, which is Survey's number for that one glyph. -->
-    <sys:Double x:Key="SurveyIconToggleGlyph">20</sys:Double>
+    <sys:Double x:Key="SurveyIconToggleGlyph">16</sys:Double>
     <sys:Double x:Key="CategoryRowHeight">34</sys:Double>
     <sys:Double x:Key="CircleActionSize">34</sys:Double>
     <sys:Double x:Key="CircleGlyphSize">17</sys:Double>
@@ -2137,13 +2137,13 @@
     </Style>
 
     <!-- ====================================================================
-         STRIP TOOL BUTTON — the category sub-row's button: 40x32 (5px padding +
-         20px icon + 1px border per side), 6px radius. Checked = neutral chip.
+         STRIP TOOL BUTTON — the category sub-row's button: Survey's 28x28 chrome-subcontrol
+         with a 16px glyph, 6px radius. Checked = neutral chip.
          ==================================================================== -->
     <Style x:Key="StripToolButton" TargetType="ToggleButton">
         <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-        <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="32"/>
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="0"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -2163,8 +2163,8 @@
                                     Background="{StaticResource HoverFillBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="5"
                                     Background="{StaticResource PressedShadeBrush}"/>
-                            <!-- Survey's sub-row glyphs are 20px; the shared resources are 18. -->
-                            <Viewbox Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <!-- Survey PASS 7: chrome-sub-control 28x28 holding the 16px chrome glyph. -->
+                            <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
                             </Viewbox>
                         </Grid>
@@ -2195,7 +2195,7 @@
     </Style>
 
     <!-- StripToolButton's material on a row that carries WORDS as well as a glyph.
-         Same chip, same washes, same radius — only the fixed 40x32 box and the 20x20
+         Same chip, same washes, same radius — only the fixed 28x28 box and the 16x16
          Viewbox are gone, because a Viewbox sized for one glyph scales a whole
          sentence down to fit it. -->
     <Style x:Key="StripToolRow" TargetType="ToggleButton" BasedOn="{StaticResource StripToolButton}">
