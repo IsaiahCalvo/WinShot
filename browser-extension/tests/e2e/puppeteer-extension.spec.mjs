@@ -378,7 +378,9 @@ test("URL-list batch closes its disposable fixture tabs", async () => {
       return (await chrome.storage.local.get(`batch:${id}`))[`batch:${id}`];
     });
     expect(urlBatch.results).toHaveLength(2);
-    expect(urlBatch.results.every((item) => item.state === "complete")).toBe(true);
+    // Name each result so a failure says which page did not complete and why.
+    expect(urlBatch.results.map((item) => `${item.url}: ${item.state}${item.error ? ` (${item.error})` : ""}`))
+      .toEqual(["http://127.0.0.1:4173/frame: complete", "http://127.0.0.1:4173/sticky: complete"]);
     expect(urlBatch.mode).toBe("full-page");
     const urlRecords = await urlSummary.evaluate(async (results) => {
       const store = await import(chrome.runtime.getURL("src/store.js"));
