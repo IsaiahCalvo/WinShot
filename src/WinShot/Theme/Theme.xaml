@@ -1211,8 +1211,56 @@
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
+                <!-- The knob answers the pointer like every other control here: it grows a
+                     little under the pointer and settles back while dragged, on the same quick
+                     ease the buttons use. It used to give no sign it could be grabbed. -->
                 <ControlTemplate TargetType="Thumb">
-                    <Ellipse Fill="White" Stroke="{StaticResource AccentBrush}" StrokeThickness="0"/>
+                    <Ellipse x:Name="Knob" Fill="White" Stroke="{StaticResource AccentBrush}" StrokeThickness="0"
+                             RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <ScaleTransform x:Name="KnobScale" ScaleX="1" ScaleY="1"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1.18" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1.18" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="0.9" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="0.9" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <!-- Back to the hover size: the pointer is still on the knob when a drag ends, and if it
+                                 is not, the hover exit that follows settles it to rest. -->
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1.18" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                        <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1.18" Duration="{StaticResource MotionQuick}" EasingFunction="{StaticResource EaseOutCubic}"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
