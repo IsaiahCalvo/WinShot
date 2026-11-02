@@ -1,0 +1,47 @@
+name: fix-renders
+
+# Renders the editor states behind a reported bug (FixCheckRenderHarness) and prints each
+# PNG to the log as base64, so the fix can be looked at without downloading artifacts.
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix-renders:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install Windows 10 SDK 10.0.19041 (UAP Platform.xml for CsWinRT)
+        shell: pwsh
+        run: choco install windows-sdk-10-version-2004-all -y --no-progress
+      - name: Render
+        shell: pwsh
+        env:
+          WINSHOT_RENDER_FIXCHECK: '1'
+          WINSHOT_RENDER_OUTPUT: ${{ github.workspace }}\fix-renders
+        run: dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter "FullyQualifiedName~FixCheckRenderHarness"
+      - name: Print renders
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = "fix-renders"
+          if (Test-Path "$dir\fixcheck.txt") { Get-Content "$dir\fixcheck.txt" | ForEach-Object { Write-Host "FIXCHECK $_" } }
+          Get-ChildItem $dir -Filter *.png | Sort-Object Name | ForEach-Object {
+            $b = [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            Write-Host "B64BEGIN $($_.Name)"
+            for ($i = 0; $i -lt $b.Length; $i += 3000) { Write-Host ("B64 " + $b.Substring($i, [Math]::Min(3000, $b.Length - $i))) }
+            Write-Host "B64END $($_.Name)"
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fix-renders
+          path: fix-renders
