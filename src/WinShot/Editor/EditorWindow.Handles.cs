@@ -690,6 +690,59 @@ public partial class EditorWindow : Window
         foreach (var t in _handleThumbs) t.Visibility = Visibility.Collapsed;
         HideRotateThumb();
         PaintCloudGlow(null);
+        if (_lockBadge is not null) _lockBadge.Visibility = Visibility.Collapsed;
+    }
+
+    private Canvas? _lockBadge;
+
+    /// <summary>
+    /// Survey's SelectionLockBadge (SVGSelectionOverlay.jsx:527-552): a selected locked mark
+    /// keeps its frame but has no grabbers, and shows a small white disc with a blue lock on
+    /// the frame's top-right corner, so the reason is plain. It is the rotate grip's size
+    /// (radius 10 screen px), takes no clicks, and turns with the mark.
+    /// </summary>
+    private void PlaceLockBadge(Rect? frame, double angle)
+    {
+        if (frame is not Rect b)
+        {
+            if (_lockBadge is not null) _lockBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (_lockBadge is null)
+        {
+            var ring = new SolidColorBrush(AnnotationStyle.SelectionRingColor);
+            ring.Freeze();
+            _lockBadge = new Canvas { Width = 24, Height = 24, IsHitTestVisible = false };
+            _lockBadge.Children.Add(new Ellipse { Width = 24, Height = 24, Fill = Brushes.White, Stroke = ring });
+            var glyph = new Canvas { Width = 24, Height = 24 };
+            glyph.Children.Add(new Path
+            {
+                Data = new RectangleGeometry(new Rect(4, 11, 16, 10), 1.11, 1.11),
+                Stroke = ring, StrokeThickness = 2.2,
+            });
+            glyph.Children.Add(new Path
+            {
+                Data = Geometry.Parse("M8 11V7A4 4 0 0 1 16 7V11"),
+                Stroke = ring, StrokeThickness = 2.2,
+            });
+            _lockBadge.Children.Add(glyph);
+            HandleLayer.Children.Add(_lockBadge);
+        }
+        double r = RotateHandleScreenPx / 2 * HandleScale;
+        var disc = (Ellipse)_lockBadge.Children[0];
+        disc.Width = disc.Height = 2 * r;
+        disc.StrokeThickness = r / 7;
+        // The glyph is 1.25 r wide, drawn from Survey's 24-unit lock icon.
+        double g = r * 1.25;
+        var glyphHost = (Canvas)_lockBadge.Children[1];
+        glyphHost.RenderTransform = new MatrixTransform(g / 24, 0, 0, g / 24, r - g / 2, r - g / 2);
+        _lockBadge.Width = _lockBadge.Height = 2 * r;
+        var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+        Point at = AnnotationRotation.RotatePoint(new Point(b.Right, b.Top), centre, angle);
+        Canvas.SetLeft(_lockBadge, at.X - r);
+        Canvas.SetTop(_lockBadge, at.Y - r);
+        _lockBadge.Visibility = Visibility.Visible;
+        HandleLayer.Visibility = Visibility.Visible;
     }
 
     /// <summary>Index of the handle near a content point, or -1. Endpoint/box share the same thumb list.</summary>

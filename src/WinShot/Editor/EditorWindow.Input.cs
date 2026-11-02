@@ -1885,6 +1885,9 @@ public partial class EditorWindow : Window
         SelectionRect.Visibility = lineLike || borderFlush ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateSelectionHandles();
+        bool locked = _selection.Count <= 1
+            && (_selected as FrameworkElement)?.Tag is AnnotationData { Locked: true };
+        PlaceLockBadge(locked ? b : null, selAngle);
     }
 
     /// <summary>
