@@ -53,8 +53,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Rectangle _placedWorkingArea;
     private IDisposable? _enterMotion;
     private bool _enterMotionRunning;
-    private WF.Timer? _exitMotionTimer;
-    private WF.Timer? _stackMotionTimer;
+    private FrameTimer? _exitMotionTimer;
+    private FrameTimer? _stackMotionTimer;
     private IDisposable? _exitMotionClock;
     private IDisposable? _stackMotionClock;
     private WF.Timer? _autoCloseTimer;
@@ -82,7 +82,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _flashMessage;
     private bool _flashIsFailure;
     private double _flashAmount;
-    private WF.Timer? _flashTimer;
+    private FrameTimer? _flashTimer;
     private IDisposable? _flashTimerScope;
     private SD.Point _flashCursor;
     private bool _hovering;
@@ -907,7 +907,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // Windows' default ~15.6 ms tick this ran at ~32 fps and coalesced. Hold and fade
         // timings are unchanged — only the smoothness.
         _flashTimerScope ??= Motion.Acquire();
-        _flashTimer = new WF.Timer { Interval = Motion.FrameIntervalMs };
+        _flashTimer = new FrameTimer();
         long start = Environment.TickCount64;
         int hold = StatusHoldMs(message);
         _flashTimer.Tick += (_, _) =>
@@ -1628,7 +1628,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         double startingOpacity = Opacity;
         long started = Stopwatch.GetTimestamp();
 
-        _exitMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _exitMotionTimer = new FrameTimer();
         _exitMotionClock = WinShot.Core.Motion.Acquire();
         _exitMotionTimer.Tick += (_, _) =>
         {
@@ -1717,7 +1717,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
 
         SD.Point start = Location;
-        _stackMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _stackMotionTimer = new FrameTimer();
         _stackMotionClock = WinShot.Core.Motion.Acquire();
         _stackMotionTimer.Tick += (_, _) =>
         {

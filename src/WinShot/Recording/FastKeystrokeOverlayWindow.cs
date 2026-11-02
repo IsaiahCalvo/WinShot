@@ -50,7 +50,7 @@ public sealed class FastKeystrokeOverlayWindow : AlphaOverlayWindow, IRecordingO
     private readonly KeystrokeOverlayOptions _options;
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
-    private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
+    private readonly WinShot.Core.FrameTimer _timer = new();
     private IDisposable? _motionClock;
     private readonly double _scale;
     private readonly SD.Font _font;

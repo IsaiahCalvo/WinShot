@@ -151,7 +151,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     // independent of whether idle hover WM_MOUSEMOVE reaches the overlay (it doesn't reliably
     // across multiple monitors / when the overlay isn't the foreground window). Runs ONLY while
     // shown — started in ShowAsync, stopped in Complete — so it adds no idle background work.
-    private readonly WF.Timer _followTimer;
+    private readonly WinShot.Core.FrameTimer _followTimer;
     private bool _lastCtrlDown;
     // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
     // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
@@ -220,7 +220,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
 
-        _followTimer = new WF.Timer { Interval = WinShot.Core.Motion.FrameIntervalMs };
+        _followTimer = new WinShot.Core.FrameTimer();
         _followTimer.Tick += OnFollowTick;
 
         // Window-list load is kicked from ShowAsync, not the Shown event: Shown fires only

@@ -78,7 +78,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// Mirrors <see cref="FastRegionSelectorDialog"/>'s guard of the same name.
     /// </summary>
     private bool _sessionEnded;
-    private readonly WF.Timer _followTimer;
+    private readonly WinShot.Core.FrameTimer _followTimer;
     private bool _lastCtrlDown;
     // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
     // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
@@ -101,7 +101,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
 
-        _followTimer = new WF.Timer { Interval = WinShot.Core.Motion.FrameIntervalMs };
+        _followTimer = new WinShot.Core.FrameTimer();
         _followTimer.Tick += OnFollowTick;
 
         // Post-show init runs from ShowAsync, not the Shown event: Shown fires only on a

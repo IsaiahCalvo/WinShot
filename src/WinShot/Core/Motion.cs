@@ -18,8 +18,9 @@ namespace WinShot.Core;
 internal static class Motion
 {
     /// <summary>
-    /// Animation tick. USER32 clamps window timers to 10 ms, so this asks for the floor and
-    /// lets high-refresh displays take everything they can get.
+    /// The fallback animation tick, for when there is no display refresh to pace by (see
+    /// <see cref="FrameTimer"/>, which every tween and frame loop now runs on). USER32 clamps
+    /// window timers to 10 ms, which is why this asks for the floor.
     /// </summary>
     public const int FrameIntervalMs = 8;
 
@@ -104,7 +105,7 @@ internal static class Motion
     }
 
     /// <summary>
-    /// Runs a tween: its own timer at <see cref="FrameIntervalMs"/>, wall-clock time from a
+    /// Runs a tween: ticked once per display refresh (<see cref="FrameTimer"/>), wall-clock time from a
     /// stopwatch (a dropped frame shortens the animation instead of stretching it), and the
     /// high-resolution clock held for exactly as long as it runs.
     ///
@@ -204,7 +205,7 @@ internal static class Motion
         private readonly Action? _onDone;
         private readonly Stopwatch _clock = Stopwatch.StartNew();
         private readonly double _durationMs;
-        private WF.Timer? _timer;
+        private FrameTimer? _timer;
         private IDisposable? _hold;
         private bool _cancelled;
 
@@ -215,7 +216,8 @@ internal static class Motion
             _onFrame = onFrame;
             _onDone = onDone;
             _hold = Acquire();
-            _timer = new WF.Timer { Interval = FrameIntervalMs };
+            // Paced by the display, not a 10 ms window timer: see FrameTimer.
+            _timer = new FrameTimer();
             _timer.Tick += OnTick;
             _timer.Start();
         }
@@ -245,7 +247,7 @@ internal static class Motion
             catch (Exception ex)
             {
                 // A throwing frame must not strand the process-wide timer resolution — and
-                // it must not be rethrown either: a tween ticks on a WinForms timer, so the
+                // it must not be rethrown either: a tween ticks from a window message, so the
                 // exception leaves through NativeWindow's callback rather than WPF's
                 // dispatcher. That pops a modal ThreadExceptionDialog (invisible, and
                 // unclickable, on the hidden test desktop) and DispatcherUnhandledException
@@ -263,7 +265,7 @@ internal static class Motion
 
         private void Release()
         {
-            WF.Timer? timer = _timer;
+            FrameTimer? timer = _timer;
             _timer = null;
             if (timer is not null)
             {
