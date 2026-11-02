@@ -2,6 +2,8 @@ import { CaptureMode, DEFAULT_LIMITS } from "./contract.js";
 
 export const SETTINGS_KEY = "winshot:capture-settings";
 
+export const AFTER_CAPTURE = Object.freeze(["editor", "save", "save-pdf", "copy"]);
+
 export const DEFAULT_SETTINGS = Object.freeze({
   delayMs: 0,
   captureInfiniteGrowth: true,
@@ -15,6 +17,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   fileNameCounter: 1,
   fileNameCounterPad: 3,
   fileNameTemplate: "{title}-{date}-{time}",
+  // What happens when a capture finishes: open the editor (default), or FireShot's
+  // one-step "capture and ..." actions. Pickers and batches follow the same choice.
+  afterCapture: "editor",
+  downloadFolder: "",
+  saveAs: false,
+  imageFormat: "png",
+  editorStyle: null,
   pdf: Object.freeze({
     layout: "multipage",
     pageSize: "auto",
@@ -47,6 +56,11 @@ export function normalizeSettings(value = {}) {
     fileNameCounter: Math.round(finiteNumber(value.fileNameCounter, DEFAULT_SETTINGS.fileNameCounter, 0, 1e9)),
     fileNameCounterPad: Math.round(finiteNumber(value.fileNameCounterPad, DEFAULT_SETTINGS.fileNameCounterPad, 0, 10)),
     fileNameTemplate: String(value.fileNameTemplate || DEFAULT_SETTINGS.fileNameTemplate).slice(0, 160),
+    afterCapture: AFTER_CAPTURE.includes(value.afterCapture) ? value.afterCapture : DEFAULT_SETTINGS.afterCapture,
+    downloadFolder: String(value.downloadFolder ?? "").replace(/[<>:"|?*\x00-\x1f]/g, "").slice(0, 120),
+    saveAs: value.saveAs === true,
+    imageFormat: ["png", "jpeg", "webp"].includes(value.imageFormat) ? value.imageFormat : "png",
+    editorStyle: value.editorStyle && typeof value.editorStyle === "object" ? { ...value.editorStyle } : null,
     pdf: {
       layout: pdf.layout === "single" ? "single" : "multipage",
       pageSize: ["auto", "a4", "letter", "legal", "custom"].includes(pdf.pageSize) ? pdf.pageSize : "auto",

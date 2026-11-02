@@ -591,6 +591,16 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
     else await storeScrollingCapture(session, controller);
     await attachThumbnail(session);
   } catch (error) {
+    // A page that navigates mid-capture usually breaks the content-script channel a
+    // moment BEFORE tabs.onUpdated reports the navigation, so the raw "message channel
+    // closed" error would win the race and hide the real cause. Ask the tab directly.
+    if (!activeEntry.failureReason && /message channel closed|receiving end does not exist|back\/forward cache|frame (?:was )?removed/i.test(String(error?.message || error))) {
+      const now = await chrome.tabs.get(tab.id).catch(() => null);
+      if (!now) activeEntry.failureReason = "The captured tab closed during capture. No complete image was claimed.";
+      else if (now.status === "loading" || (now.url && session.sourceUrl && now.url !== session.sourceUrl)) {
+        activeEntry.failureReason = "The page navigated during capture. WinShot stopped without claiming a complete image.";
+      }
+    }
     if (activeEntry.failureReason) {
       session.state = SessionState.FAILED;
       session.error = activeEntry.failureReason;
@@ -618,9 +628,28 @@ async function runCapture(mode, target = null, tabOverride = null, options = {})
   }
 
   if (options.openEditor !== false && session.state !== SessionState.CANCELLED) {
-    await chrome.tabs.create({ url: chrome.runtime.getURL(`src/editor.html?id=${encodeURIComponent(session.id)}`) });
+    await openEditorFor(session, options.settings);
   }
   return { captureId: session.id, state: session.state, error: session.error };
+}
+
+// FireShot's "capture and save / save as PDF / copy" one-step actions. Saving runs in a
+// background editor tab that closes itself, so no extra window flashes up; copying needs
+// a focused page for the clipboard, so that editor opens in front. A failed or partial
+// capture always opens the editor so its warnings are seen rather than silently saved.
+async function openEditorFor(session, suppliedSettings = null) {
+  const settings = normalizeSettings(suppliedSettings || await loadSettings());
+  const action = session.state === SessionState.COMPLETE ? settings.afterCapture : "editor";
+  const query = new URLSearchParams({ id: session.id });
+  let active = true;
+  if (action === "save" || action === "save-pdf") {
+    query.set("then", action);
+    query.set("close", "1");
+    active = false;
+  } else if (action === "copy") {
+    query.set("then", "copy");
+  }
+  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/editor.html?${query}`), active });
 }
 
 function supportedBatchUrl(url) {
@@ -771,16 +800,46 @@ async function attachThumbnail(session) {
   }
 }
 
-async function refreshContextMenu() {
+const MENU_CONTEXTS = ["page", "frame", "selection", "image", "link"];
+const MENU_ITEMS = [
+  ["winshot-full-page", "Capture entire page", CaptureMode.FULL_PAGE],
+  ["winshot-visible", "Capture visible part", CaptureMode.VISIBLE],
+  ["winshot-region", "Capture selection", CaptureMode.REGION],
+  ["winshot-element", "Capture element", CaptureMode.ELEMENT]
+];
+
+let menuQueue = Promise.resolve();
+function refreshContextMenu() {
+  // removeAll/create calls interleave badly when two refreshes overlap; serialize them.
+  menuQueue = menuQueue.then(buildContextMenu, buildContextMenu);
+  return menuQueue;
+}
+
+async function buildContextMenu() {
   const settings = await loadSettings();
   await chrome.contextMenus.removeAll();
+  const create = (properties) => new Promise((resolve) => {
+    chrome.contextMenus.create(properties, () => { void chrome.runtime.lastError; resolve(); });
+  });
+  // The toolbar button's own right-click menu always offers History and Settings.
+  await create({ id: "winshot-open-history", title: "Capture history", contexts: ["action"] });
+  await create({ id: "winshot-open-options", title: "WinShot settings", contexts: ["action"] });
   if (!settings.contextMenu) return;
   const capturing = activeCaptures.size > 0 || activeBatch;
-  chrome.contextMenus.create({
-    id: capturing ? "winshot-stop" : "winshot-last",
-    title: capturing ? "Stop WinShot capture" : `WinShot: ${MODE_LABELS[settings.lastMode] || MODE_LABELS["full-page"]}`,
-    contexts: ["page", "frame", "selection", "image", "link"]
-  });
+  if (capturing) {
+    await create({ id: "winshot-stop", title: "Stop WinShot capture", contexts: MENU_CONTEXTS });
+    return;
+  }
+  // FireShot's page menu: every capture mode, the repeat entry, and batch captures.
+  await create({ id: "winshot-root", title: "WinShot", contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-last", parentId: "winshot-root", title: `Repeat: ${MODE_LABELS[settings.lastMode] || MODE_LABELS["full-page"]}`, contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-sep-1", parentId: "winshot-root", type: "separator", contexts: MENU_CONTEXTS });
+  for (const [id, title] of MENU_ITEMS) await create({ id, parentId: "winshot-root", title, contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-sep-2", parentId: "winshot-root", type: "separator", contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-all-tabs", parentId: "winshot-root", title: "Capture all tabs", contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-all-tabs-pdf", parentId: "winshot-root", title: "Capture all tabs to one PDF", contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-sep-3", parentId: "winshot-root", type: "separator", contexts: MENU_CONTEXTS });
+  await create({ id: "winshot-history", parentId: "winshot-root", title: "Capture history", contexts: MENU_CONTEXTS });
 }
 
 async function rememberMode(mode) {
@@ -924,11 +983,20 @@ chrome.commands.onCommand.addListener((command) => handleCommand(command).catch(
 
 chrome.contextMenus.onClicked.addListener((info) => {
   (async () => {
-    if (info.menuItemId === "winshot-stop") return await cancelActiveCapture();
-    if (info.menuItemId === "winshot-last") {
+    const item = String(info.menuItemId);
+    if (item === "winshot-stop") return await cancelActiveCapture();
+    if (item === "winshot-last") {
       const settings = await loadSettings();
       return await startByMode(settings.lastMode);
     }
+    const mode = MENU_ITEMS.find(([id]) => id === item)?.[2];
+    if (mode) return await startByMode(mode);
+    if (item === "winshot-all-tabs") return await runBatch("all-tabs");
+    if (item === "winshot-all-tabs-pdf") return await runBatch("all-tabs", [], { combinePdf: true });
+    if (item === "winshot-history" || item === "winshot-open-history") {
+      return await chrome.tabs.create({ url: chrome.runtime.getURL("src/history.html") });
+    }
+    if (item === "winshot-open-options") return await chrome.runtime.openOptionsPage();
     return undefined;
   })().catch(() => {});
 });

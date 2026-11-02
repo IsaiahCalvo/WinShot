@@ -4,23 +4,56 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>WinShot Capture</title>
+  <link rel="icon" href="../icons/32.png">
   <link rel="stylesheet" href="editor.css">
 </head>
 <body>
   <header>
-    <div class="brand"><span class="mark" aria-hidden="true"></span><strong>WinShot Capture</strong></div>
-    <div class="actions">
-      <button id="save-png">Save PNG</button>
-      <button id="save-jpeg">Save JPEG</button>
-      <button id="save-webp">Save WebP</button>
-      <button id="save-pdf">Save PDF</button>
-      <button id="copy-clipboard">Copy</button>
-      <button id="print-capture">Print</button>
-      <a id="open-history" href="history.html">History</a>
+    <div class="topbar">
+      <div class="brand"><img src="../icons/32.png" alt="" width="22" height="22"><strong>WinShot</strong></div>
+      <div class="actions">
+        <div class="group" role="group" aria-label="Save as">
+          <button id="save-png" class="primary" data-tip="Save as PNG (Ctrl+S)">Save PNG</button>
+          <button id="save-jpeg" data-tip="Save as JPEG">JPEG</button>
+          <button id="save-webp" data-tip="Save as WebP">WebP</button>
+          <button id="save-pdf" data-tip="Save as PDF">PDF</button>
+        </div>
+        <button id="copy-clipboard" data-tip="Copy image (Ctrl+C)">Copy</button>
+        <button id="print-capture" data-tip="Print (Ctrl+P)">Print</button>
+        <button id="open-desktop" data-tip="Save, then open in the WinShot desktop editor">Open in WinShot</button>
+        <a id="open-history" href="history.html">History</a>
+        <a id="open-options" href="options.html" target="_blank">Settings</a>
+      </div>
     </div>
+    <div class="toolbar" id="toolbar" role="toolbar" aria-label="Annotation tools">
+      <button class="icon" id="undo" data-icon="Undo" aria-label="Undo" data-tip="Undo (Ctrl+Z)"></button>
+      <button class="icon" id="redo" data-icon="Redo" aria-label="Redo" data-tip="Redo (Ctrl+Y)"></button>
+      <span class="sep"></span>
+      <button class="icon tool" data-tool="pan" data-icon="Pan" aria-label="Pan" data-tip="Pan (hold Space)"></button>
+      <button class="icon tool" data-tool="select" data-icon="Cursor" aria-label="Select" data-tip="Select (V)"></button>
+      <span class="sep"></span>
+      <button class="category" data-category="draw" data-icon="DrawGroup" data-tip="Draw">Draw</button>
+      <button class="category" data-category="shapes" data-icon="Shapes" data-tip="Shapes">Shapes</button>
+      <button class="category" data-category="text" data-icon="TextGroup" data-tip="Text">Text</button>
+      <button class="category" data-category="effects" data-icon="Effects" data-tip="Effects">Effects</button>
+      <button class="category" data-category="image" data-icon="Crop" data-tip="Image">Image</button>
+      <span class="sep"></span>
+      <div class="context" id="context"></div>
+      <span class="spacer"></span>
+      <button class="icon" id="zoom-out" data-icon="Minus" aria-label="Zoom out" data-tip="Zoom out (Ctrl+-)"></button>
+      <button id="zoom-label" data-tip="Fit (Ctrl+1) · 100% (Ctrl+0)">100%</button>
+      <button class="icon" id="zoom-in" data-icon="Plus" aria-label="Zoom in" data-tip="Zoom in (Ctrl++)"></button>
+      <button class="icon" id="toggle-details" data-icon="Info" aria-label="Capture details" data-tip="Capture details and PDF options"></button>
+    </div>
+    <div class="subbar" id="subbar" role="toolbar" aria-label="Tools in this group"></div>
   </header>
   <main>
-    <aside>
+    <section class="stage" id="stage" aria-label="Capture preview">
+      <div class="viewport-pin"><canvas id="view"></canvas></div>
+      <div id="preview"></div>
+      <textarea id="text-editor" spellcheck="false" hidden></textarea>
+    </section>
+    <aside id="details">
       <h1 id="title">Loading capture…</h1>
       <div id="state" class="pill">Loading</div>
       <dl id="report"></dl>
@@ -49,12 +82,26 @@
         <label for="pdf-watermark">Watermark</label><input id="pdf-watermark" maxlength="500">
         <small>Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small>
       </details>
-      <p class="privacy">All rendering and exports happen locally in your browser.</p>
+      <p class="privacy">All editing and exports happen locally in your browser. Your marks are saved with the capture in History.</p>
     </aside>
-    <section class="stage" aria-label="Capture preview">
-      <div id="preview"></div>
-    </section>
   </main>
+  <dialog id="resize-dialog">
+    <form method="dialog">
+      <h2>Resize image</h2>
+      <div class="resize-grid">
+        <label for="resize-width">Width (px)</label><input id="resize-width" type="number" min="1" step="1">
+        <label for="resize-height">Height (px)</label><input id="resize-height" type="number" min="1" step="1">
+        <label for="resize-percent">Scale (%)</label><input id="resize-percent" type="number" min="5" max="400" step="1">
+      </div>
+      <p class="hint">Keeps the aspect ratio. The original capture is never changed; the size applies when you save, copy, or print.</p>
+      <div class="dialog-actions">
+        <button value="reset" id="resize-reset">Original size</button>
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="primary" id="resize-ok">Apply</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="tooltip" role="tooltip"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="editor.js"></script>
 </body>

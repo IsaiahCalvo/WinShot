@@ -8,7 +8,8 @@
     "build:extension": "node browser-extension/tools/build-extension.mjs",
     "test:browser": "node --test browser-extension/tests/unit/*.test.mjs",
     "test:e2e": "npm run build:extension && playwright test -c browser-extension/playwright.config.mjs",
-    "test:extension": "npm run test:browser && npm run test:e2e"
+    "test:extension": "npm run test:browser && npm run test:e2e",
+    "package:extension": "node browser-extension/tools/package-extension.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

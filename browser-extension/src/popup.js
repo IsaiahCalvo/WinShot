@@ -12,6 +12,7 @@ const templateNode = document.querySelector("#filename-template");
 const batchModeNode = document.querySelector("#batch-mode");
 const retentionNode = document.querySelector("#history-retention");
 const contextMenuNode = document.querySelector("#context-menu");
+const afterCaptureNode = document.querySelector("#after-capture");
 
 function showSettings() {
   delayNode.value = String(settings.delayMs);
@@ -23,6 +24,7 @@ function showSettings() {
   batchModeNode.value = settings.batchMode;
   retentionNode.value = String(settings.historyRetentionDays);
   contextMenuNode.checked = settings.contextMenu;
+  afterCaptureNode.value = settings.afterCapture;
 }
 
 async function persistSettings() {
@@ -36,12 +38,13 @@ async function persistSettings() {
     fileNameTemplate: templateNode.value,
     batchMode: batchModeNode.value,
     historyRetentionDays: Number(retentionNode.value),
-    contextMenu: contextMenuNode.checked
+    contextMenu: contextMenuNode.checked,
+    afterCapture: afterCaptureNode.value
   }));
 }
 
 showSettings();
-for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode, templateNode, batchModeNode, retentionNode, contextMenuNode]) {
+for (const node of [delayNode, infiniteNode, timeoutNode, heightNode, tilesNode, templateNode, batchModeNode, retentionNode, contextMenuNode, afterCaptureNode]) {
   node.addEventListener("change", () => persistSettings().catch((error) => {
     status.className = "error";
     status.textContent = error.message;
@@ -175,6 +178,25 @@ document.querySelector("#cancel").addEventListener("click", async () => {
     status.textContent = error.message;
   }
 });
+
+// Show the shortcuts Chrome actually assigned: a default another extension (such as
+// FireShot) already claims is left unset, and a printed key that does nothing is worse
+// than no hint at all.
+chrome.commands.getAll().then((commands) => {
+  const byName = new Map(commands.map((command) => [command.name, command.shortcut || ""]));
+  for (const node of document.querySelectorAll("kbd[data-command]")) {
+    const shortcut = byName.get(node.dataset.command);
+    if (shortcut !== undefined) node.textContent = shortcut.replace(/\+/g, " ");
+  }
+}).catch(() => {});
+
+for (const link of document.querySelectorAll("#open-options, #open-options-top")) {
+  link.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await chrome.runtime.openOptionsPage();
+    window.close();
+  });
+}
 
 document.querySelector("#open-history").addEventListener("click", async (event) => {
   event.preventDefault();

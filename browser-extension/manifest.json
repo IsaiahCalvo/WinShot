@@ -2,13 +2,13 @@
   "manifest_version": 3,
   "name": "WinShot Capture",
   "short_name": "WinShot",
-  "description": "Reliable, local-first webpage capture for WinShot.",
-  "version": "0.1.0",
+  "description": "Capture entire pages, selections, and elements, then mark them up and save as PNG, JPEG, WebP, or searchable PDF. Local-first.",
+  "version": "0.2.0",
   "minimum_chrome_version": "109",
   "offline_enabled": true,
   "incognito": "spanning",
   "action": {
-    "default_title": "Capture with WinShot",
+    "default_title": "WinShot - capture this page",
     "default_popup": "src/popup.html",
     "default_icon": {
       "16": "icons/16.png",
@@ -20,6 +20,10 @@
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
   },
   "icons": {
     "16": "icons/16.png",

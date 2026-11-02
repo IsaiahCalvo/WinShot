@@ -1,9 +1,28 @@
 # WinShot Capture browser extension
 
 WinShot Capture is a local-first Manifest V3 extension. It captures real browser pixels,
-stores large captures as tiles, validates coverage and overlap confidence, and exports
-PNG, JPEG, WebP, or PDF without a cloud service. WinShot desktop integration is optional;
-the standalone editor/export page works without the Windows app.
+stores large captures as tiles, validates coverage and overlap confidence, lets you mark the
+capture up with WinShot desktop's editor tools, and exports PNG, JPEG, WebP, or PDF without a
+cloud service. WinShot desktop integration is optional; the editor works without the Windows app.
+
+## Editor (2026-11)
+
+The editor uses WinShot desktop's tool groups and its icons (generated from
+`src/WinShot/Theme/SurveyToolIcons.xaml` by `tools/port-desktop-icons.py`): Pan and Select;
+Draw (pen, highlighter, eraser); Shapes (rectangle, ellipse, line, arrow, numbered step);
+Text (plain, bold, outlined, label); Effects (pixelate / blur / black-out redaction, spotlight);
+Image (crop, resize). Colours, widths, fills, dashes, undo/redo, keyboard shortcuts (the desktop's
+letters: V, P, H, E, R, O, L, A, C, T, X, K) and zoom/pan all work on captures of any height,
+because the canvas draws only the visible window. Marks are stored in image pixels on the capture
+record (`record.edits`) and are flattened into fresh tiles by `src/annotations.js` before every
+export, so PNG/JPEG/WebP/PDF/copy/print all include them and PDF text and links follow the crop.
+
+Other FireShot-parity additions: a Settings page (after-capture action — editor, save image,
+save PDF, or copy — Downloads sub-folder, Save As prompt, file names, shortcuts), a full
+right-click menu, opening or pasting any image from History, and **Open in WinShot**, which saves
+the PNG and launches `winshot://edit:<path>` so the desktop editor opens it.
+
+Store releases are headless — see [docs/chrome-web-store.md](docs/chrome-web-store.md).
 
 ## Build and test
 
@@ -11,7 +30,10 @@ the standalone editor/export page works without the Windows app.
 npm install
 npm run build:extension
 npm run test:extension
+npm run package:extension   # store zip in browser-extension/dist/
 ```
+
+On Linux as root (containers), the end-to-end launcher adds `--no-sandbox` automatically.
 
 The unpacked package is generated at `browser-extension/dist/winshot-capture`. Automated
 extension tests use Puppeteer's supported Chrome-for-Testing extension API and a fresh

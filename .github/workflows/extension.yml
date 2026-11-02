@@ -1,0 +1,51 @@
+name: browser-extension
+
+on:
+  push:
+    branches: ['main']
+    paths: ['browser-extension/**', 'package.json', 'package-lock.json', '.github/workflows/extension.yml']
+  pull_request:
+    branches: ['main']
+    paths: ['browser-extension/**', 'package.json', 'package-lock.json', '.github/workflows/extension.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install (downloads Chrome for Testing for the extension tests)
+        run: npm ci
+      # Ubuntu 24.04 blocks the unprivileged user namespaces Chrome's sandbox needs.
+      - name: Allow Chrome's sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Unit tests
+        run: npm run test:browser
+      - name: Package for the Chrome Web Store
+        id: package
+        run: node browser-extension/tools/package-extension.mjs
+      - name: End-to-end tests (packaged MV3 extension in a disposable profile)
+        run: npx playwright test -c browser-extension/playwright.config.mjs --project=extension-puppeteer --reporter=list
+      - name: Upload store package
+        uses: actions/upload-artifact@v4
+        with:
+          name: winshot-capture-${{ steps.package.outputs.version }}
+          path: ${{ steps.package.outputs.zip }}
+          if-no-files-found: error
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-test-report
+          path: |
+            browser-extension/playwright-report
+            output/playwright
+          if-no-files-found: ignore

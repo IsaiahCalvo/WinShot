@@ -30,6 +30,24 @@ Checked against FireShot's official [edition comparison](https://getfireshot.com
 
 Verification status last reconciled against the 2026-08-20 adversarial QA pass (five adversarial-*.spec.mjs suites, 79 tests total, 78 passing); full findings in `.claudehelper/extension-qa-report.md` at the repo root.
 
+## Editing, saving, and workflow parity (2026-11)
+
+| FireShot feature | WinShot coverage |
+| --- | --- |
+| Shapes, arrows, numbers, text annotations | Implemented with WinShot desktop's tool groups and icons; editable, persistent marks |
+| Styles (colour, width, fill, dash, text style) | Implemented |
+| Unlimited undo/redo | Implemented (200 steps) |
+| Blur / pixelate sensitive data | Implemented (pixelate, blur, black out) plus spotlight |
+| Crop and resize | Implemented; applied at export, original kept |
+| Editing annotations in saved captures | Implemented: marks are saved with the capture in History and stay editable |
+| Save PNG/JPEG/WebP/PDF, copy, print | Implemented; BMP/GIF not offered |
+| Capture and save / save as PDF / copy in one step | Implemented as the "After a capture" setting |
+| Choose download folder, Save As dialog | Implemented in Settings |
+| Import from clipboard or file | Implemented on the History page (button, Ctrl+V, drag and drop) |
+| Export to a third-party editor | "Open in WinShot" hands the PNG to the desktop editor |
+| Options page, right-click menu with every mode | Implemented |
+| Upload to cloud/FTP, email, OneNote | Not implemented by design: captures never leave the device |
+
 ## Scope decision
 
-This matrix covers the browser-native capture and PDF feature union shown across FireShot Lite, Standard, and Pro. Browser-window capture is supplied by WinShot desktop, but the extension-to-desktop launch is not yet a dependable acknowledged bridge. Annotation editing, upload destinations, email/printing, and store packaging are intentionally outside this capture-engine milestone. FireShot's optional webpage JavaScript API is also tracked as future automation/integration rather than a missing capture mode.
+This matrix covers the browser-native capture and PDF feature union shown across FireShot Lite, Standard, and Pro. Browser-window capture is supplied by WinShot desktop, but the extension-to-desktop launch is not yet a dependable acknowledged bridge. Upload destinations and email remain intentionally out of scope; annotation editing, printing, and store packaging are now covered above. FireShot's optional webpage JavaScript API is also tracked as future automation/integration rather than a missing capture mode.

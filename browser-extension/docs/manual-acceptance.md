@@ -7,7 +7,7 @@ Automated tests use disposable browser profiles. They cover every browser-native
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Choose **Load unpacked**.
-4. Select `C:\Users\icalvo\.codex\worktrees\8d13\winshot\browser-extension\dist\winshot-capture`.
+4. Run `npm run build:extension` in `C:\Users\icalvo\winshot`, then select `C:\Users\icalvo\winshot\browser-extension\dist\winshot-capture`.
 5. Pin **WinShot Capture** to the toolbar.
 
 ## Short browser acceptance
@@ -20,6 +20,9 @@ Automated tests use disposable browser profiles. They cover every browser-native
 6. **Frame:** choose **Capture a scrolling frame** and click inside an iframe.
 7. **Batch:** try all tabs, a URL list, and all tabs to one PDF.
 8. **PDF:** search for page text, click a captured link, and try single-page, multipage, Letter/A4, header, footer, and watermark settings.
+9. **Editor:** draw with each tool group (Draw, Shapes, Text, Effects, Image), change colours, undo/redo, crop, resize, then Save PNG and PDF and confirm the marks are in both. Reopen the capture from History: the marks are still editable.
+10. **After-capture action:** in Settings choose "Save the image" and a Downloads sub-folder, capture, and confirm the file lands there without the editor staying open.
+11. **Open in WinShot:** with WinShot desktop running, press Open in WinShot in the editor and confirm the desktop editor opens the saved PNG.
 
 ## Desktop-only acceptance
 
