@@ -250,6 +250,7 @@ public partial class EditorWindow : Window
                 && stepBadge.Tag is AnnotationData { Type: AnnotationData.TypeStep } stepMeta)
             {
                 _movingSelection = false;
+                HideSnapGuides();
                 BeginCounterOrbit(stepBadge, stepMeta, e.GetPosition(AnnotationCanvas), shift: true);
                 return;
             }
@@ -271,6 +272,7 @@ public partial class EditorWindow : Window
                 _moveTotal += d;
                 UpdateSelectionVisual();
             }
+            ShowSnapGuides();
             return;
         }
         if (_tool == EditorTool.Eyedropper && !_dragging)
@@ -1518,6 +1520,7 @@ public partial class EditorWindow : Window
         }
         if (!_movingSelection) return;
         _movingSelection = false;
+        HideSnapGuides();
         Viewport.ReleaseMouseCapture();
         if (_selected is not null)
         {
@@ -1620,6 +1623,7 @@ public partial class EditorWindow : Window
         }
         if (!_movingSelection) return;
         _movingSelection = false;
+        HideSnapGuides();
         if (_selected is not null && (_moveTotal.X != 0 || _moveTotal.Y != 0))
         {
             foreach (UIElement el in SelectionList())

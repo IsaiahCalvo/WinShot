@@ -1,5 +1,8 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shapes;
 
 namespace WinShot.Editor;
 
@@ -27,6 +30,7 @@ public partial class EditorWindow
         _moveRaw = new Vector();
         _snapStart = null;
         _snapOthers = null;
+        HideSnapGuides();
     }
 
     /// <summary>The move to apply for a pointer travel of <paramref name="raw"/>.</summary>
@@ -68,5 +72,87 @@ public partial class EditorWindow
         _settings.Save();
         App.Toast(_settings.Current.EditorSnapping ? "Snapping on" : "Snapping off",
             "Shift+S turns it back. Alt+drag moves one mark without snapping.");
+    }
+
+    // ---- Survey SnapGuidesLayer: dashed guides while a dragged mark lines up ----
+
+    private const double SnapGuideOverhangPx = 24, SnapGuideStrokePx = 1.9, SnapGuideDashPx = 5,
+        SnapMarkHalfPx = 2.83;
+    private Canvas? _snapGuideLayer;
+
+    /// <summary>
+    /// Draws Survey's guides for the selection as it now sits: a dashed selection-blue line
+    /// for each edge or centre exactly on a neighbour's (24 px past both ends), and small X
+    /// marks on the lined-up corners and centres. Sized in screen px at every zoom.
+    /// </summary>
+    private void ShowSnapGuides()
+    {
+        if (_snapOthers is null || !SnappingOn || (Keyboard.Modifiers & ModifierKeys.Alt) != 0)
+        {
+            HideSnapGuides();
+            return;
+        }
+        Rect now = Rect.Empty;
+        foreach (UIElement el in SelectionList())
+            if (AnnotationCanvas.Children.Contains(el)) now.Union(GetCanvasBounds(el));
+        var (lines, points) = ObjectSnap.Guides(now, _snapOthers);
+        if (lines.Count == 0) { HideSnapGuides(); return; }
+
+        if (_snapGuideLayer is null)
+        {
+            if (HandleLayer.Parent is not Panel host) return;
+            _snapGuideLayer = new Canvas { IsHitTestVisible = false };
+            host.Children.Insert(host.Children.IndexOf(HandleLayer), _snapGuideLayer);
+        }
+        _snapGuideLayer.Children.Clear();
+        double k = HandleScale;
+        var blue = new SolidColorBrush(AnnotationStyle.SelectionRingColor);
+        blue.Freeze();
+        double over = SnapGuideOverhangPx * k;
+        foreach (var g in lines)
+        {
+            var line = new Line
+            {
+                Stroke = blue,
+                StrokeThickness = SnapGuideStrokePx * k,
+                // WPF dashes count in stroke widths; Survey's are 5 screen px on, 5 off.
+                StrokeDashArray = new DoubleCollection { SnapGuideDashPx / SnapGuideStrokePx, SnapGuideDashPx / SnapGuideStrokePx },
+            };
+            if (g.AxisX) { line.X1 = line.X2 = g.Value; line.Y1 = g.Min - over; line.Y2 = g.Max + over; }
+            else { line.Y1 = line.Y2 = g.Value; line.X1 = g.Min - over; line.X2 = g.Max + over; }
+            _snapGuideLayer.Children.Add(line);
+        }
+        if (points.Count > 0)
+        {
+            double h = SnapMarkHalfPx * k;
+            var marks = new StreamGeometry();
+            using (StreamGeometryContext ctx = marks.Open())
+                foreach (Point p in points)
+                {
+                    ctx.BeginFigure(new Point(p.X - h, p.Y - h), false, false);
+                    ctx.LineTo(new Point(p.X + h, p.Y + h), true, false);
+                    ctx.BeginFigure(new Point(p.X + h, p.Y - h), false, false);
+                    ctx.LineTo(new Point(p.X - h, p.Y + h), true, false);
+                }
+            marks.Freeze();
+            _snapGuideLayer.Children.Add(new Path
+            {
+                Data = marks, Stroke = Brushes.White, StrokeThickness = 2.6 * k,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            });
+            _snapGuideLayer.Children.Add(new Path
+            {
+                Data = marks, Stroke = blue, StrokeThickness = 1.3 * k,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            });
+        }
+        _snapGuideLayer.Visibility = Visibility.Visible;
+    }
+
+    private void HideSnapGuides()
+    {
+        if (_snapGuideLayer is null) return;
+        _snapGuideLayer.Children.Clear();
+        _snapGuideLayer.Visibility = Visibility.Collapsed;
     }
 }
