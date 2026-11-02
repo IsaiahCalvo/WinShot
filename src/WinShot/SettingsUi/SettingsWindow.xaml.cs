@@ -337,6 +337,29 @@ public partial class SettingsWindow : Window
         Top = top;
     }
 
+    /// <summary>
+    /// Ctrl+Tab and Ctrl+PageDown step to the next section, with Shift / PageUp going back,
+    /// the way every tabbed settings window on Windows moves. Without it the keyboard had to
+    /// Tab back up to the section list first. A shortcut box keeps the keys, since Ctrl+Tab
+    /// is a combination someone may want to record.
+    /// </summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
+            && e.Key is Key.Tab or Key.PageDown or Key.PageUp
+            && Keyboard.FocusedElement is not HotkeyBox
+            && SectionList is { Items.Count: > 0 } list)
+        {
+            bool back = e.Key == Key.PageUp
+                || (e.Key == Key.Tab && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
+            int count = list.Items.Count;
+            list.SelectedIndex = (Math.Max(0, list.SelectedIndex) + (back ? count - 1 : 1)) % count;
+            e.Handled = true;
+            return;
+        }
+        base.OnPreviewKeyDown(e);
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
