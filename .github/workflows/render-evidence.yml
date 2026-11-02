@@ -21,7 +21,7 @@ jobs:
   render:
     if: contains(github.event.pull_request.labels.*.name, 'render-evidence')
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       OUT: ${{ github.workspace }}\render-out
     steps:
@@ -58,9 +58,12 @@ jobs:
           foreach ($d in 'out','history','settings','visual-audit','winforms-audit','recording','scroll','video-editor','minimal-ui') {
             New-Item -ItemType Directory -Force "$o\$d" | Out-Null
           }
-          $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','VisualAuditHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
+          $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
           $filter = ($classes | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
           dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --blame-hang-timeout 150s --blame-hang-dump-type none --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt"
+          # The WPF ink audit sweeps ~30 windows at four DPIs and is by far the slowest; it
+          # runs on its own afterwards so a slow or stuck surface cannot cost the rest.
+          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --no-build --filter "FullyQualifiedName~VisualAuditHarness" --blame-hang-timeout 600s --blame-hang-dump-type none --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt" -Append
       - name: Print audit findings
         if: always()
         shell: pwsh
@@ -69,6 +72,8 @@ jobs:
           # Least important first: the log tail is what gets read.
           Write-Host "== files per folder"
           Get-ChildItem -Recurse -File $o | Group-Object { $_.Directory.FullName.Substring($o.Length) } | ForEach-Object { Write-Host ("DIR " + $_.Name + " " + $_.Count) }
+          Write-Host "== last visual-audit renders"
+          Get-ChildItem -File (Join-Path $o "visual-audit") -Filter *.png -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 6 | ForEach-Object { Write-Host ("LAST " + $_.Name + " " + $_.LastWriteTime.ToString("HH:mm:ss")) }
           foreach ($f in "winforms-audit\noscale.tsv","visual-audit\states.tsv") {
             $p = Join-Path $o $f
             if (Test-Path $p) { Write-Host "== $f"; Get-Content $p | ForEach-Object { Write-Host "TSV $_" } }
