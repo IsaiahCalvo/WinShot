@@ -107,15 +107,13 @@ public class HistoryRenderHarness
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-search.png"));
                 search.Text = "invoice march";
                 PumpUntil(() => list.Items.Count == 0);
-                Pump();
-                window.UpdateLayout();
+                SettleEmptyState(window);
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-search-empty.png"));
                 search.Clear();
                 Pump();
 
                 ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipGif")).IsChecked = true;
-                Pump();
-                window.UpdateLayout();
+                SettleEmptyState(window);
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-empty-filtered.png"));
 
                 typeof(HistoryWindow)
@@ -124,8 +122,7 @@ public class HistoryRenderHarness
                 typeof(HistoryWindow)
                     .GetMethod("UpdateEmptyState", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(window, null);
-                Pump();
-                window.UpdateLayout();
+                SettleEmptyState(window);
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-error.png"));
 
                 window.Close();
@@ -243,6 +240,18 @@ public class HistoryRenderHarness
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    /// <summary>
+    /// The empty-state panel fades in over Motion.SwapMs, and a frame grabbed right after the
+    /// grid empties caught it at opacity ~0: the "nothing matches" and error frames came out
+    /// as a blank window. Wait for the fade to land before the picture is taken.
+    /// </summary>
+    private static void SettleEmptyState(HistoryWindow window)
+    {
+        var panel = (FrameworkElement)window.FindName("EmptyState");
+        PumpUntil(() => panel.Visibility == Visibility.Visible && panel.Opacity >= 0.99);
+        window.UpdateLayout();
     }
 
     private static void PumpUntil(Func<bool> condition)

@@ -1,3 +1,9 @@
 # Frames to print into the render-evidence log (paths under render-out).
+# "path" prints the whole frame; "path x y w h [cols]" crops that box first.
 history\history-search.png
 history\history-search-empty.png
+history\history-search-empty.png 272 230 500 300 120
+history\history-error.png
+out\dark-hover.png
+out\context-menu.png
+settings\normal-general.png

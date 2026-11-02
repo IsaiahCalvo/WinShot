@@ -100,8 +100,10 @@ jobs:
           }
       # The artifact zip cannot always be fetched by whoever reads the run, so the frames
       # named in .github/render-peek.txt (paths under render-out, one per line) are printed
-      # as text pictures: "PEEK <name> <w>x<h>" then "ART |...|" rows, 140 columns wide, one
-      # character per cell from dark to light, enough to read layout, spacing and empty space.
+      # as text pictures: "PEEK <name> <w>x<h>" then "ART |...|" rows, one character per cell
+      # from dark to light. Each picture is stretched to its own darkest and lightest cells, so
+      # light text on the dark theme still shows. An optional "x y w h" after the path crops
+      # that box first (with its own column count as a fifth number) to read a small area.
       - name: Peek renders
         if: always()
         shell: pwsh
@@ -110,27 +112,48 @@ jobs:
           if (-not (Test-Path $list)) { exit 0 }
           Add-Type -AssemblyName System.Drawing
           $ramp = " .:-=+*#%@"
-          foreach ($rel in Get-Content $list) {
-            $rel = $rel.Trim()
-            if ($rel -eq '' -or $rel.StartsWith('#')) { continue }
+          foreach ($entry in Get-Content $list) {
+            $entry = $entry.Trim()
+            if ($entry -eq '' -or $entry.StartsWith('#')) { continue }
+            $parts = $entry -split '\s+'
+            $rel = $parts[0]
             $p = Join-Path $env:OUT $rel
             if (-not (Test-Path $p)) { Write-Host "PEEK-MISSING $rel"; continue }
             $src = [System.Drawing.Image]::FromFile($p)
+            $box = New-Object System.Drawing.Rectangle 0, 0, $src.Width, $src.Height
             $cols = 140
-            $rows = [int][Math]::Max(1, [Math]::Round($src.Height * $cols / $src.Width / 2.1))
+            if ($parts.Count -ge 5) {
+              $box = New-Object System.Drawing.Rectangle ([int]$parts[1]), ([int]$parts[2]), ([int]$parts[3]), ([int]$parts[4])
+              $box.Intersect((New-Object System.Drawing.Rectangle 0, 0, $src.Width, $src.Height))
+              if ($parts.Count -ge 6) { $cols = [int]$parts[5] }
+            }
+            if ($box.Width -le 0 -or $box.Height -le 0) { Write-Host "PEEK-EMPTYBOX $entry"; $src.Dispose(); continue }
+            $rows = [int][Math]::Max(1, [Math]::Round($box.Height * $cols / $box.Width / 2.1))
             $bmp = New-Object System.Drawing.Bitmap $cols, $rows
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.InterpolationMode = 'HighQualityBicubic'
-            $g.DrawImage($src, 0, 0, $cols, $rows)
+            $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $cols, $rows), $box, [System.Drawing.GraphicsUnit]::Pixel)
             $g.Dispose()
-            Write-Host "PEEK $rel $($src.Width)x$($src.Height)"
+            Write-Host "PEEK $entry $($src.Width)x$($src.Height)"
             $src.Dispose()
+            $lum = New-Object 'double[,]' $cols, $rows
+            $lo = 1.0; $hi = 0.0
             for ($y = 0; $y -lt $rows; $y++) {
-              $line = New-Object System.Text.StringBuilder
               for ($x = 0; $x -lt $cols; $x++) {
                 $c = $bmp.GetPixel($x, $y)
                 $l = (0.2126 * $c.R + 0.7152 * $c.G + 0.0722 * $c.B) / 255.0
-                [void]$line.Append($ramp[[Math]::Min(9, [int]($l * 10))])
+                $lum[$x, $y] = $l
+                if ($l -lt $lo) { $lo = $l }
+                if ($l -gt $hi) { $hi = $l }
+              }
+            }
+            $span = [Math]::Max(0.04, $hi - $lo)
+            Write-Host ("PEEK-RANGE {0:N2}..{1:N2}" -f $lo, $hi)
+            for ($y = 0; $y -lt $rows; $y++) {
+              $line = New-Object System.Text.StringBuilder
+              for ($x = 0; $x -lt $cols; $x++) {
+                $n = ($lum[$x, $y] - $lo) / $span
+                [void]$line.Append($ramp[[Math]::Min(9, [Math]::Max(0, [int]($n * 10)))])
               }
               Write-Host ("ART |" + $line.ToString() + "|")
             }
