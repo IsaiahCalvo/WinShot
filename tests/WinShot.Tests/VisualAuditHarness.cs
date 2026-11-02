@@ -311,6 +311,16 @@ public class VisualAuditHarness
                     : PresentationSource.FromVisual(c)?.RootVisual as FrameworkElement;
                 if (root is null || root.ActualWidth < 4)
                 {
+                    // Every surface tries every layer, but most layers belong to one tool: a
+                    // popup whose trigger is not on screen for this tool is not a fault.
+                    var popup = c is null ? null
+                        : (c.Parent ?? LogicalTreeHelper.GetParent(c)) as System.Windows.Controls.Primitives.Popup;
+                    var target = popup?.PlacementTarget ?? popup?.TemplatedParent as UIElement;
+                    if (c is null || (target is not null && !target.IsVisible))
+                    {
+                        rows.Add($"{name}\t-\t-\t-\tnot on this tool\t-\t\t\t\t\t\t\t\t\t");
+                        continue;
+                    }
                     rows.Add($"{name}\t-\t-\t-\tNEVER OPENED\t-\t\t\t\t\t\t\t\t\tERROR");
                     continue;
                 }
