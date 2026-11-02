@@ -1741,6 +1741,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private bool RestyleSelectedRedaction(RedactStyle? style, int? strength, bool push)
     {
+        if (SelectedIsLocked) return false;
         if (_selected is not System.Windows.Shapes.Rectangle mark ||
             mark.Tag is not AnnotationData meta || meta.Type != AnnotationData.TypeRedact)
             return false;

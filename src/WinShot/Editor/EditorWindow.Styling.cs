@@ -773,6 +773,7 @@ public partial class EditorWindow : Window
 
     private void RestyleSelectedArrowhead()
     {
+        if (SelectedIsLocked) return;
         if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
             meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCallout))
         {
@@ -811,6 +812,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void CycleSelectedArrowStyle()
     {
+        if (SelectedIsLocked) return;
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
             meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow))
             return;
@@ -834,6 +836,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void RestyleSelectedArrow(ArrowStyle style)
     {
+        if (SelectedIsLocked) return;
         if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
             meta.Type != AnnotationData.TypeArrow)
             return;
@@ -903,7 +906,7 @@ public partial class EditorWindow : Window
 
         // Apply live to the selection without pushing undo, capturing a one-time "before" for
         // the whole gesture so the eventual commit is a single reversible step.
-        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta && CanSetOpacity(_selected))
+        if (!SelectedIsLocked && _selected is FrameworkElement fe && fe.Tag is AnnotationData meta && CanSetOpacity(_selected))
         {
             if (_opacityBefore is null || !ReferenceEquals(_opacityElement, _selected))
             {
@@ -1066,7 +1069,7 @@ public partial class EditorWindow : Window
         if (!IsLoaded || _syncingContext) return;
         _magnification = value;
 
-        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+        if (!SelectedIsLocked && _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
             meta.Type == AnnotationData.TypeMagnifier)
         {
             if (_magnifyBefore is null || !ReferenceEquals(_magnifyElement, _selected))

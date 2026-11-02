@@ -22,6 +22,9 @@ public partial class EditorWindow
     /// <summary>Whether any picked mark is locked (Survey: a locked mark in the pick stops the move).</summary>
     private bool SelectionLocked() => SelectionList().Any(IsLocked);
 
+    /// <summary>The primary picked mark is locked, so a toolbar control must not restyle it.</summary>
+    private bool SelectedIsLocked => _selected is not null && IsLocked(_selected);
+
     /// <summary>Locks every picked mark, or unlocks them all when any is locked. One undo step.</summary>
     private void ToggleSelectionLock()
     {
