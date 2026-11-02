@@ -1153,7 +1153,6 @@ public partial class EditorWindow : Window
         FlushRedactionRefresh();
         if (_selected is not null) RefreshRedaction(_selected);
         ScheduleHideRotationPill();
-        _justDraggedAt = Environment.TickCount64;
 
         if (_adjustingCrop)
         {
@@ -1193,6 +1192,7 @@ public partial class EditorWindow : Window
             return;
         }
 
+        _justDraggedAt = Environment.TickCount64; // a real resize or turn, not a click
         UIElement el = _selected;
         Push(new EditorAction(
             undo: () => { ApplyResizeSnapshot(el, before); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },

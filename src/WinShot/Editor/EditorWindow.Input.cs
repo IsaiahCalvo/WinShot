@@ -674,6 +674,13 @@ public partial class EditorWindow : Window
                     e.Handled = true;
                     return;
                 }
+                // Survey's double-click edit mode does not depend on the armed tool
+                // (handleAnnotationDoubleClick): a counter, line or arrow opens its frame here too.
+                if (TryEnterBboxEdit(fe, tm))
+                {
+                    e.Handled = true;
+                    return;
+                }
             }
             if (existing is CalloutAnnotation existingCallout && CalloutBoxContains(existingCallout, pos))
             {
@@ -689,6 +696,12 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
+
+        // Survey handleSvgPointerDown: with any tool but Select, a press on empty canvas
+        // deselects at once ("Not select tool - existing deselect behavior"). Without this a
+        // freshly drawn or turned mark kept its frame and grabbers after a click off it.
+        if (_selected is not null || _selection.Count > 0)
+            Select(null);
 
         if (_tool == EditorTool.Text)
         {
@@ -1125,6 +1138,23 @@ public partial class EditorWindow : Window
     private const long DoubleClickGuardMs = 400;
     private const long EditModeCooldownMs = 300;
 
+    /// <summary>
+    /// Survey's bbox edit mode: a double-click on a counter, line or arrow (or WinShot's curved
+    /// arrow) swaps its point grabbers for the full frame with resize pills and the rotate
+    /// grabber. Rect, ellipse and ink are no-ops there: their single-click chrome is the frame.
+    /// </summary>
+    private bool TryEnterBboxEdit(FrameworkElement fe, AnnotationData tm)
+    {
+        if (tm.Locked == true) return false;
+        if (tm.Type is not (AnnotationData.TypeStep or AnnotationData.TypeLine
+                or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow)) return false;
+        if (Environment.TickCount64 - _editModeLeftAt < EditModeCooldownMs) return false;
+        Select(fe);
+        _bboxEditTarget = fe;
+        UpdateSelectionVisual();
+        return true;
+    }
+
     private void SelectMouseDown(Point pos, PointerArgs e)
     {
         CommitText();
@@ -1174,13 +1204,8 @@ public partial class EditorWindow : Window
             }
             // Survey's bbox edit mode covers counter, line and arrow (and WinShot's curved
             // arrow, which rides on Survey's 'line'); rect/ellipse/ink are explicit no-ops.
-            if (tm.Type is AnnotationData.TypeStep or AnnotationData.TypeLine
-                    or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow
-                && Environment.TickCount64 - _editModeLeftAt >= EditModeCooldownMs)
+            if (TryEnterBboxEdit(fe, tm))
             {
-                Select(hit);
-                _bboxEditTarget = fe;
-                UpdateSelectionVisual();
                 e.Handled = true;
                 return;
             }
@@ -1543,6 +1568,10 @@ public partial class EditorWindow : Window
                     _moveTotal += fix;
                     UpdateSelectionVisual();
                 }
+                // Only a REAL move arms the double-click guard. Stamping it on every release
+                // made the first click of a double-click block the second, so a counter, line
+                // or arrow never reached its edit frame and text never reopened.
+                _justDraggedAt = Environment.TickCount64;
                 double dx = _moveTotal.X, dy = _moveTotal.Y;
                 // The move was applied live during the drag, so record it without re-applying.
                 Push(new EditorAction(
@@ -1551,7 +1580,6 @@ public partial class EditorWindow : Window
             }
         }
         _moveTotal = new Vector();
-        _justDraggedAt = Environment.TickCount64;
         foreach (UIElement el in SelectionList())
             RefreshHighlighterFill(el);
     }
