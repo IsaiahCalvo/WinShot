@@ -312,19 +312,22 @@ public class FixCheckRenderHarness
                 // edge and 80 px right. The bottom should stop at 560, the right still follow.
                 Deselect();
                 Tool(EditorTool.Rectangle); Drag(40, 470, 120, 530);
+                var rect11a = canvas.Children[canvas.Children.Count - 1];
                 Tool(EditorTool.Select);
-                Down(80, 500); Up(80, 500); Pump(3);
+                InvokeN(editor, "Select", new object?[] { rect11a }); Pump(3);
                 var area11a = new Rect(0, 440, 400, 200);
-                log.AppendLine($"11a before {BoxesIn(area11a)}");
-                Drag(120, 530, 200, 600);
+                Rect s11 = Frame();
+                log.AppendLine($"11a before frame={s11} {BoxesIn(area11a)}");
+                Drag(s11.Right, s11.Bottom, s11.Right + 80, s11.Bottom + 70);
                 log.AppendLine($"11a after {BoxesIn(area11a)} (bottom should be <= 560, right ~200)");
                 WindowShot("11a-single-resize-edge.png");
 
                 // 11b. A mark at the very top: grabbers draw whole over the desk, rotate grip below.
                 Deselect();
                 Tool(EditorTool.Rectangle); Drag(620, 2, 720, 50);
+                var rect11b = canvas.Children[canvas.Children.Count - 1];
                 Tool(EditorTool.Select);
-                Down(670, 26); Up(670, 26); Pump(3);
+                InvokeN(editor, "Select", new object?[] { rect11b }); Pump(3);
                 Shot("11b-top-edge-handles.png", new Rect(600, -30, 140, 130), 20);
                 var grip11 = (FrameworkElement)typeof(EditorWindow).GetField("_rotateThumb", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
                 log.AppendLine($"11b grip top={Canvas.GetTop(grip11):0.#} (below the mark means > 50)");
@@ -370,7 +373,7 @@ public class FixCheckRenderHarness
                 // 12. Survey's mark menu: icon row, Lock, Arrange with its submenu.
                 Deselect();
                 Tool(EditorTool.Select);
-                Down(80, 500); Up(80, 500); Pump(3);
+                InvokeN(editor, "Select", new object?[] { rect11a }); Pump(3);
                 var markMenu = (ContextMenu)typeof(EditorWindow).GetMethod("BuildAnnotationMenu", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null)!;
                 void RenderEl(FrameworkElement el, string name)
                 {
