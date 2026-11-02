@@ -865,6 +865,8 @@ stage.addEventListener("pointerdown", (event) => {
   }
   if (event.button !== 0) return;
   commitTextEditor();
+  // A press on the canvas leaves any toolbar field, so keys go back to the editor shortcuts.
+  if (document.activeElement && document.activeElement !== document.body && document.activeElement !== textEditor) document.activeElement.blur();
   const point = screenToImage(event.clientX, event.clientY);
   stage.setPointerCapture(event.pointerId);
   event.preventDefault();
@@ -1043,6 +1045,9 @@ function endGesture(event) {
   requestRender();
 }
 
+// Pressing the canvas must not move focus: it would blur (and close) a text box opened by
+// that same press, and send the typed text to the page shortcuts instead.
+stage.addEventListener("mousedown", (event) => { if (event.target !== textEditor) event.preventDefault(); });
 stage.addEventListener("pointerup", endGesture);
 stage.addEventListener("pointercancel", endGesture);
 
@@ -1111,7 +1116,10 @@ function openTextEditor(existing, point = null) {
   positionTextEditor();
   syncContext();
   requestRender();
-  setTimeout(() => textEditor.focus(), 0);
+  // Focus now so the first keystroke lands in the box; the stage's mousedown no longer
+  // moves focus (see below), and the deferred call covers a double-click's second press.
+  textEditor.focus();
+  setTimeout(() => { if (!textEditor.hidden) textEditor.focus(); }, 0);
 }
 
 function commitTextEditor() {

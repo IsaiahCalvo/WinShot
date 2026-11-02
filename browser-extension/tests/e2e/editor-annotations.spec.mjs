@@ -212,6 +212,7 @@ test("desktop-style markup burns into exports, persists, and supports crop, resi
     const textAt = await editor.evaluate(() => globalThis.__winshotEditor.imageToScreen(500, 500));
     await editor.mouse.click(box.x + textAt.x, box.y + textAt.y);
     await editor.waitForSelector("#text-editor:not([hidden])");
+    await editor.waitForFunction(() => document.activeElement?.id === "text-editor");
     await editor.keyboard.type("Hello");
     await editor.keyboard.down("Control");
     await editor.keyboard.press("Enter");
