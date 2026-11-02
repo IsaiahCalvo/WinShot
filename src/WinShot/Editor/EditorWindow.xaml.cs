@@ -183,7 +183,9 @@ public partial class EditorWindow : Window
     /// The hand-drawn line quality for the NEXT mark; a selected one carries its own. It is
     /// ORTHOGONAL to Survey's LINE STYLE dropdown, which owns solid/dashed/dotted/cloud.
     /// </summary>
-    private StrokeRender _strokeRender = StrokeRender.Clean;
+    // New marks are always drawn ruled; the hand-drawn option was removed (Isaiah, 2026-11-02).
+    // Sketchy marks in older projects still render from their own saved Sketch value.
+    private readonly StrokeRender _strokeRender = StrokeRender.Clean;
 
     /// <summary>The jitter seed of the shape being drawn, so its wobble is stable as the drag grows.</summary>
     private int _sketchSeed;
@@ -544,8 +546,8 @@ public partial class EditorWindow : Window
 
     /// <summary>
     /// Fits the WHOLE image into the viewport, centered. Tall scrolling captures scale down
-    /// so top-to-bottom is visible; a capture that already fits opens at 100%, never blown up
-    /// (see <see cref="FitWidthScale"/>). Use <see cref="FitToWidth"/> to read a long capture
+    /// so top-to-bottom is visible; a small capture is zoomed up to fill the canvas, up to
+    /// <see cref="MaxFitZoom"/>. Use <see cref="FitToWidth"/> to read a long capture
     /// at full width and scroll down it. Ctrl+0 / Center button / open all route here.
     /// </summary>
     private void FitToView()
@@ -609,29 +611,21 @@ public partial class EditorWindow : Window
     private const double FitGap = 16;
 
     /// <summary>
-    /// Fit SHRINKS ONLY. Survey's arithmetic is unchanged below; this is the one place the
-    /// result is capped at 1.0, so every fit mode inherits it instead of three call sites
-    /// each remembering to.
-    ///
-    /// <para>Survey never needs the cap because a PDF page is always about 612x792pt, so its
-    /// fit lands near 100% on any real viewport. A screenshot is whatever size it is, and
-    /// Survey's formula applied to a small one magnifies it: a 300x200 capture opened at
-    /// <b>331%</b> in a 1337x768 viewport, and an 80x50 one at over 900%. Upscaling a bitmap
-    /// cannot add detail — it just serves blurry pixels and makes the annotation you draw on
-    /// top land on a soft target. Isaiah, 2026-09-17: "fit-to-page and how the page fits is
-    /// weird"; this was it.</para>
-    ///
-    /// <para>So a capture smaller than the viewport opens at 100%, centred by the callers'
-    /// existing translate maths. Zooming past 100% is still a thing the user can ask for —
-    /// the rail, Ctrl+wheel and the %-box all go to MaxZoom 40. Fit just stops volunteering.</para>
+    /// The most a fit will magnify a capture. Fit fills the canvas area, as CleanShot and
+    /// Shottr open a shot and as Survey fits a page (Isaiah, 2026-11-02: a capture opened at
+    /// 100% "is too small, massive borders above and below"). The ceiling only stops a tiny
+    /// capture (an 80x50 crop) being blown up to 900%, where it is all blur and no content.
+    /// Zooming further by hand still goes to MaxZoom.
     /// </summary>
-    private static double ShrinkOnly(double scale) => Math.Min(1.0, scale);
+    internal const double MaxFitZoom = 4.0;
+
+    private static double FitCap(double scale) => Math.Min(MaxFitZoom, scale);
 
     /// <summary>Survey's getFitWidthForContainer / pw (PdfjsViewerContainer.jsx:137-140, :1891).</summary>
-    private double FitWidthScale(double vw) => ShrinkOnly(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
+    private double FitWidthScale(double vw) => FitCap(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
 
     /// <summary>Survey's fh: clientHeight / (ph + 2*gap) (PdfjsViewerContainer.jsx:1892-1893).</summary>
-    private double FitHeightScale(double vh) => ShrinkOnly(vh / (_sourceHeight + 2 * FitGap));
+    private double FitHeightScale(double vh) => FitCap(vh / (_sourceHeight + 2 * FitGap));
 
     /// <summary>The pan bound used by <see cref="ClampView"/>; unrelated to the fit insets.</summary>
     private const double ViewMargin = 12;
@@ -1398,11 +1392,9 @@ public partial class EditorWindow : Window
             Has(EditorContextControls.RedactStrength) &&
             Redaction.UsesStrength(SelectedRedactStyle() ?? _redactStyle));
         MagnifyPanel.Visibility = Show(Has(EditorContextControls.Magnification));
-        StrokePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
         if (Has(EditorContextControls.RedactStyle)) SyncRedactControls();
         if (Has(EditorContextControls.Magnification)) SyncMagnifySlider();
-        if (Has(EditorContextControls.LineStyle)) SyncSketchCheck();
 
         // Row 1, right of the group chips (Survey toolbarRows.js resolveToolBarGroup): the
         // armed tool's group; under Select or Pan with a mark picked, THAT mark's group, so a
@@ -1669,7 +1661,6 @@ public partial class EditorWindow : Window
         if (LineStylePanel is not null) yield return LineStylePanel;
         if (RedactStrengthPanel is not null) yield return RedactStrengthPanel;
         if (CropToolsPanel is not null) yield return CropToolsPanel;
-        if (StrokePanel is not null) yield return StrokePanel;
         if (CropPanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) != "Apply crop")

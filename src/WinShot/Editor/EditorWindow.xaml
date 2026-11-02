@@ -1211,17 +1211,6 @@
                                                     <!-- Eraser mode lives in the tool's own split menu (Draw sub-row),
                                                          exactly as Survey mounts it — there is no top-row combo. -->
 
-                                                    <!-- Survey's LINE STYLE dropdown owns solid/dashed/dotted/cloud. The one thing it has
-                                                         no vocabulary for is the hand-drawn line QUALITY, which is orthogonal to the dash:
-                                                         a sketchy outline can still be dotted. So this is the only survivor of WinShot's
-                                                         own outline popover — one checkbox, next to the dropdown it qualifies. -->
-                                                    <StackPanel x:Name="StrokePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <CheckBox x:Name="SketchCheck" Style="{StaticResource DarkCheckBox}" Content="Hand-drawn"
-                                                                  VerticalAlignment="Center" Click="OnSketchClick"
-                                                                  ToolTip="Draw the line with a sketched wobble instead of a ruled one"
-                                                                  AutomationProperties.Name="Hand-drawn outline"
-                                                                  AutomationProperties.HelpText="Draw with a sketched, hand-drawn line instead of a ruled one."/>
-                                                    </StackPanel>
 
                                                     <StackPanel x:Name="RedactStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <!-- Survey's own format controls are all dropdowns of this shape, so the four
