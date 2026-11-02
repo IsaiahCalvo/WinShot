@@ -179,15 +179,6 @@ public partial class EditorWindow : Window
     private bool _hueDragging;
     private double _opacity = 1.0; // annotation alpha multiplier (0–1.0) for new + restyled marks
 
-    /// <summary>
-    /// The hand-drawn line quality for the NEXT mark; a selected one carries its own. It is
-    /// ORTHOGONAL to Survey's LINE STYLE dropdown, which owns solid/dashed/dotted/cloud.
-    /// </summary>
-    private StrokeRender _strokeRender = StrokeRender.Clean;
-
-    /// <summary>The jitter seed of the shape being drawn, so its wobble is stable as the drag grows.</summary>
-    private int _sketchSeed;
-
 
     // Redaction defaults for the NEXT mark; a selected redaction carries its own. Survey's
     // separate Pixelate and Blur tools are two of these four styles.
@@ -529,8 +520,8 @@ public partial class EditorWindow : Window
 
     /// <summary>
     /// Fits the WHOLE image into the viewport, centered. Tall scrolling captures scale down
-    /// so top-to-bottom is visible; a capture that already fits opens at 100%, never blown up
-    /// (see <see cref="FitWidthScale"/>). Use <see cref="FitToWidth"/> to read a long capture
+    /// so top-to-bottom is visible; a small capture scales up to fill the view, up to
+    /// <see cref="MaxFitZoom"/>. Use <see cref="FitToWidth"/> to read a long capture
     /// at full width and scroll down it. Ctrl+0 / Center button / open all route here.
     /// </summary>
     private void FitToView()
@@ -594,29 +585,29 @@ public partial class EditorWindow : Window
     private const double FitGap = 16;
 
     /// <summary>
-    /// Fit SHRINKS ONLY. Survey's arithmetic is unchanged below; this is the one place the
-    /// result is capped at 1.0, so every fit mode inherits it instead of three call sites
-    /// each remembering to.
+    /// The most a fit may MAGNIFY a capture. Survey's arithmetic is unchanged below; this is
+    /// the one place the result is capped, so every fit mode inherits it instead of three
+    /// call sites each remembering to.
     ///
-    /// <para>Survey never needs the cap because a PDF page is always about 612x792pt, so its
-    /// fit lands near 100% on any real viewport. A screenshot is whatever size it is, and
-    /// Survey's formula applied to a small one magnifies it: a 300x200 capture opened at
-    /// <b>331%</b> in a 1337x768 viewport, and an 80x50 one at over 900%. Upscaling a bitmap
-    /// cannot add detail — it just serves blurry pixels and makes the annotation you draw on
-    /// top land on a soft target. Isaiah, 2026-09-17: "fit-to-page and how the page fits is
-    /// weird"; this was it.</para>
+    /// <para>History: until 2026-09-17 fit had no cap, and Survey's formula blew small
+    /// captures up to 331% (300x200) or over 900% (80x50) — blurry. That day the cap became
+    /// 100%, which swung too far the other way: a small capture opened at 100% as a little
+    /// island with big empty bands above and below it. Isaiah, 2026-11-02: "it's too small.
+    /// You have these massive borders above and below it."</para>
     ///
-    /// <para>So a capture smaller than the viewport opens at 100%, centred by the callers'
-    /// existing translate maths. Zooming past 100% is still a thing the user can ask for —
-    /// the rail, Ctrl+wheel and the %-box all go to MaxZoom 40. Fit just stops volunteering.</para>
+    /// <para>So fit now fills the viewport (with Survey's small margin) and may magnify, but
+    /// never past 200%: big enough to work on, not so far that the pixels go soft. The rail,
+    /// Ctrl+wheel and the %-box still go to MaxZoom 40.</para>
     /// </summary>
-    private static double ShrinkOnly(double scale) => Math.Min(1.0, scale);
+    private const double MaxFitZoom = 2.0;
+
+    private static double CapFit(double scale) => Math.Min(MaxFitZoom, scale);
 
     /// <summary>Survey's getFitWidthForContainer / pw (PdfjsViewerContainer.jsx:137-140, :1891).</summary>
-    private double FitWidthScale(double vw) => ShrinkOnly(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
+    private double FitWidthScale(double vw) => CapFit(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
 
     /// <summary>Survey's fh: clientHeight / (ph + 2*gap) (PdfjsViewerContainer.jsx:1892-1893).</summary>
-    private double FitHeightScale(double vh) => ShrinkOnly(vh / (_sourceHeight + 2 * FitGap));
+    private double FitHeightScale(double vh) => CapFit(vh / (_sourceHeight + 2 * FitGap));
 
     /// <summary>The pan bound used by <see cref="ClampView"/>; unrelated to the fit insets.</summary>
     private const double ViewMargin = 12;
@@ -825,17 +816,11 @@ public partial class EditorWindow : Window
         {
             case "FitWidth": FitToWidth(); break;
             case "FitHeight": FitToHeight(); break;
-            case "Free":
-                FitToView(); // establishes a sane translation before the stored scale is applied
-                // A remembered zoom is a preference, not an instruction to show a sliver. If
-                // the stored scale is bigger than what this capture fits at, the capture wins:
-                // a 1000x4000 scroll capture opened at the 200 % left over from the last small
-                // screenshot showed a hand's width of it and no way to know that was the whole
-                // picture. Zooming back in is one gesture; realising you are looking at 5 % of
-                // an image is not.
-                if (_settings.Current.EditorManualZoom <= _zoom)
-                    ZoomAt(ViewportCentre(), _settings.Current.EditorManualZoom);
-                break;
+            // "Free" (the last capture was zoomed by hand) opens fitted too. A hand zoom
+            // belongs to the capture it was made on: a stored scale bigger than this capture's
+            // fit showed a sliver of a tall scroll capture, and a smaller one (often the 100%
+            // left by Ctrl+0) opened a small capture as a little island with empty bands
+            // around it (Isaiah, 2026-11-02).
             default: FitToView(); break;
         }
     }
@@ -1321,11 +1306,9 @@ public partial class EditorWindow : Window
             Has(EditorContextControls.RedactStrength) &&
             Redaction.UsesStrength(SelectedRedactStyle() ?? _redactStyle));
         MagnifyPanel.Visibility = Show(Has(EditorContextControls.Magnification));
-        StrokePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
         if (Has(EditorContextControls.RedactStyle)) SyncRedactControls();
         if (Has(EditorContextControls.Magnification)) SyncMagnifySlider();
-        if (Has(EditorContextControls.LineStyle)) SyncSketchCheck();
 
         // Survey's `activeCategoryDropdown` follows the ARMED tool only: it starts null, is
         // force-cleared whenever activeTool becomes pan/select/text-select (PDFViewer.jsx:4340,
@@ -1536,13 +1519,13 @@ public partial class EditorWindow : Window
         // which is backwards — it kept them and overflowed the choices they qualify. With
         // Arrow armed at a 1400 DIP window that put the ARROWHEAD dropdown into the "..."
         // flyout (measured: slack 344.35, LineStyle 90 + Arrowhead 257.3 = 347.3, so it
-        // lost by 2.95 DIP) while the hand-drawn toggle kept its place. That is Isaiah's
+        // lost by 2.95 DIP) while a qualifier toggle kept its place. That is Isaiah's
         // "I can't change arrow heads": the control was wired and working, just filed away
         // behind an overflow button on the one tool that exists to use it.
         //
         // So: each tool's DEFINING control first, then the shared ones, then the qualifiers
-        // — a hand-drawn toggle and a redaction's strength are refinements of a choice made
-        // elsewhere on the row, and are the right things to lose first.
+        // — a redaction's strength is a refinement of a choice made elsewhere on the row,
+        // and is the right thing to lose first.
         if (ArrowStylePanel is not null) yield return ArrowStylePanel;
         if (RedactStylePanel is not null) yield return RedactStylePanel;
         if (StepModePanel is not null) yield return StepModePanel;
@@ -1551,7 +1534,6 @@ public partial class EditorWindow : Window
         if (LineStylePanel is not null) yield return LineStylePanel;
         if (RedactStrengthPanel is not null) yield return RedactStrengthPanel;
         if (CropToolsPanel is not null) yield return CropToolsPanel;
-        if (StrokePanel is not null) yield return StrokePanel;
         if (CropPanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) != "Apply crop")

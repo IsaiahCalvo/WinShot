@@ -251,32 +251,12 @@ public class EditorHardeningTests
         Assert.Equal(StrokeDash.Solid, StrokeStyles.ParseDash(null));
         Assert.Equal(StrokeDash.Solid, StrokeStyles.ParseDash("  "));
         Assert.Equal(StrokeDash.Solid, StrokeStyles.ParseDash("nonsense"));
-        Assert.Equal(StrokeRender.Clean, StrokeStyles.ParseRender(null));
-        Assert.Equal(StrokeRender.Clean, StrokeStyles.ParseRender("nonsense"));
         // FINDING (non-blocking): Enum.TryParse accepts a bare ORDINAL, so a project file
         // carrying "Dash":"7" yields an undefined StrokeDash. Benign — DashArray's default
         // arm returns null (solid) — and unreachable from anything WinShot writes, since
         // AnnotationData always stores the enum NAME.
         Assert.False(Enum.IsDefined(StrokeStyles.ParseDash("7")));
         Assert.Null(StrokeStyles.DashArray(StrokeStyles.ParseDash("7")));
-        Assert.False(Enum.IsDefined(StrokeStyles.ParseRender("42")));
-    }
-
-    [Fact]
-    public void B8b_SketchIsDeterministicAndFinite()
-    {
-        var pts = new[] { new Point(0, 0), new Point(100, 0), new Point(100, 60), new Point(0, 60) };
-        var a = StrokeStyles.SketchPolygon(pts, 5);
-        var b = StrokeStyles.SketchPolygon(pts, 5);
-        Assert.Equal(a.Count, b.Count);
-        for (int i = 0; i < a.Count; i++)
-        {
-            Assert.Equal(a[i].X, b[i].X, 9);
-            Assert.False(double.IsNaN(a[i].X) || double.IsNaN(a[i].Y), "sketch produced NaN");
-        }
-        // Degenerate: one point, and two identical points.
-        Assert.NotNull(StrokeStyles.SketchPath(new[] { new Point(1, 1) }, 3, closed: false));
-        Assert.NotNull(StrokeStyles.SketchSegment(new Point(2, 2), new Point(2, 2), 3));
     }
 
     // ---------------------------------------------------------------- colour picker

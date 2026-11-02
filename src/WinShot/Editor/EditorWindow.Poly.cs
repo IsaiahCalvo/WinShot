@@ -129,7 +129,7 @@ public partial class EditorWindow
         var path = AnnotationFactory.CreatePolyShape(
             finish.Points, finish.Closed, CurrentStrokeBrush(),
             finish.Closed ? CurrentFillBrush() : Colors.Transparent,
-            _thickness, _lineStyle, _cloudIntensity, _strokeRender, _sketchSeed);
+            _thickness, _lineStyle, _cloudIntensity);
         var data = AnnotationData.ForPoly(
             finish.FinalType, finish.Points, CurrentStrokeBrush(), _thickness, _lineStyle);
         if (finish.Closed)
@@ -138,8 +138,6 @@ public partial class EditorWindow
             data.FillColor = AnnotationStyle.ToHex(CurrentFillBrush());
         }
         if (_lineStyle == LineBorderStyle.Cloud) data.CloudIntensity = _cloudIntensity;
-        data.Sketch = _strokeRender == StrokeRender.Clean ? null : _strokeRender.ToString();
-        data.Seed = _sketchSeed;
         path.Tag = data;
         AnnotationCanvas.Children.Add(path);
         // Not selected, like a pen stroke: the tool stays armed for the next run, and a
