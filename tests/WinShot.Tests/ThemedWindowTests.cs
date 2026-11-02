@@ -27,7 +27,9 @@ public class ThemedWindowTests
     [Fact]
     public void ThemedWindows_LoadSharedThemeOnDemand()
     {
+        WsTrace.T();
         Exception? failure = null;
+        WsTrace.T();
         var thread = new Thread(() =>
         {
             try
@@ -122,16 +124,22 @@ public class ThemedWindowTests
             }
         });
 
+        WsTrace.T();
         thread.SetApartmentState(ApartmentState.STA);
+        WsTrace.T();
         thread.Start();
+        WsTrace.T();
         thread.Join();
 
+        WsTrace.T();
         Assert.Null(failure);
     }
 
     private static void ShowAndClose(Window window)
     {
+        WsTrace.T();
         window.Show();
+        WsTrace.T();
         window.Close();
     }
 
@@ -146,7 +154,9 @@ public class ThemedWindowTests
     /// </summary>
     private static void VideoEditorResolutionSmoke(string path, SettingsService settings, HistoryService history)
     {
+        WsTrace.T();
         var window = new VideoEditorWindow(path, settings, history);
+        WsTrace.T();
         window.Show();
 
         // The call OnMediaOpened makes. The stub source reports 0x0, and For(0, 0) falls back to
@@ -154,12 +164,15 @@ public class ThemedWindowTests
         typeof(VideoEditorWindow)
             .GetMethod("PopulateResolutions", NP)!
             .Invoke(window, null);
+        WsTrace.T();
         var combo = (ComboBox)typeof(VideoEditorWindow).GetField("ResolutionCombo", NP)!.GetValue(window)!;
 
+        WsTrace.T();
         Assert.Equal(
             VideoResolutionPresets.For(1920, 1080).Select(preset => preset.Label),
             combo.Items.Cast<ComboBoxItem>().Select(item => (string)item.Content));
 
+        WsTrace.T();
         window.Close();
     }
 
@@ -168,15 +181,22 @@ public class ThemedWindowTests
 
     private static void HistorySelectionInteractionSmoke(HistoryService history, SettingsService settings)
     {
+        WsTrace.T();
         var window = new HistoryWindow(history, settings);
+        WsTrace.T();
         var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        WsTrace.T();
         var items = Enumerable.Range(0, 5)
             .Select(index => new HistoryItem($@"C:\sanitized-history\20260803-12000{index}-000.png"))
             .ToList();
+        WsTrace.T();
         paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        WsTrace.T();
         window.Show();
+        WsTrace.T();
         window.UpdateLayout();
 
+        WsTrace.T();
         try
         {
             ((Button)window.FindName("SelectButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -221,19 +241,27 @@ public class ThemedWindowTests
     /// an MP4 has no card, so Enter must not raise the restore handoff.</summary>
     private static void HistoryActivationSmoke(HistoryService history, SettingsService settings)
     {
+        WsTrace.T();
         var window = new HistoryWindow(history, settings);
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        WsTrace.T();
         var items = new List<HistoryItem>
         {
             new(@"C:\sanitized-history\20260803-120000-000.png"),
             new(@"C:\sanitized-history\20260803-120001-000.mp4"),
         };
+        WsTrace.T();
         paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        WsTrace.T();
         window.Show();
+        WsTrace.T();
         window.UpdateLayout();
 
+        WsTrace.T();
         try
         {
             var restored = new List<string>();
@@ -303,9 +331,12 @@ public class ThemedWindowTests
     /// guards the shape that would deadlock if it were ever awaited from the UI thread.</summary>
     private static void HistoryThumbnailLoadSmoke(SettingsService settings)
     {
+        WsTrace.T();
         string dir = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        WsTrace.T();
         System.IO.Directory.CreateDirectory(dir);
+        WsTrace.T();
         try
         {
             for (int index = 0; index < 12; index++)
@@ -376,9 +407,12 @@ public class ThemedWindowTests
     /// </summary>
     private static void HistoryRotateRefreshSmoke(SettingsService settings)
     {
+        WsTrace.T();
         string dir = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        WsTrace.T();
         System.IO.Directory.CreateDirectory(dir);
+        WsTrace.T();
         try
         {
             string file = System.IO.Path.Combine(dir, "20260803-120000-000.png");
@@ -451,17 +485,24 @@ public class ThemedWindowTests
     /// </summary>
     private static void HistoryOverlayActionsBaseStateSmoke(HistoryService history, SettingsService settings)
     {
+        WsTrace.T();
         var window = new HistoryWindow(history, settings);
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        WsTrace.T();
         paging.ReplaceAll(
             new List<HistoryItem> { new(@"C:\sanitized-history\20260803-120000-000.png") },
             static _ => true,
             selectedPath: null);
+        WsTrace.T();
         window.Show();
+        WsTrace.T();
         window.UpdateLayout();
 
+        WsTrace.T();
         try
         {
             var list = (ListBox)window.FindName("ItemsList");
@@ -487,14 +528,18 @@ public class ThemedWindowTests
 
     private static FrameworkElement? FindDescendantByName(DependencyObject root, string name)
     {
+        WsTrace.T();
         if (root is FrameworkElement element && element.Name == name) return element;
+        WsTrace.T();
         int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        WsTrace.T();
         for (int index = 0; index < count; index++)
         {
             FrameworkElement? hit = FindDescendantByName(
                 System.Windows.Media.VisualTreeHelper.GetChild(root, index), name);
             if (hit is not null) return hit;
         }
+        WsTrace.T();
         return null;
     }
 
@@ -506,9 +551,12 @@ public class ThemedWindowTests
     /// </summary>
     private static void HistoryCaptureRoundTripRefreshSmoke(SettingsService settings)
     {
+        WsTrace.T();
         string dir = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), "WinShotTests", Guid.NewGuid().ToString("N"));
+        WsTrace.T();
         System.IO.Directory.CreateDirectory(dir);
+        WsTrace.T();
         try
         {
             var scoped = new HistoryService(settings, () => dir);
@@ -543,10 +591,14 @@ public class ThemedWindowTests
     /// straight away, rather than leaving an orphaned tween to finish on its own.</summary>
     private static void HistoryReflowCloseSmoke(HistoryService history, SettingsService settings)
     {
+        WsTrace.T();
         var window = new HistoryWindow(history, settings);
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        WsTrace.T();
         paging.ReplaceAll(
             Enumerable.Range(0, 8)
                 .Select(index => new HistoryItem(index % 2 == 0
@@ -555,10 +607,14 @@ public class ThemedWindowTests
                 .ToList(),
             static _ => true,
             selectedPath: null);
+        WsTrace.T();
         window.Show();
+        WsTrace.T();
         window.UpdateLayout();
 
+        WsTrace.T();
         Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        WsTrace.T();
         try
         {
             Motion.AnimationsEnabled = () => true;
@@ -585,10 +641,14 @@ public class ThemedWindowTests
     /// rebuilding the page, and the tween lets go of the high-resolution clock when it ends.</summary>
     private static void HistoryReflowSmoke(HistoryService history, SettingsService settings)
     {
+        WsTrace.T();
         var window = new HistoryWindow(history, settings);
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var paging = (HistoryIncrementalCollection)typeof(HistoryWindow).GetField("_paging", NP)!.GetValue(window)!;
+        WsTrace.T();
         var items = new List<HistoryItem>
         {
             new(@"C:\sanitized-history\20260803-120000-000.png"),
@@ -597,11 +657,16 @@ public class ThemedWindowTests
             new(@"C:\sanitized-history\20260803-120003-000.mp4"),
             new(@"C:\sanitized-history\20260803-120004-000.png"),
         };
+        WsTrace.T();
         paging.ReplaceAll(items, static _ => true, selectedPath: null);
+        WsTrace.T();
         window.Show();
+        WsTrace.T();
         window.UpdateLayout();
 
+        WsTrace.T();
         Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        WsTrace.T();
         try
         {
             Motion.AnimationsEnabled = () => true;
@@ -652,7 +717,9 @@ public class ThemedWindowTests
 
     private static void WaitUntil(Func<bool> condition)
     {
+        WsTrace.T();
         var deadline = DateTime.UtcNow.AddSeconds(5);
+        WsTrace.T();
         while (!condition() && DateTime.UtcNow < deadline)
         {
             PumpDispatcherOnce();
@@ -663,7 +730,9 @@ public class ThemedWindowTests
     private static T? FindVisualNamed<T>(System.Windows.DependencyObject root, string name)
         where T : System.Windows.FrameworkElement
     {
+        WsTrace.T();
         int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        WsTrace.T();
         for (int index = 0; index < count; index++)
         {
             var child = System.Windows.Media.VisualTreeHelper.GetChild(root, index);
@@ -671,12 +740,15 @@ public class ThemedWindowTests
             if (FindVisualNamed<T>(child, name) is T nested) return nested;
         }
 
+        WsTrace.T();
         return null;
     }
 
     private static T? FindVisualChild<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
     {
+        WsTrace.T();
         int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        WsTrace.T();
         for (int index = 0; index < count; index++)
         {
             var child = System.Windows.Media.VisualTreeHelper.GetChild(root, index);
@@ -684,43 +756,65 @@ public class ThemedWindowTests
             if (FindVisualChild<T>(child) is T nested) return nested;
         }
 
+        WsTrace.T();
         return null;
     }
 
     private static void ShowAndClose(WF.Form form)
     {
+        WsTrace.T();
         form.Show();
+        WsTrace.T();
         form.Close();
+        WsTrace.T();
         form.Dispose();
     }
 
     private static void SettingsWindowShowCloseSmoke(SettingsService settings)
     {
+        WsTrace.T();
         settings.Current.ShortcutBindings["legacy-placeholder"] = "Ctrl+Alt+Q";
+        WsTrace.T();
         settings.Current.ShowCrosshair = false;
+        WsTrace.T();
         settings.Current.CrosshairMode = "always";
+        WsTrace.T();
         settings.Current.ScreenshotSave = true;
+        WsTrace.T();
         settings.Current.ScreenshotShowOverlay = false;
+        WsTrace.T();
         var window = SettingsWindow.Show(settings);
+        WsTrace.T();
         Assert.True(window.IsVisible);
+        WsTrace.T();
         Assert.True(window.ShowInTaskbar);
+        WsTrace.T();
         AssertSettingsTruthfulAndAccessible(window);
+        WsTrace.T();
         Assert.Equal(
             "never",
             ((System.Windows.Controls.ComboBoxItem)
                 ((System.Windows.Controls.ComboBox)window.FindName("CrosshairModeCombo")).SelectedItem).Tag);
         // The after-capture matrix is a set: Save on, Quick Access off, independently.
         Assert.True(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotSaveCheck")).IsChecked);
+        WsTrace.T();
         Assert.False(((System.Windows.Controls.CheckBox)window.FindName("ScreenshotShowOverlayCheck")).IsChecked);
+        WsTrace.T();
         SettingsSectionMotionSmoke(window);
+        WsTrace.T();
         SettingsLiveApplyAndDefaultsSmoke(window, settings);
+        WsTrace.T();
         typeof(SettingsWindow).GetMethod(
             "SaveShortcutBoxes",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(window, new object[] { settings.Current });
+        WsTrace.T();
         Assert.Equal("Ctrl+Alt+Q", settings.Current.ShortcutBindings["legacy-placeholder"]);
+        WsTrace.T();
         window.Close();
+        WsTrace.T();
         WaitUntilHidden(window);
+        WsTrace.T();
         Assert.False(window.IsVisible);
     }
 
@@ -733,13 +827,18 @@ public class ThemedWindowTests
     /// </summary>
     private static void AssertEveryVisibleSettingHasAReachableControl(SettingsWindow window)
     {
+        WsTrace.T();
         var list = (System.Windows.Controls.ListBox)window.FindName("SectionList")!;
+        WsTrace.T();
         var sections = (System.Windows.Controls.ScrollViewer[])typeof(SettingsWindow)
             .GetMethod("Sections", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(window, null)!;
+        WsTrace.T();
         Assert.Equal(list.Items.Count, sections.Length);
 
+        WsTrace.T();
         var reachable = new HashSet<System.Windows.Controls.ScrollViewer>();
+        WsTrace.T();
         for (int i = 0; i < sections.Length; i++)
         {
             var tab = (System.Windows.Controls.ListBoxItem)list.Items[i]!;
@@ -750,6 +849,7 @@ public class ThemedWindowTests
             reachable.Add(sections[i]);
         }
 
+        WsTrace.T();
         bool IsReachable(string controlName)
         {
             if (window.FindName(controlName) is not DependencyObject element) return false;
@@ -759,7 +859,9 @@ public class ThemedWindowTests
             return false;
         }
 
+        WsTrace.T();
         string root = TestPaths.RepoRoot();
+        WsTrace.T();
         var names = new HashSet<string>(
             System.Text.RegularExpressions.Regex
                 .Matches(
@@ -769,12 +871,16 @@ public class ThemedWindowTests
                 .Select(m => m.Groups["n"].Value),
             StringComparer.Ordinal);
 
+        WsTrace.T();
         string code = string.Concat(new[] { "SettingsWindow.xaml.cs", "SettingsWindow.Shortcuts.cs" }
             .Select(f => System.IO.File.ReadAllText(
                 System.IO.Path.Combine(root, "src", "WinShot", "SettingsUi", f))));
+        WsTrace.T();
         string[] statements = code.Split(';');
 
+        WsTrace.T();
         int matched = 0;
+        WsTrace.T();
         foreach (string property in SettingsTruthCatalog.VisibleRuntimeBackedProperties)
         {
             // The shortcut rows are built from SettingsWindow.Shortcuts.cs's own table rather
@@ -792,26 +898,39 @@ public class ThemedWindowTests
             matched++;
         }
 
+        WsTrace.T();
         Assert.True(matched >= 50, $"only {matched} properties were checked — the source scan stopped working");
     }
 
     private static void AssertSettingsTruthfulAndAccessible(SettingsWindow window)
     {
+        WsTrace.T();
         AssertEveryVisibleSettingHasAReachableControl(window);
 
+        WsTrace.T();
         T Named<T>(string name) where T : FrameworkElement =>
             Assert.IsAssignableFrom<T>(window.FindName(name));
 
+        WsTrace.T();
         Assert.Equal(ResizeMode.CanResize, window.ResizeMode);
+        WsTrace.T();
         Assert.True(window.MinWidth >= 620);
+        WsTrace.T();
         Assert.True(window.MinHeight >= 560);
 
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("QuickAccessNavItem").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.ListBoxItem>("AnnotateNavItem").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("AfterCaptureMatrix").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("SoundsRow").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrayIconRow").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("AskForNameRow").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ScreenshotBackgroundRow").Visibility);
         // The shadow switch only means something once a background is on, so it rides the same
         // reveal as the colour field rather than sitting there greyed out under "None".
@@ -819,9 +938,13 @@ public class ThemedWindowTests
         // The corner trim applies to every window capture, so unlike the backdrop's shadow it
         // has nothing to be revealed by and stands on its own.
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("TrimWindowShadowRow").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("NotificationsCard").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("ShutterSoundRow").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.DockPanel>("MaxResolutionRow").Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, Named<System.Windows.Controls.Border>("PinnedStyleCard").Visibility);
         // Deleted rather than left Collapsed: a row for a setting nothing implements is dead
         // XAML, and "it is in the file but hidden" is how it comes back by accident.
@@ -834,21 +957,29 @@ public class ThemedWindowTests
             Assert.Null(window.FindName(gone));
         }
 
+        WsTrace.T();
         var done = Named<System.Windows.Controls.Button>("SaveButton");
+        WsTrace.T();
         var cancel = Named<System.Windows.Controls.Button>("CancelButton");
+        WsTrace.T();
         Assert.True(done.IsDefault);
+        WsTrace.T();
         Assert.True(cancel.IsCancel);
         // "Close", not "Cancel". Checkboxes, combos and sliders live-apply 250 ms after they
         // change, so a button labelled Cancel promising to "close without applying changes"
         // was describing the opposite of what it did.
         Assert.Equal("Close", cancel.Content);
+        WsTrace.T();
         Assert.DoesNotContain(
             "without applying",
             AutomationProperties.GetHelpText(cancel) ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
+        WsTrace.T();
         Assert.NotNull(done.FocusVisualStyle);
+        WsTrace.T();
         Assert.NotNull(cancel.FocusVisualStyle);
 
+        WsTrace.T();
         string[] accessibleControls =
         [
             "StartupCheck", "UpdatesCheck", "SaveFolderBox", "BrowseSaveFolderButton",
@@ -876,6 +1007,7 @@ public class ThemedWindowTests
             "AboutNoticesToggle", "AboutLicensesButton",
         ];
 
+        WsTrace.T();
         foreach (string name in accessibleControls)
         {
             var control = Named<System.Windows.Controls.Control>(name);
@@ -883,8 +1015,11 @@ public class ThemedWindowTests
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(control)), name);
         }
 
+        WsTrace.T();
         var shortcutBoxes = FindLogicalChildren<HotkeyBox>(window).ToArray();
+        WsTrace.T();
         Assert.Equal(SettingsTruthCatalog.ExecutableShortcutIds.Count, shortcutBoxes.Length);
+        WsTrace.T();
         Assert.All(shortcutBoxes, box =>
         {
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(box)));
@@ -892,6 +1027,7 @@ public class ThemedWindowTests
             Assert.NotNull(box.FocusVisualStyle);
         });
 
+        WsTrace.T();
         var tabOrder = new[]
         {
             Named<System.Windows.Controls.Control>("StartupCheck").TabIndex,
@@ -903,11 +1039,13 @@ public class ThemedWindowTests
             cancel.TabIndex,
             done.TabIndex,
         };
+        WsTrace.T();
         Assert.Equal(tabOrder.Order().ToArray(), tabOrder);
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject
     {
+        WsTrace.T();
         for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
         {
             DependencyObject child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
@@ -920,6 +1058,7 @@ public class ThemedWindowTests
 
     private static IEnumerable<T> FindLogicalChildren<T>(DependencyObject root) where T : DependencyObject
     {
+        WsTrace.T();
         foreach (object child in LogicalTreeHelper.GetChildren(root))
         {
             if (child is T match)
@@ -935,15 +1074,23 @@ public class ThemedWindowTests
     /// their end state immediately.</summary>
     private static void HistoryWindowShowCloseSmoke(HistoryService history, SettingsService settings)
     {
+        WsTrace.T();
         var window = HistoryWindow.Show(history, settings);
+        WsTrace.T();
         Assert.True(window.IsVisible);
+        WsTrace.T();
         Assert.True(window.ShowInTaskbar);
 
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var fadeIn = typeof(HistoryWindow).GetMethod("FadeIn", NP)!;
+        WsTrace.T();
         void FadeIn(double from) => fadeIn.Invoke(window, new object[] { from });
+        WsTrace.T();
         Func<bool> previousAnimations = Motion.AnimationsEnabled;
+        WsTrace.T();
         try
         {
             Motion.AnimationsEnabled = () => false;
@@ -973,13 +1120,17 @@ public class ThemedWindowTests
             window.Close();
         }
 
+        WsTrace.T();
         WaitUntilHidden(window);
+        WsTrace.T();
         Assert.False(window.IsVisible);
 
         // With animation off, Escape has to close the window on the spot rather than waiting
         // for a tween that will never run.
         var second = HistoryWindow.Show(history, settings);
+        WsTrace.T();
         Motion.AnimationsEnabled = () => false;
+        WsTrace.T();
         try
         {
             Assert.True(second.HandleKey(Key.Escape, ModifierKeys.None));
@@ -1024,14 +1175,17 @@ public class ThemedWindowTests
     /// </summary>
     private static void ToolRowStabilitySmoke(EditorWindow editor)
     {
+        WsTrace.T();
         var toolPanel = (FrameworkElement)editor.FindName("ToolPanel")!;
 
+        WsTrace.T();
         double Left()
         {
             editor.UpdateLayout();
             return toolPanel.TransformToAncestor(editor).Transform(new Point(0, 0)).X;
         }
 
+        WsTrace.T();
         double baseline = Left();
 
         // Tools whose format cluster differs the most: shapes carry fill and stroke, the
@@ -1065,6 +1219,7 @@ public class ThemedWindowTests
                 $"tool row moved {now - baseline:0.##}px when opening {name}");
         }
 
+        WsTrace.T();
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
     }
 
@@ -1075,17 +1230,25 @@ public class ThemedWindowTests
     /// </summary>
     private static void RotationGripSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         var handleLayer = (Canvas)editor.FindName("HandleLayer")!;
+        WsTrace.T();
         var selField = type.GetField("_selected", NP)!;
+        WsTrace.T();
         var updateVisual = type.GetMethod("UpdateSelectionVisual", NP)!;
 
+        WsTrace.T();
         bool GripVisible() => handleLayer.Children.OfType<System.Windows.Shapes.Ellipse>()
             .Any(e => e.Visibility == Visibility.Visible);
 
+        WsTrace.T();
         void SelectAndLayout(FrameworkElement el)
         {
             selField.SetValue(editor, el);
@@ -1093,6 +1256,7 @@ public class ThemedWindowTests
             editor.UpdateLayout();
         }
 
+        WsTrace.T();
         canvas.Children.Clear();
 
         // A plain box annotation — the baseline that always had handles.
@@ -1102,51 +1266,81 @@ public class ThemedWindowTests
             Height = 60,
             Tag = new AnnotationData { Type = AnnotationData.TypeRectangle },
         };
+        WsTrace.T();
         Canvas.SetLeft(rect, 20);
+        WsTrace.T();
         Canvas.SetTop(rect, 20);
+        WsTrace.T();
         canvas.Children.Add(rect);
+        WsTrace.T();
         rect.Measure(new Size(90, 60));
+        WsTrace.T();
         rect.Arrange(new Rect(0, 0, 90, 60));
+        WsTrace.T();
         SelectAndLayout(rect);
+        WsTrace.T();
         Assert.True(GripVisible(), "rectangle should carry a rotation grip");
 
         // The counter: previously fell through to HideHandles, so it could not be rotated.
         var badge = AnnotationFactory.CreateStepBadge(1, Colors.Red, 4, letters: false);
+        WsTrace.T();
         badge.Tag = new AnnotationData { Type = AnnotationData.TypeStep };
+        WsTrace.T();
         Canvas.SetLeft(badge, 140);
+        WsTrace.T();
         Canvas.SetTop(badge, 40);
+        WsTrace.T();
         canvas.Children.Add(badge);
+        WsTrace.T();
         badge.Measure(new Size(200, 200));
+        WsTrace.T();
         badge.Arrange(new Rect(0, 0, badge.DesiredSize.Width, badge.DesiredSize.Height));
+        WsTrace.T();
         SelectAndLayout(badge);
+        WsTrace.T();
         Assert.True(GripVisible(), "counter should carry a rotation grip");
 
         // Rotating it must actually take, and survive a round-trip through the model.
         AnnotationTransform.SetAngle(badge, 37);
+        WsTrace.T();
         Assert.Equal(37, AnnotationTransform.AngleOf(badge), 3);
+        WsTrace.T();
         Assert.Equal(new Vector(0, 0), AnnotationTransform.OffsetOf(badge));
 
         // Moving a rotated mark must not straighten it.
         AnnotationTransform.SetOffset(badge, new Vector(12, 8));
+        WsTrace.T();
         Assert.Equal(37, AnnotationTransform.AngleOf(badge), 3);
+        WsTrace.T();
         Assert.Equal(new Vector(12, 8), AnnotationTransform.OffsetOf(badge));
 
+        WsTrace.T();
         canvas.Children.Clear();
+        WsTrace.T();
         selField.SetValue(editor, null);
+        WsTrace.T();
         updateVisual.Invoke(editor, null);
     }
 
     private static void ZOrderReorderSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var canvas = (System.Windows.Controls.Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         var selField = type.GetField("_selected", NP)!;
+        WsTrace.T();
         var zmoveType = type.GetNestedType("ZMove", System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         var reorder = type.GetMethod("ReorderSelected", NP)!;
+        WsTrace.T();
         var undoAsync = type.GetMethod("UndoAsync", NP)!;
 
+        WsTrace.T();
         (System.Windows.UIElement a, System.Windows.UIElement b, System.Windows.UIElement c) Setup()
         {
             canvas.Children.Clear();
@@ -1156,23 +1350,32 @@ public class ThemedWindowTests
             canvas.Children.Add(a); canvas.Children.Add(b); canvas.Children.Add(c);
             return (a, b, c);
         }
+        WsTrace.T();
         void Move(System.Windows.UIElement sel, string move)
         {
             selField.SetValue(editor, sel);
             reorder.Invoke(editor, new[] { Enum.Parse(zmoveType, move) });
         }
+        WsTrace.T();
         System.Windows.UIElement[] Order() => canvas.Children.Cast<System.Windows.UIElement>().ToArray();
 
+        WsTrace.T();
         var (a, b, c) = Setup(); Move(b, "Front");    Assert.Equal(new[] { a, c, b }, Order());
+        WsTrace.T();
         (a, b, c) = Setup();     Move(b, "Back");     Assert.Equal(new[] { b, a, c }, Order());
+        WsTrace.T();
         (a, b, c) = Setup();     Move(a, "Forward");  Assert.Equal(new[] { b, a, c }, Order());
+        WsTrace.T();
         (a, b, c) = Setup();     Move(c, "Backward"); Assert.Equal(new[] { a, c, b }, Order());
 
         // Undo restores original order.
         (a, b, c) = Setup(); Move(b, "Front");
+        WsTrace.T();
         ((Task)undoAsync.Invoke(editor, null)!).GetAwaiter().GetResult();
+        WsTrace.T();
         Assert.Equal(new[] { a, b, c }, Order());
 
+        WsTrace.T();
         canvas.Children.Clear();
     }
 
@@ -1183,21 +1386,32 @@ public class ThemedWindowTests
         // a visible home — rotate / flip / image size on the crop bar, and add image, add
         // capture, add background, extract text and export GIF in the Image group's strip.
         Assert.Null(editor.FindName("MoreToolsButton"));
+        WsTrace.T();
         Assert.Null(editor.FindName("MoreToolsPopup"));
+        WsTrace.T();
         Assert.Null(editor.FindName("MoreToolPanel"));
+        WsTrace.T();
         Assert.Null(editor.FindName("MoreChromeBtn"));
+        WsTrace.T();
         Assert.Null(editor.FindName("MoreChromePopup"));
+        WsTrace.T();
         Assert.Null(editor.FindName("EmojiToolBtn"));
+        WsTrace.T();
         Assert.Null(editor.FindName("DragMeHandle"));
+        WsTrace.T();
         Assert.Empty(EditorShellContract.MoreToolOrder);
 
         // Survey's two separate effect tools are gone: Pixelate and Blur are two of the
         // four STYLES of the one re-editable redaction mark, so there is one strength
         // control on the strip instead of an S/M/L combo per tool.
         Assert.Null(editor.FindName("PixelateToolBtn"));
+        WsTrace.T();
         Assert.Null(editor.FindName("BlurToolBtn"));
+        WsTrace.T();
         Assert.Null(editor.FindName("EffectStrengthPanel"));
+        WsTrace.T();
         Assert.Null(editor.FindName("EffectStrengthBox"));
+        WsTrace.T();
         Assert.Null(editor.FindName("EffectStrengthLabel"));
         // Rectangle + Fill covers what the second rectangle button used to.
         Assert.Null(editor.FindName("FilledRectangleToolBtn"));
@@ -1207,7 +1421,9 @@ public class ThemedWindowTests
         // is the two panels read left to right. WinShot adds a FIFTH chip, Image, for the
         // one-shot things that act on the picture rather than adding a mark.
         var panSelect = (StackPanel)editor.FindName("PanSelectPanel")!;
+        WsTrace.T();
         var primary = (StackPanel)editor.FindName("ToolPanel")!;
+        WsTrace.T();
         string[] primaryOrder = panSelect.Children.OfType<FrameworkElement>()
             .Concat(primary.Children.OfType<FrameworkElement>())
             .Where(el => el.Visibility == Visibility.Visible)
@@ -1215,6 +1431,7 @@ public class ThemedWindowTests
             .Where(tag => !string.IsNullOrEmpty(tag))
             .Select(tag => tag!)
             .ToArray();
+        WsTrace.T();
         Assert.Equal(EditorShellContract.PrimaryToolOrder, primaryOrder);
 
         // Each category's 34px strip holds exactly the tools the contract lists, in order.
@@ -1224,6 +1441,7 @@ public class ThemedWindowTests
             Assert.Equal(EditorShellContract.ToolsIn(category), GroupToolTags(row));
         }
 
+        WsTrace.T();
         string[] namedControls =
         {
             "BtnUndo", "BtnRedo", "SelectToolBtn", "PanToolBtn",
@@ -1243,6 +1461,7 @@ public class ThemedWindowTests
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
             "BtnZoomIn", "BtnZoomOut", "FitMenuBtn", "FitPageItem", "FitWidthItem", "FitHeightItem",
         };
+        WsTrace.T();
         foreach (string name in namedControls)
         {
             var element = Assert.IsAssignableFrom<FrameworkElement>(editor.FindName(name));
@@ -1268,16 +1487,22 @@ public class ThemedWindowTests
             "BtnPin", "BtnCopy", "BtnCenter", "BtnSave",
             "AlignMenuBtn", "FormatOverflowBtn", "BtnZoomIn", "BtnZoomOut", "FitMenuBtn",
         };
+        WsTrace.T();
         foreach (string name in iconOnlyControls)
         {
             var element = Assert.IsAssignableFrom<FrameworkElement>(editor.FindName(name));
             Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(element)), name);
         }
 
+        WsTrace.T();
         var select = (RadioButton)editor.FindName("SelectToolBtn")!;
+        WsTrace.T();
         var pan = (RadioButton)editor.FindName("PanToolBtn")!;
+        WsTrace.T();
         var undo = (Button)editor.FindName("BtnUndo")!;
+        WsTrace.T();
         var copy = (Button)editor.FindName("BtnCopy")!;
+        WsTrace.T();
         foreach (Control control in new Control[] { select, pan, undo, copy })
         {
             control.ApplyTemplate();
@@ -1286,49 +1511,77 @@ public class ThemedWindowTests
             Assert.True(control.IsTabStop);
         }
 
+        WsTrace.T();
         Assert.Null(editor.FindName("EditorStyleBar"));
+        WsTrace.T();
         var groupBar = (Border)editor.FindName("EditorGroupBar")!;
         // Survey (RULED 2026-09-26 w44 "flip rows"): row 1 holds the group's TOOLS right of
         // the chips; row 2 — the 34px band that OVERLAYS the canvas — holds the settings, and
         // is only on screen when there are settings to show.
         var groupHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
+        WsTrace.T();
         var formatRow = (FrameworkElement)editor.FindName("EditorFormatRow")!;
+        WsTrace.T();
         var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
+        WsTrace.T();
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
+        WsTrace.T();
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
+        WsTrace.T();
         var color = (StackPanel)editor.FindName("ColorPanel")!;
+        WsTrace.T();
         var thickness = (StackPanel)editor.FindName("ThicknessPanel")!;
+        WsTrace.T();
         var fill = (StackPanel)editor.FindName("FillPanel")!;
+        WsTrace.T();
         var arrowStyle = (StackPanel)editor.FindName("ArrowStylePanel")!;
+        WsTrace.T();
         var redactStyle = (StackPanel)editor.FindName("RedactStylePanel")!;
+        WsTrace.T();
         var redactStrength = (StackPanel)editor.FindName("RedactStrengthPanel")!;
+        WsTrace.T();
         var magnify = (StackPanel)editor.FindName("MagnifyPanel")!;
+        WsTrace.T();
         var cropRatio = (StackPanel)editor.FindName("CropRatioPanel")!;
+        WsTrace.T();
         var cropTools = (StackPanel)editor.FindName("CropToolsPanel")!;
         // Survey's size control is an editable field plus a preset popover, not a combo
         // (components/AnnotationSizeControl.jsx); it replaced the sweep's SizeBox pair.
         var sizeInput = (TextBox)editor.FindName("SizeInput")!;
+        WsTrace.T();
         var sizeField = (Border)editor.FindName("SizeField")!;
+        WsTrace.T();
         var sizeHeading = (TextBlock)editor.FindName("SizePresetsHeading")!;
+        WsTrace.T();
         var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
+        WsTrace.T();
         var viewport = (Grid)editor.FindName("Viewport")!;
+        WsTrace.T();
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
+        WsTrace.T();
         var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
         // Survey's zoom rail replaced the sweep's label + menu-button pair, and Survey's
         // size field replaced the sweep's combo.
         var zoomBox = (TextBox)editor.FindName("ZoomBox")!;
+        WsTrace.T();
         Assert.Null(editor.FindName("ZoomMenuButton"));
+        WsTrace.T();
         Assert.Null(editor.FindName("ZoomLabel"));
+        WsTrace.T();
         Assert.Null(editor.FindName("SizeBox"));
+        WsTrace.T();
         Assert.Null(editor.FindName("SizeFieldBorder"));
 
         // Survey centres the tool cluster and hangs undo/redo and the props off it as
         // absolute side blocks. Equal star side columns give the same geometry, so the
         // tools stay put on every tool switch. ToolRowStabilitySmoke pins this.
         Assert.Equal(HorizontalAlignment.Center, primary.HorizontalAlignment);
+        WsTrace.T();
         Assert.Equal(HorizontalAlignment.Center, groupTools.HorizontalAlignment);
+        WsTrace.T();
         Assert.True(groupHost.MinWidth < 40,
             "Group tools must size to the visible chips, not a reserved blank slot.");
+        WsTrace.T();
         Assert.Equal(HorizontalAlignment.Stretch, groupBar.HorizontalAlignment);
         // Survey's two chrome tokens have fixed roles: #181c24 for every band that SPANS the
         // viewer width (top bar AppShell.jsx:1343, sub-row PDFViewer.jsx:32021) and #12151c
@@ -1336,77 +1589,121 @@ public class ThemedWindowTests
         // SurveySpacesRail.jsx:1229). The bottom band spans the width, so it shares the top
         // bar's material — that is what makes the chrome read as one system.
         var bottomBar = (Border)editor.FindName("EditorBottomBar")!;
+        WsTrace.T();
         var rail = (Border)editor.FindName("ZoomRail")!;
+        WsTrace.T();
         Assert.Equal(topToolbar.Background, bottomBar.Background);
+        WsTrace.T();
         Assert.Equal(groupBar.Background, bottomBar.Background);
+        WsTrace.T();
         Assert.NotEqual(rail.Background, bottomBar.Background);
         // Survey's Pan/Select block (AppShell.jsx:1468-1477/:1631): Select edge -> divider =
         // gap 6 + divider margin 4 = 10px; divider -> first chip = divider margin 4 +
         // block paddingRight 8 = 12px.
         var divider = panSelect.Children.OfType<System.Windows.Shapes.Rectangle>().Last();
+        WsTrace.T();
         Assert.Equal(10d, divider.Margin.Left + select.Margin.Right);
+        WsTrace.T();
         Assert.Equal(12d, divider.Margin.Right + panSelect.Margin.Right
             + ((Button)editor.FindName("DrawGroupBtn")!).Margin.Left);
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(groupBar, formatBar),
             "The settings sit in row 2, the band under the tool bar, like Survey (w44).");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(groupBar, secondary),
             "Colour and width sit in row 2 with the rest of the settings.");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(topToolbar, groupTools),
             "A group's tools sit in the tool bar right of the chips, like Survey (w44).");
+        WsTrace.T();
         Assert.False(IsLogicalDescendant(topToolbar, groupBar),
             "Row 2 lies over the canvas so it does not shrink the image.");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
             "Rotate must live next to Crop, not over the image.");
+        WsTrace.T();
         Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
             el => el.Name is "EditorStyleBar");
 
         // The pointer tool has no settings of its own, so row 2 disappears entirely, and
         // row 1 shows Select's Box / Lasso modes where a group's tools go (Survey w46).
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, groupHost.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("SelectModePanel")!).Visibility);
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("SelectModePanel")!));
         // No category open -> no band and no hairline at all: the top bar butts straight
         // onto the canvas, which is why both are #181c24 in Survey.
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        WsTrace.T();
         Assert.Equal(34d, groupBar.Height);
+        WsTrace.T();
         Assert.Equal(VerticalAlignment.Top, groupBar.VerticalAlignment);
+        WsTrace.T();
         Assert.DoesNotContain(primary.Children.OfType<FrameworkElement>(),
             el => el.Tag as string == "Step");
+        WsTrace.T();
         Assert.Contains(((StackPanel)editor.FindName("ShapeGroupPanel")!).Children.OfType<RadioButton>(),
             rb => rb.Tag as string == "Step");
+        WsTrace.T();
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        WsTrace.T();
         ((RadioButton)editor.FindName("PanToolBtn")!).IsChecked = true;
+        WsTrace.T();
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         double viewportHSelect = viewport.ActualHeight;
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, color.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, thickness.Visibility);
 
+        WsTrace.T();
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, groupHost.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         // Survey (UX 2026-09-22): a second click on the LIT chip is a no-op. While one of a
         // group's tools is armed its tools stay on screen, so the armed tool is never live
         // and unseeable; Pan, Select or Escape is how it is put down.
         var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
+        WsTrace.T();
         shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
+        WsTrace.T();
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             "Row 2 coming and going must not resize the canvas — it overlays it.");
         // Row 1: the group's tools hang off the chips' right edge, so the chips never move.
         double arrowToolsW = groupTools.ActualWidth;
+        WsTrace.T();
         double chipsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor).X;
+        WsTrace.T();
         Assert.True(groupTools.TranslatePoint(new Point(0, 0), editor).X >= chipsRight - 0.5,
             "The group's tools must sit right of the chips, not over them.");
         // Row 2 is centred under the chips (Survey w48 "rows 2/3 centred"). WinShot has only
@@ -1414,48 +1711,75 @@ public class ThemedWindowTests
         // the window's centre, where the chips are.
         double chipsCentre = primary.TranslatePoint(new Point(0, 0), editor).X
             + primary.ActualWidth / 2;
+        WsTrace.T();
         double arrowRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
+        WsTrace.T();
         Assert.True(Math.Abs(arrowRowCentre - chipsCentre) < 1,
             $"Row 2 is not centred under the chips: row={arrowRowCentre:0.##} chips={chipsCentre:0.##}");
+        WsTrace.T();
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, colorBar.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, formatBar.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, color.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, thickness.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, arrowStyle.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, fill.Visibility);
         // Arming a tool lights its group chip and swaps the 34px strip to that group's row.
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("DrawGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal("WIDTH", sizeHeading.Text);
 
+        WsTrace.T();
         Assert.Null(editor.FindName("EraserPartialBtn"));
         // Survey PASS 7 (board 13): the eraser's kind is a Partial / Whole toggle in row 2,
         // not a combo and not a chevron menu inside the eraser button.
         Assert.Null(editor.FindName("EraserModeBox"));
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, ((FrameworkElement)editor.FindName("EraserCaretBtn")!).Visibility);
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("FitEditorCombos",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, null);
+        WsTrace.T();
         var lineBox = (ComboBox)editor.FindName("LineStyleBox")!;
+        WsTrace.T();
         var arrowBox = (ComboBox)editor.FindName("ArrowStyleBox")!;
+        WsTrace.T();
         Assert.True(lineBox.Width > 40, $"Line style combo was not sized to content: {lineBox.Width}");
+        WsTrace.T();
         double lineWidth = lineBox.Width;
+        WsTrace.T();
         foreach (ComboBoxItem item in lineBox.Items.OfType<ComboBoxItem>())
             if (item.Tag as string == "dashed") { lineBox.SelectedItem = item; break; }
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(lineWidth, lineBox.Width);
+        WsTrace.T();
         double arrowWidth = arrowBox.Width;
+        WsTrace.T();
         foreach (ComboBoxItem item in arrowBox.Items.OfType<ComboBoxItem>())
             if (item.Tag as string == "none") { arrowBox.SelectedItem = item; break; }
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(arrowWidth, arrowBox.Width);
 
         // The size field takes any whole number, not just the old 2 / 4 / 6, and the preset
         // popover offers Survey's twelve widths, each row carrying its value.
         sizeInput.Text = "17";
+        WsTrace.T();
         Assert.Equal("17", sizeInput.Text);
+        WsTrace.T();
         Assert.Equal(
             AnnotationSize.Presets,
             sizePresets.Children.OfType<ButtonBase>().Select(b => (int)(double)b.Tag!).ToArray());
@@ -1467,12 +1791,17 @@ public class ThemedWindowTests
         // what the COMMIT does — typing 999 and walking away leaves 50, not a rejection and
         // not a 999-wide stroke.
         sizeInput.Text = "999";
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("CommitSizeInput",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, null);
+        WsTrace.T();
         ((RadioButton)editor.FindName("LineToolBtn")!).IsChecked = true;
+        WsTrace.T();
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        WsTrace.T();
         Assert.Equal("50", sizeInput.Text);
+        WsTrace.T();
         sizeInput.Text = "7";
 
         // The pen keeps a size of its own; text does NOT. Survey's Width box for text is the
@@ -1481,60 +1810,96 @@ public class ThemedWindowTests
         // and not the font-size list. So Text reads back what Arrow left, and Freehand is the
         // tool that proves the sizes are still kept apart.
         ((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked = true;
+        WsTrace.T();
         Assert.Equal("3", sizeInput.Text);
+        WsTrace.T();
         ((RadioButton)editor.FindName("TextToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Assert.Equal("50", sizeInput.Text);
+        WsTrace.T();
         var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
+        WsTrace.T();
         Assert.True(primaryRow.ActualHeight <= 48,
             $"Primary row grew instead of staying one line: {primaryRow.ActualHeight}");
+        WsTrace.T();
         Assert.True(topToolbar.ActualHeight <= 56,
             $"Top chrome grew extra rows with Text selected: {topToolbar.ActualHeight}");
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, ((TextBlock)editor.FindName("ThicknessLabel")!).Visibility);
         // Survey's Width control for text is a STROKE width (AppShell.jsx:2464-2482), so the
         // shared size box keeps the stroke presets; the font size lives in FontSizeBox, which
         // — like Survey's rich-text row — is only up while an editor is mounted.
         Assert.Contains(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 16);
+        WsTrace.T();
         Assert.DoesNotContain(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 72);
+        WsTrace.T();
         Assert.False(string.IsNullOrEmpty(sizeInput.Text));
+        WsTrace.T();
         var fontSizeBox = (ComboBox)editor.FindName("FontSizeBox")!;
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, thickness.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
         // Same rule as the Shape row above: row 2 centred under the chips.
         double textToolsW = groupTools.ActualWidth;
+        WsTrace.T();
         double textRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
+        WsTrace.T();
         Assert.True(Math.Abs(textRowCentre - chipsCentre) < 1,
             $"Text row 2 is not centred under the chips: row={textRowCentre:0.##} chips={chipsCentre:0.##}");
+        WsTrace.T();
         Assert.True(textToolsW < arrowToolsW - 8,
             $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
+        WsTrace.T();
         var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
+        WsTrace.T();
         Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Point sizeOrigin = sizeField.TranslatePoint(new Point(0, 0), editor);
         // Survey's rule between the colour and the width sits in this gap (showsColourRule).
         Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 24,
             $"Color well and size field have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
+        WsTrace.T();
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Text vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
+        WsTrace.T();
         var overflowBtn = (Button)editor.FindName("FormatOverflowBtn")!;
+        WsTrace.T();
         var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
+        WsTrace.T();
         var bold = (Button)editor.FindName("BoldBtn")!;
+        WsTrace.T();
         var textButtons = (FrameworkElement)editor.FindName("TextFormatButtons")!;
         // Survey's rich-text row is only portalled in while an editor is mounted, so with the
         // Text tool merely armed there is nothing on the strip left to overflow.
         Assert.Equal(Visibility.Collapsed, overflowBtn.Visibility);
+        WsTrace.T();
         Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name is "TextFormatButtons" or "BoldBtn" or "ItalicBtn");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(formatBar, textButtons),
             "B/I/U/S must stay on the primary strip, not the overflow flyout.");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(formatBar, bold));
+        WsTrace.T();
         Point textSave = BarRightEdge(editor);
+        WsTrace.T();
         Point textSec = secondary.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Assert.True(textSec.X + secondary.ActualWidth <= textSave.X + 0.5,
             $"Text secondary runs off the top bar: sec={textSec.X}+{secondary.ActualWidth} save={textSave.X}");
 
@@ -1542,73 +1907,115 @@ public class ThemedWindowTests
         // field commits on Enter or blur, so a keystroke walked away from is discarded, not
         // silently applied to the next mark.
         ((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked = true;
+        WsTrace.T();
         Assert.Equal("50", sizeInput.Text);
 
+        WsTrace.T();
         ((RadioButton)editor.FindName("CalloutToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Assert.Contains(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 1);
+        WsTrace.T();
         Assert.Contains(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 50);
+        WsTrace.T();
         Assert.DoesNotContain(sizePresets.Children.OfType<ButtonBase>(), b => (double?)b.Tag == 72);
         // Same rule for callouts: Survey's font-size dropdown belongs to the rich-text row,
         // which only exists while an editor is mounted (TextEditOverlay.jsx:278-318).
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, thickness.Visibility);
+        WsTrace.T();
         Point strokeOrigin = thickness.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Point saveOrigin = BarRightEdge(editor);
+        WsTrace.T();
         Assert.True(strokeOrigin.X + thickness.ActualWidth <= saveOrigin.X + 0.5,
             $"Callout size runs off the top bar: size={strokeOrigin.X}+{thickness.ActualWidth} save={saveOrigin.X}");
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Point formatOrigin = formatBar.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         saveOrigin = BarRightEdge(editor);
+        WsTrace.T();
         Assert.True(formatOrigin.X + formatBar.ActualWidth <= saveOrigin.X + 0.5,
             $"Format extras sit on Save as…: format={formatOrigin.X}+{formatBar.ActualWidth} save={saveOrigin.X}");
+        WsTrace.T();
         Point calloutSec = secondary.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Assert.True(calloutSec.X + secondary.ActualWidth <= saveOrigin.X + 0.5,
             $"Callout secondary runs off the top bar: sec={calloutSec.X}+{secondary.ActualWidth} save={saveOrigin.X}");
+        WsTrace.T();
         var done = (Button)editor.FindName("BtnDone")!;
+        WsTrace.T();
         Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
             $"Done overflows the window: done={doneOrigin.X}+{done.ActualWidth} win={editor.ActualWidth}");
         // Row 2 has the whole band to itself, so the callout's settings may well all fit; if
         // anything did go into "...", it is never the B / I / U / S letters.
         Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name is "TextFormatButtons" or "BoldBtn");
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(formatBar, textButtons));
+        WsTrace.T();
         Assert.NotNull(editor.FindName("BoldBtn"));
+        WsTrace.T();
         Assert.NotNull(editor.FindName("FontFamilyBox"));
+        WsTrace.T();
         Assert.NotNull(editor.FindName("AlignMenuBtn"));
+        WsTrace.T();
         Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName((Button)editor.FindName("BoldBtn")!)));
+        WsTrace.T();
         var italicGlyph = Assert.IsType<TextBlock>(((Button)editor.FindName("ItalicBtn")!).Content);
+        WsTrace.T();
         Assert.Equal(FontStyles.Italic, italicGlyph.FontStyle);
+        WsTrace.T();
         Assert.False(italicGlyph.RenderTransform is SkewTransform);
 
+        WsTrace.T();
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         var label = AnnotationFactory.CreateStyledTextLabel("Hello", Brushes.White, 16, TextStyle.Plain);
+        WsTrace.T();
         label.Tag = AnnotationData.ForText(new Point(10, 10), "Hello", TextStyle.Plain, 16, Colors.White);
+        WsTrace.T();
         canvas.Children.Add(label);
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("Select",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { label });
+        WsTrace.T();
         editor.UpdateLayout();
         // Survey shows the rich-text row solely while an editor is mounted, NOT when a text
         // annotation is merely selected (AppShell.jsx:1756 gates on bottomToolbarApi.richTextEditor).
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, color.Visibility);
         // Survey toolbarRows.js: in Select mode a picked mark brings ITS group's tools into
         // row 1 and its settings into row 2, so a picked text box reads Text / Callout up top
         // and its colour and width below. Box / Lasso give way to them.
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("SelectModePanel")!).Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
         // No category chip is gold under Select either (AppShell.jsx:1647/1666/1685/1719).
         Assert.Equal(
             ((SolidColorBrush)editor.FindResource("ChromeTextBrush")).Color,
             ((SolidColorBrush)((Button)editor.FindName("TextGroupBtn")!).Foreground).Color);
+        WsTrace.T();
         canvas.Children.Clear();
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("Select",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object?[] { null });
@@ -1616,15 +2023,25 @@ public class ThemedWindowTests
         // One redaction tool with a style menu and a continuous strength — no S/M/L radios,
         // and no colour well, because a redaction has no colour to pick.
         ((RadioButton)editor.FindName("RedactToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, redactStyle.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, redactStrength.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, color.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("EffectsGroupPanel")!).Visibility);
+        WsTrace.T();
         var redactBox = (ComboBox)editor.FindName("RedactStyleBox")!;
+        WsTrace.T();
         Point redactOrigin = redactBox.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Point redactSave = BarRightEdge(editor);
+        WsTrace.T();
         Assert.True(redactOrigin.X + redactBox.ActualWidth <= redactSave.X + 0.5,
             $"Redact style runs off the top bar: style={redactOrigin.X}+{redactBox.ActualWidth} save={redactSave.X}");
 
@@ -1633,70 +2050,111 @@ public class ThemedWindowTests
         // Shottr's row exists for — while the flag stayed live and every drag silently
         // produced one mark per word with no control on screen to say so.
         var textOnly = (CheckBox)editor.FindName("RedactTextOnlyCheck")!;
+        WsTrace.T();
         Assert.Same(redactStyle, textOnly.Parent);
+        WsTrace.T();
         var applyRedactStyle = typeof(EditorWindow).GetMethod("ApplyRedactStyle",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         applyRedactStyle.Invoke(editor, new object[] { RedactStyle.BlackOut });
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, redactStrength.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, redactStyle.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, textOnly.Visibility);
+        WsTrace.T();
         applyRedactStyle.Invoke(editor, new object[] { RedactStyle.Pixelate });
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, redactStrength.Visibility);
 
         // The magnifier is the third Effects mark and carries its own zoom, not a strength.
         ((RadioButton)editor.FindName("MagnifierToolBtn")!).IsChecked = true;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, magnify.Visibility);
+        WsTrace.T();
         Assert.Equal(Visibility.Collapsed, redactStrength.Visibility);
 
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("OnCropClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { editor, new RoutedEventArgs() });
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, cropRatio.Visibility);
         // Rotate / flip / image size / snap came out of Survey's "more" popup and live on
         // the crop bar now.
         Assert.Equal(Visibility.Visible, cropTools.Visibility);
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("RotateCcwBtn")!));
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("FlipHorizontalBtn")!));
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("FlipVerticalBtn")!));
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("ResizeImageBtn")!));
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("SnapToEdgesCheck")!));
+        WsTrace.T();
         Assert.True(IsLogicalDescendant(cropTools, (DependencyObject)editor.FindName("ImageSizeLabel")!));
+        WsTrace.T();
         var cropPanel = (FrameworkElement)editor.FindName("CropPanel")!;
+        WsTrace.T();
         cropPanel.Visibility = Visibility.Visible;
+        WsTrace.T();
         PackEditorFormat(editor);
+        WsTrace.T();
         Button applyCrop = LogicalTreeHelper.GetChildren(cropPanel).OfType<Button>()
             .First(b => AutomationProperties.GetName(b) == "Apply crop");
+        WsTrace.T();
         Assert.True(applyCrop.IsVisible && applyCrop.Parent == cropPanel,
             "Apply crop must stay on the strip; overflow Don't crop / ratio first.");
+        WsTrace.T();
         Point applyOrigin = applyCrop.TranslatePoint(new Point(0, 0), editor);
+        WsTrace.T();
         Point cropSave = BarRightEdge(editor);
+        WsTrace.T();
         Assert.True(applyOrigin.X + applyCrop.ActualWidth <= cropSave.X + 0.5,
             $"Apply crop runs off the top bar: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
+        WsTrace.T();
         Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name == "CropCancelBtn");
 
         // A group chip opens its own strip and arms that strip's first tool; Image is the
         // one that arms nothing, so clicking it cannot drop the user into a crop.
         ((Button)editor.FindName("DrawGroupBtn")!).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("DrawGroupPanel")!).Visibility);
+        WsTrace.T();
         Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
+        WsTrace.T();
         ((Button)editor.FindName("ImageGroupBtn")!).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.True(((RadioButton)editor.FindName("FreehandToolBtn")!).IsChecked);
 
+        WsTrace.T();
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
         // The zoom readout is written in one place, on every view change — the old label +
         // combo pair went stale after a wheel zoom and never came back. The percentages
         // GLIDE now, so the tween is forced to land in one frame rather than raced.
         var animations = Motion.AnimationsEnabled;
+        WsTrace.T();
         Motion.AnimationsEnabled = () => false;
+        WsTrace.T();
         try
         {
             typeof(EditorWindow).GetMethod("ZoomAt",
@@ -1705,6 +2163,7 @@ public class ThemedWindowTests
             Assert.Equal("200%", zoomBox.Text);
         }
         finally { Motion.AnimationsEnabled = animations; }
+        WsTrace.T();
         Assert.False(string.IsNullOrWhiteSpace(
             AutomationProperties.GetHelpText((FrameworkElement)editor.FindName("FitMenuBtn")!)));
 
@@ -1714,20 +2173,31 @@ public class ThemedWindowTests
         // Save as… / Done pair off the right edge and no way to drag narrower. Every open
         // path clamps, not just the grow: this editor came up the History/CLI way.
         var work = SystemParameters.WorkArea;
+        WsTrace.T();
         Assert.True(editor.MinWidth <= work.Width + 0.5,
             $"MinWidth {editor.MinWidth} exceeds the {work.Width:0} DIP work area.");
+        WsTrace.T();
         Assert.True(editor.MinHeight <= work.Height + 0.5,
             $"MinHeight {editor.MinHeight} exceeds the {work.Height:0} DIP work area.");
+        WsTrace.T();
         Assert.True(editor.MinWidth > 0 && editor.MinHeight > 0);
 
+        WsTrace.T();
         editor.Width = EditorShellContract.MinimumEditorLogicalWidth;
+        WsTrace.T();
         editor.UpdateLayout();
+        WsTrace.T();
         Assert.True(topToolbar.ActualWidth <= editor.ActualWidth);
+        WsTrace.T();
         Assert.True(primary.ActualHeight <= 42, $"Primary tools wrapped at minimum width: {primary.ActualHeight}");
+        WsTrace.T();
         ToolbarFitsAtMinimumWidth(editor);
+        WsTrace.T();
         ContextRowNeverCoversTheFinishPair(editor);
+        WsTrace.T();
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
 
+        WsTrace.T();
         MarqueeSelectsEveryIntersectingAnnotation(editor);
     }
 
@@ -1748,7 +2218,9 @@ public class ThemedWindowTests
     /// </summary>
     private static string[] GroupToolTags(DependencyObject root)
     {
+        WsTrace.T();
         var tags = new List<string>();
+        WsTrace.T();
         void Walk(DependencyObject node)
         {
             foreach (object child in LogicalTreeHelper.GetChildren(node))
@@ -1763,47 +2235,67 @@ public class ThemedWindowTests
                 }
             }
         }
+        WsTrace.T();
         Walk(root);
+        WsTrace.T();
         return tags.ToArray();
     }
 
     private static void PackEditorFormat(EditorWindow editor)
     {
+        WsTrace.T();
         var pack = typeof(EditorWindow).GetMethod("PackFormatOverflow",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         var frame = new DispatcherFrame();
+        WsTrace.T();
         editor.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
             pack.Invoke(editor, null);
             frame.Continue = false;
         });
+        WsTrace.T();
         Dispatcher.PushFrame(frame);
+        WsTrace.T();
         editor.UpdateLayout();
     }
 
     private static bool IsLogicalDescendant(DependencyObject root, DependencyObject child)
     {
+        WsTrace.T();
         for (DependencyObject? d = child; d is not null; d = LogicalTreeHelper.GetParent(d))
             if (ReferenceEquals(d, root)) return true;
+        WsTrace.T();
         return false;
     }
 
     private static void MarqueeSelectsEveryIntersectingAnnotation(EditorWindow editor)
     {
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         canvas.Children.Clear();
         // Both marks stay inside the 80x50 source: Survey clamps the marquee to the page
         // viewBox, so a band dragged past the image edge stops at the edge.
         var a = new System.Windows.Shapes.Rectangle { Width = 30, Height = 30, Fill = Brushes.Red };
+        WsTrace.T();
         var b = new System.Windows.Shapes.Rectangle { Width = 20, Height = 20, Fill = Brushes.Blue };
+        WsTrace.T();
         Canvas.SetLeft(a, 5); Canvas.SetTop(a, 5);
+        WsTrace.T();
         Canvas.SetLeft(b, 50); Canvas.SetTop(b, 10);
+        WsTrace.T();
         a.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
+        WsTrace.T();
         b.Tag = new AnnotationData { Type = AnnotationData.TypeRectangle };
+        WsTrace.T();
         canvas.Children.Add(a);
+        WsTrace.T();
         canvas.Children.Add(b);
+        WsTrace.T();
         editor.UpdateLayout();
 
+        WsTrace.T();
         typeof(EditorWindow).GetField("_marqueeStart",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(editor, new Point(0, 0));
@@ -1812,15 +2304,20 @@ public class ThemedWindowTests
         typeof(EditorWindow).GetField("_marqueeArmed",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(editor, true);
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("EndMarquee",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { new Point(140, 60) });
 
+        WsTrace.T();
         var selection = (System.Collections.IList)typeof(EditorWindow).GetField("_selection",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
+        WsTrace.T();
         Assert.Equal(2, selection.Count);
+        WsTrace.T();
         canvas.Children.Clear();
+        WsTrace.T();
         typeof(EditorWindow).GetMethod("Select",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, new object[] { null! });
@@ -1851,13 +2348,19 @@ public class ThemedWindowTests
     /// </summary>
     private static void ContextRowNeverCoversTheFinishPair(EditorWindow editor)
     {
+        WsTrace.T();
         var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
+        WsTrace.T();
         var overflowPanel = (StackPanel)editor.FindName("FormatOverflowPanel")!;
+        WsTrace.T();
         var check = typeof(EditorWindow).GetMethod("CheckToolButton",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
+        WsTrace.T();
         double width = editor.Width;
+        WsTrace.T();
         int overflowed = 0;
+        WsTrace.T();
         try
         {
             // The narrowest real case: a 1920x1080 display at 200 % is 960 DIP.
@@ -1896,10 +2399,13 @@ public class ThemedWindowTests
 
     private static void ToolbarFitsAtMinimumWidth(EditorWindow editor)
     {
+        WsTrace.T();
         var primaryRow = (Grid)editor.FindName("ToolbarPrimaryRow")!;
+        WsTrace.T();
         var check = typeof(EditorWindow).GetMethod("CheckToolButton",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
+        WsTrace.T();
         foreach (EditorTool tool in Enum.GetValues<EditorTool>())
         {
             check.Invoke(editor, new object[] { tool });
@@ -1931,53 +2437,81 @@ public class ThemedWindowTests
     /// </summary>
     private static void RedactionObjectSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         var source = (SD.Bitmap)type.GetField("_source", NP)!.GetValue(editor)!;
+        WsTrace.T();
         var undoAsync = type.GetMethod("UndoAsync", NP)!;
+        WsTrace.T();
         var redoAsync = type.GetMethod("RedoAsync", NP)!;
 
         // Undo/redo refuse to run while the source is still loading, so let the initial
         // image land first — otherwise every assertion below reads a no-op.
         WaitForEditorOperation(editor, type.GetField("_sourceOperationActive", NP)!);
+        WsTrace.T();
         canvas.Children.Clear();
+        WsTrace.T();
         SD.Color before = source.GetPixel(12, 12);
+        WsTrace.T();
         var area = new Rect(4, 4, 40, 24);
 
+        WsTrace.T();
         var mark = (System.Windows.Shapes.Rectangle)type.GetMethod("BeginRedaction", NP)!
             .Invoke(editor, new object[] { area })!;
+        WsTrace.T();
         canvas.Children.Add(mark);
+        WsTrace.T();
         type.GetMethod("UpdateRedactionPreview", NP)!.Invoke(editor, new object[] { mark, area, true });
+        WsTrace.T();
         mark.Tag = AnnotationData.ForRedaction(area, RedactStyle.Pixelate, 45, seed: 7);
+        WsTrace.T();
         type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { mark, true });
 
+        WsTrace.T();
         Assert.Single(canvas.Children);
         // The whole point: nothing was baked into the picture.
         Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
+        WsTrace.T();
         Assert.IsType<ImageBrush>(mark.Fill);
 
         // Restyling to Black Out is one undoable step and repaints flat black.
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { mark });
+        WsTrace.T();
         Assert.True((bool)type.GetMethod("RestyleSelectedRedaction", NP)!
             .Invoke(editor, new object?[] { RedactStyle.BlackOut, null, true })!);
+        WsTrace.T();
         var blackedOut = Assert.IsType<SolidColorBrush>(mark.Fill);
+        WsTrace.T();
         Assert.Equal(Colors.Black, blackedOut.Color);
 
+        WsTrace.T();
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.IsType<ImageBrush>(mark.Fill);
+        WsTrace.T();
         WaitForTask((Task)redoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.IsType<SolidColorBrush>(mark.Fill);
 
         // Two more undos take the restyle and then the mark itself off the canvas; the
         // source is untouched at every step.
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Empty(canvas.Children);
+        WsTrace.T();
         Assert.Equal(before.ToArgb(), source.GetPixel(12, 12).ToArgb());
 
+        WsTrace.T();
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        WsTrace.T();
         canvas.Children.Clear();
     }
 
@@ -1989,20 +2523,30 @@ public class ThemedWindowTests
     /// </summary>
     private static void EyedropperPickerLatchSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var latch = type.GetField("_reopenPickerAfterSample", NP)!;
+        WsTrace.T();
         var check = type.GetMethod("CheckToolButton", NP)!;
 
+        WsTrace.T();
         type.GetMethod("OnPickerEyedropper", NP)!
             .Invoke(editor, new object?[] { null, new RoutedEventArgs() });
+        WsTrace.T();
         Assert.True((bool)latch.GetValue(editor)!);
 
+        WsTrace.T();
         check.Invoke(editor, new object?[] { EditorTool.Freehand });
+        WsTrace.T();
         Assert.False((bool)latch.GetValue(editor)!);
 
+        WsTrace.T();
         ((Popup)editor.FindName("ColorPickerPopup")!).IsOpen = false;
+        WsTrace.T();
         check.Invoke(editor, new object?[] { EditorTool.Select });
     }
 
@@ -2014,44 +2558,70 @@ public class ThemedWindowTests
     /// </summary>
     private static void MagnifierZoomUndoSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         var undoAsync = type.GetMethod("UndoAsync", NP)!;
+        WsTrace.T();
         var redoAsync = type.GetMethod("RedoAsync", NP)!;
 
+        WsTrace.T();
         WaitForEditorOperation(editor, type.GetField("_sourceOperationActive", NP)!);
+        WsTrace.T();
         canvas.Children.Clear();
 
+        WsTrace.T();
         var area = new Rect(4, 4, 40, 24);
+        WsTrace.T();
         var bubble = (System.Windows.Shapes.Rectangle)type.GetMethod("BeginMagnifier", NP)!
             .Invoke(editor, new object[] { area })!;
+        WsTrace.T();
         canvas.Children.Add(bubble);
+        WsTrace.T();
         bubble.Tag = AnnotationData.ForMagnifier(
             area, MagnifierLayout.DefaultFocus(area), MagnifierLayout.DefaultScale, Colors.White, 3);
+        WsTrace.T();
         type.GetMethod("PushAddElement", NP)!.Invoke(editor, new object[] { bubble, true });
+        WsTrace.T();
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { bubble });
 
+        WsTrace.T();
         var slider = (Slider)editor.FindName("MagnifySlider")!;
+        WsTrace.T();
         var released = type.GetMethod("OnMagnifyReleased", NP)!;
+        WsTrace.T();
         foreach (double zoom in new[] { 4d, 6d })
         {
             slider.Value = zoom;
             released.Invoke(editor, new object?[] { slider, new RoutedEventArgs() });
         }
 
+        WsTrace.T();
         static double Zoom(FrameworkElement fe) => ((AnnotationData)fe.Tag!).Zoom ?? 0;
 
+        WsTrace.T();
         Assert.Equal(6d, Zoom(bubble));
+        WsTrace.T();
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Equal(4d, Zoom(bubble));
+        WsTrace.T();
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Equal(MagnifierLayout.DefaultScale, Zoom(bubble));
+        WsTrace.T();
         WaitForTask((Task)redoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Equal(4d, Zoom(bubble));
 
+        WsTrace.T();
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        WsTrace.T();
         canvas.Children.Clear();
     }
 
@@ -2062,17 +2632,27 @@ public class ThemedWindowTests
     /// </summary>
     private static void AnnotationClipboardSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
+        WsTrace.T();
         var select = type.GetMethod("Select", NP)!;
+        WsTrace.T();
         var copy = type.GetMethod("CopySelectedAnnotations", NP)!;
+        WsTrace.T();
         var paste = type.GetMethod("PasteAnnotations", NP)!;
+        WsTrace.T();
         var duplicate = type.GetMethod("DuplicateSelectedAnnotations", NP)!;
+        WsTrace.T();
         var undoAsync = type.GetMethod("UndoAsync", NP)!;
 
+        WsTrace.T();
         canvas.Children.Clear();
+        WsTrace.T();
         var original = new System.Windows.Shapes.Rectangle
         {
             Width = 30,
@@ -2083,34 +2663,51 @@ public class ThemedWindowTests
                 AnnotationData.TypeRectangle, new Rect(10, 10, 30, 20),
                 Colors.Red, 3, ShapeFillMode.None),
         };
+        WsTrace.T();
         Canvas.SetLeft(original, 10);
+        WsTrace.T();
         Canvas.SetTop(original, 10);
+        WsTrace.T();
         canvas.Children.Add(original);
 
         // Nothing selected: there is nothing to copy, and Ctrl+C falls through to the image.
         select.Invoke(editor, new object?[] { null });
+        WsTrace.T();
         Assert.False((bool)copy.Invoke(editor, Array.Empty<object>())!);
 
+        WsTrace.T();
         select.Invoke(editor, new object?[] { original });
+        WsTrace.T();
         Assert.True((bool)copy.Invoke(editor, Array.Empty<object>())!);
 
+        WsTrace.T();
         paste.Invoke(editor, Array.Empty<object>());
+        WsTrace.T();
         Assert.Equal(2, canvas.Children.Count);
+        WsTrace.T();
         var pasted = (FrameworkElement)canvas.Children[1];
         // Offset from the original, and carrying its own copy of the data.
         Assert.Equal(32d, AnnotationTransform.OffsetOf(pasted).X, 3);
+        WsTrace.T();
         Assert.NotSame(original.Tag, pasted.Tag);
 
+        WsTrace.T();
         duplicate.Invoke(editor, Array.Empty<object>());
+        WsTrace.T();
         Assert.Equal(3, canvas.Children.Count);
 
         // Each is exactly one undo step.
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Equal(2, canvas.Children.Count);
+        WsTrace.T();
         WaitForTask((Task)undoAsync.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Single(canvas.Children);
 
+        WsTrace.T();
         select.Invoke(editor, new object?[] { null });
+        WsTrace.T();
         canvas.Children.Clear();
     }
 
@@ -2129,15 +2726,20 @@ public class ThemedWindowTests
 
     private static void TextAndCounterSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NP =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        WsTrace.T();
         var type = typeof(EditorWindow);
+        WsTrace.T();
         var canvas = (Canvas)editor.FindName("AnnotationCanvas")!;
 
         // The editor box takes returns and wraps; a caption that runs long used to march
         // off the edge of the picture.
         var box = AnnotationFactory.CreateTextEditor(Brushes.White, 20);
+        WsTrace.T();
         Assert.True(box.AcceptsReturn);
+        WsTrace.T();
         Assert.Equal(TextWrapping.Wrap, box.TextWrapping);
 
         // One line reads the same centred or left; a paragraph does not. Survey wraps the
@@ -2145,43 +2747,66 @@ public class ThemedWindowTests
         // the one inside it.
         var oneLine = GlyphsOf(AnnotationFactory.CreateStyledTextLabel(
             "Caption", Brushes.White, 20, TextStyle.Plain));
+        WsTrace.T();
         Assert.Equal(TextAlignment.Center, oneLine.TextAlignment);
+        WsTrace.T();
         var paragraph = GlyphsOf(AnnotationFactory.CreateStyledTextLabel(
             string.Join(LineBreak, "one", "two", "three"), Brushes.White, 20, TextStyle.Plain));
+        WsTrace.T();
         Assert.Equal(TextAlignment.Left, paragraph.TextAlignment);
 
+        WsTrace.T();
         canvas.Children.Clear();
+        WsTrace.T();
         var badge = AnnotationFactory.CreateStepBadge(1, Colors.Red, 4, letters: false);
+        WsTrace.T();
         badge.Tag = AnnotationData.ForStep(new Point(5, 5), 1, Colors.Red, 4);
+        WsTrace.T();
         canvas.Children.Add(badge);
+        WsTrace.T();
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { badge });
 
+        WsTrace.T();
         var retype = type.GetMethod("TryRetypeStepNumber", NP)!;
+        WsTrace.T();
         var nextStep = type.GetField("_nextStep", NP)!;
+        WsTrace.T();
         Assert.True((bool)retype.Invoke(editor, new object[] { Key.D1 })!);
+        WsTrace.T();
         Assert.True((bool)retype.Invoke(editor, new object[] { Key.D2 })!);
 
+        WsTrace.T();
         string caption = badge.Children.OfType<TextBlock>().First().Text;
+        WsTrace.T();
         Assert.Equal("12", caption);
+        WsTrace.T();
         Assert.Equal(13, (int)nextStep.GetValue(editor)!);
 
         // The whole run is ONE undo entry, not one per digit.
         type.GetMethod("CommitStepRetype", NP)!.Invoke(editor, Array.Empty<object>());
+        WsTrace.T();
         WaitForTask((Task)type.GetMethod("UndoAsync", NP)!.Invoke(editor, Array.Empty<object>())!);
+        WsTrace.T();
         Assert.Equal("1", badge.Children.OfType<TextBlock>().First().Text);
+        WsTrace.T();
         Assert.Equal(2, (int)nextStep.GetValue(editor)!);
 
         // A letter is not a digit, so it never reaches the badge.
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { badge });
+        WsTrace.T();
         Assert.False((bool)retype.Invoke(editor, new object[] { Key.A })!);
 
+        WsTrace.T();
         type.GetMethod("Select", NP)!.Invoke(editor, new object?[] { null });
+        WsTrace.T();
         canvas.Children.Clear();
     }
 
     private static void SaveProjectSmoke(EditorWindow editor, SettingsService settings, HistoryService history)
     {
+        WsTrace.T();
         string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"winshot-project-{Guid.NewGuid():N}.winshot");
+        WsTrace.T();
         try
         {
             var saveProjectAsync = typeof(EditorWindow).GetMethod(
@@ -2210,22 +2835,33 @@ public class ThemedWindowTests
     /// </summary>
     private static void EditorFitsTallImageSmoke(SettingsService settings, HistoryService history)
     {
+        WsTrace.T();
         const int imgW = 1000;
+        WsTrace.T();
         var tall = new SD.Bitmap(imgW, 4000);
+        WsTrace.T();
         using (var g = SD.Graphics.FromImage(tall)) g.Clear(SD.Color.CornflowerBlue);
 
+        WsTrace.T();
         var editor = EditorWindow.CreateForCapture(tall, settings, history);
+        WsTrace.T();
         editor.Show();
+        WsTrace.T();
         for (int i = 0; i < 6; i++) PumpDispatcherOnce();
 
+        WsTrace.T();
         var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
+        WsTrace.T();
         double vw = viewport.ActualWidth, vh = viewport.ActualHeight;
+        WsTrace.T();
         double zoom = (double)typeof(EditorWindow)
             .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
 
+        WsTrace.T();
         editor.Close();
 
+        WsTrace.T();
         Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
         // A tall scrolling capture opens fit-WHOLE — the ENTIRE image (both dimensions) must be
         // visible, not opened at 1:1 or fit-to-width showing only the top slice.
@@ -2242,12 +2878,16 @@ public class ThemedWindowTests
     /// </summary>
     private static void EditorGrowLandsOnItsTargetSmoke(SettingsService settings, HistoryService history)
     {
+        WsTrace.T();
         const System.Reflection.BindingFlags NS =
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
 
+        WsTrace.T();
         var animations = Motion.AnimationsEnabled;
+        WsTrace.T();
         Motion.AnimationsEnabled = () => false; // the tween applies its end frame inline
         EditorWindow? editor = null;
+        WsTrace.T();
         try
         {
             var origin = new SD.Rectangle(40, 40, 200, 130);
@@ -2304,27 +2944,42 @@ public class ThemedWindowTests
     /// </summary>
     private static void EditorFitsSmallImageSmoke(SettingsService settings, HistoryService history)
     {
+        WsTrace.T();
         const int imgW = 80, imgH = 50;
+        WsTrace.T();
         var small = new SD.Bitmap(imgW, imgH);
+        WsTrace.T();
         using (var g = SD.Graphics.FromImage(small)) g.Clear(SD.Color.CornflowerBlue);
 
+        WsTrace.T();
         var editor = EditorWindow.CreateForCapture(small, settings, history);
+        WsTrace.T();
         editor.Show();
+        WsTrace.T();
         for (int i = 0; i < 6; i++) PumpDispatcherOnce();
 
+        WsTrace.T();
         var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
+        WsTrace.T();
         double vw = viewport.ActualWidth, vh = viewport.ActualHeight;
+        WsTrace.T();
         double zoom = (double)typeof(EditorWindow)
             .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(editor)!;
+        WsTrace.T();
         var fitMenuBtn = (Button)editor.FindName("FitMenuBtn")!;
+        WsTrace.T();
         var zoomBox = (TextBox)editor.FindName("ZoomBox")!;
 
+        WsTrace.T();
         editor.Close();
 
+        WsTrace.T();
         Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
+        WsTrace.T();
         Assert.True(Math.Abs(zoom - 1.0) < 1e-9,
             $"tiny capture was not opened at 100%: zoom={zoom}, viewport={vw}x{vh}");
+        WsTrace.T();
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
         // Survey's fit insets are unchanged — PAD=20 per side horizontally, GAP=16 folded into
@@ -2332,12 +2987,16 @@ public class ThemedWindowTests
         // just capped at 1.0 now. Check the uncapped arithmetic still matches, so a real
         // regression in the formula cannot hide behind the cap.
         double surveyFit = Math.Min((vw - 40) / imgW, vh / (imgH + 32));
+        WsTrace.T();
         Assert.True(surveyFit > 1.0,
             $"this capture is meant to be one Survey's formula would magnify: surveyFit={surveyFit}");
+        WsTrace.T();
         Assert.Equal(Math.Min(1.0, surveyFit), zoom, 9);
         // Survey's fit trigger tooltip is `Page fit: ${label}` in every state (AppShell.jsx:3072).
         Assert.Equal("Page fit: Fit page", fitMenuBtn.ToolTip);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, zoomBox.Visibility);
+        WsTrace.T();
         Assert.EndsWith("%", zoomBox.Text);
     }
 
@@ -2347,18 +3006,24 @@ public class ThemedWindowTests
     /// </summary>
     private static Point BarRightEdge(EditorWindow editor)
     {
+        WsTrace.T();
         var bar = (FrameworkElement)editor.FindName("TopToolbar")!;
+        WsTrace.T();
         return bar.TranslatePoint(new Point(bar.ActualWidth - 6, 0), editor);
     }
 
     private static void PinSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         var onPin = typeof(EditorWindow).GetMethod(
             "OnPin",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         onPin.Invoke(editor, new object[] { editor, new RoutedEventArgs() });
+        WsTrace.T();
         PumpDispatcherOnce();
 
+        WsTrace.T();
         foreach (WF.Form form in WF.Application.OpenForms.Cast<WF.Form>().ToList())
         {
             if (form is FastPinWindow)
@@ -2368,11 +3033,15 @@ public class ThemedWindowTests
 
     private static void BackgroundFromEditorSmoke(EditorWindow editor)
     {
+        WsTrace.T();
         var onBackground = typeof(EditorWindow).GetMethod(
             "OnAddBackground",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         onBackground.Invoke(editor, new object[] { editor, new RoutedEventArgs() });
+        WsTrace.T();
         PumpDispatcherOnce();
+        WsTrace.T();
         foreach (Window window in Application.Current.Windows.Cast<Window>().ToList())
             if (window is BackgroundComposerWindow)
                 window.Close();
@@ -2380,36 +3049,55 @@ public class ThemedWindowTests
 
     private static void QuickActionButtonSmoke(SettingsService settings)
     {
+        WsTrace.T();
         using var overlay = new FastQuickActionsWindow(NewBitmap(), settings);
+        WsTrace.T();
         bool pin = false;
+        WsTrace.T();
         bool edit = false;
+        WsTrace.T();
         bool ocr = false;
+        WsTrace.T();
         bool background = false;
 
+        WsTrace.T();
         overlay.PinRequested += _ => pin = true;
+        WsTrace.T();
         overlay.EditRequested += _ => edit = true;
+        WsTrace.T();
         overlay.OcrRequested += _ => ocr = true;
+        WsTrace.T();
         overlay.BackgroundRequested += _ => background = true;
 
+        WsTrace.T();
         InvokeQuickAction(overlay, "Pin");
+        WsTrace.T();
         InvokeQuickAction(overlay, "Open Annotate");
         // OCR and Background remain local features but moved to the overflow menu to keep
         // the verified hover shell uncluttered. Exercise their legacy keyboard paths here.
         InvokeKey(overlay, System.Windows.Forms.Keys.O);
+        WsTrace.T();
         InvokeKey(overlay, System.Windows.Forms.Keys.B);
 
+        WsTrace.T();
         Assert.True(pin);
+        WsTrace.T();
         Assert.True(edit);
+        WsTrace.T();
         Assert.True(ocr);
+        WsTrace.T();
         Assert.True(background);
     }
 
     private static void InvokeQuickAction(FastQuickActionsWindow overlay, string tipPrefix)
     {
+        WsTrace.T();
         var buttonsField = typeof(FastQuickActionsWindow).GetField(
             "_buttons",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         var buttons = (System.Collections.IEnumerable)buttonsField.GetValue(overlay)!;
+        WsTrace.T();
         foreach (var button in buttons)
         {
             var tip = (string)button.GetType().GetProperty("Tip")!.GetValue(button)!;
@@ -2421,26 +3109,32 @@ public class ThemedWindowTests
             return;
         }
 
+        WsTrace.T();
         throw new InvalidOperationException($"Quick action not found: {tipPrefix}");
     }
 
     private static void InvokeKey(FastQuickActionsWindow overlay, System.Windows.Forms.Keys key)
     {
+        WsTrace.T();
         var handler = typeof(FastQuickActionsWindow).GetMethod(
             "OnOverlayKeyDown",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        WsTrace.T();
         handler.Invoke(overlay, new object?[] { overlay, new System.Windows.Forms.KeyEventArgs(key) });
     }
 
     private static void WaitForEditorOperation(EditorWindow editor, System.Reflection.FieldInfo activeField)
     {
+        WsTrace.T();
         var deadline = DateTime.UtcNow.AddSeconds(5);
+        WsTrace.T();
         while ((bool)activeField.GetValue(editor)! && DateTime.UtcNow < deadline)
         {
             PumpDispatcherOnce();
             Thread.Sleep(10);
         }
 
+        WsTrace.T();
         Assert.False((bool)activeField.GetValue(editor)!);
     }
 
@@ -2451,7 +3145,9 @@ public class ThemedWindowTests
     /// </summary>
     private static void WaitUntilHidden(Window window)
     {
+        WsTrace.T();
         var deadline = DateTime.UtcNow.AddSeconds(5);
+        WsTrace.T();
         while (window.IsVisible && DateTime.UtcNow < deadline)
         {
             PumpDispatcherOnce();
@@ -2467,26 +3163,33 @@ public class ThemedWindowTests
     /// </summary>
     private static void WaitForCondition(Func<bool> settled, string because)
     {
+        WsTrace.T();
         var deadline = DateTime.UtcNow.AddSeconds(10);
+        WsTrace.T();
         while (!settled() && DateTime.UtcNow < deadline)
         {
             PumpDispatcherOnce();
             Thread.Sleep(10);
         }
 
+        WsTrace.T();
         Assert.True(settled(), because);
     }
 
     private static void WaitForTask(Task task)
     {
+        WsTrace.T();
         var deadline = DateTime.UtcNow.AddSeconds(5);
+        WsTrace.T();
         while (!task.IsCompleted && DateTime.UtcNow < deadline)
         {
             PumpDispatcherOnce();
             Thread.Sleep(10);
         }
 
+        WsTrace.T();
         Assert.True(task.IsCompleted);
+        WsTrace.T();
         task.GetAwaiter().GetResult();
     }
 
@@ -2498,16 +3201,21 @@ public class ThemedWindowTests
     /// </summary>
     private static void SettingsSectionMotionSmoke(SettingsWindow window)
     {
+        WsTrace.T();
         var list = (System.Windows.Controls.ListBox)window.FindName("SectionList")!;
+        WsTrace.T();
         string[] paneNames =
         [
             "SectionGeneral", "SectionShortcuts", "SectionQuickAccess", "SectionRecording",
             "SectionScreenshots", "SectionAnnotate", "SectionAdvanced", "SectionAbout",
         ];
 
+        WsTrace.T();
         Assert.Contains("General", window.Title);
 
+        WsTrace.T();
         var general = (ScrollViewer)window.FindName("SectionGeneral")!;
+        WsTrace.T();
         var screenshots = (ScrollViewer)window.FindName("SectionScreenshots")!;
 
         // Animated pass. Only what the swap does SYNCHRONOUSLY is asserted here: the
@@ -2515,9 +3223,13 @@ public class ThemedWindowTests
         // after that is a WPF animation clock running on wall time, and an assertion that
         // races it fails the moment another test class puts load on the machine.
         list.SelectedIndex = 4;
+        WsTrace.T();
         PumpDispatcherOnce();
+        WsTrace.T();
         Assert.Contains("Screenshots", window.Title);
+        WsTrace.T();
         Assert.Equal(Visibility.Visible, screenshots.Visibility);
+        WsTrace.T();
         Assert.True(screenshots.IsHitTestVisible);
         // The panes are overlapping siblings and WPF hit-tests at Opacity 0 exactly as it
         // does at 1, so a fading-out pane that is still hit-testable swallows every click
@@ -2527,7 +3239,9 @@ public class ThemedWindowTests
         // Deterministic pass. With animation off every transition collapses to its end
         // state inside one dispatcher turn, so the end state can be asserted exactly.
         Func<bool> animations = Motion.AnimationsEnabled;
+        WsTrace.T();
         Motion.AnimationsEnabled = () => false;
+        WsTrace.T();
         try
         {
             list.SelectedIndex = 0;
@@ -2574,6 +3288,7 @@ public class ThemedWindowTests
         {
             Motion.AnimationsEnabled = animations;
         }
+        WsTrace.T();
         Assert.Contains("General", window.Title);
     }
 
@@ -2583,38 +3298,60 @@ public class ThemedWindowTests
     /// </summary>
     private static void SettingsLiveApplyAndDefaultsSmoke(SettingsWindow window, SettingsService settings)
     {
+        WsTrace.T();
         var list = (ListBox)window.FindName("SectionList")!;
+        WsTrace.T();
         var overlayCheck = (CheckBox)window.FindName("ScreenshotShowOverlayCheck")!;
+        WsTrace.T();
         var pinCheck = (CheckBox)window.FindName("ScreenshotPinCheck")!;
+        WsTrace.T();
         var freeze = (CheckBox)window.FindName("FreezeScreenCheck")!;
+        WsTrace.T();
         var template = (TextBox)window.FindName("TemplateBox")!;
 
         // A toggle applies without touching Done.
         bool before = settings.Current.ScreenshotPin;
+        WsTrace.T();
         pinCheck.IsChecked = !before;
+        WsTrace.T();
         window.FlushLiveApplyForTest();
+        WsTrace.T();
         Assert.Equal(!before, settings.Current.ScreenshotPin);
 
         // A typed field does NOT — that is what Done is still for, and what Escape warns about.
         string storedTemplate = settings.Current.FileNameTemplate;
+        WsTrace.T();
         Assert.False(window.HasUncommittedFieldEditsForTest());
+        WsTrace.T();
         template.Text = storedTemplate + " draft";
+        WsTrace.T();
         Assert.True(window.HasUncommittedFieldEditsForTest());
+        WsTrace.T();
         window.FlushLiveApplyForTest();
+        WsTrace.T();
         Assert.Equal(storedTemplate, settings.Current.FileNameTemplate);
+        WsTrace.T();
         template.Text = storedTemplate;
+        WsTrace.T();
         Assert.False(window.HasUncommittedFieldEditsForTest());
 
         // Restore defaults resets the tab it is on, and nothing else.
         settings.Current.FreezeScreen = false;
+        WsTrace.T();
         freeze.IsChecked = false;
+        WsTrace.T();
         overlayCheck.IsChecked = false;
+        WsTrace.T();
         window.FlushLiveApplyForTest();
+        WsTrace.T();
         Assert.False(settings.Current.ScreenshotShowOverlay);
 
+        WsTrace.T();
         list.SelectedIndex = 0;                       // General owns the after-capture matrix
         PumpDispatcherOnce();
+        WsTrace.T();
         window.RestoreSectionDefaults(0);
+        WsTrace.T();
         Assert.True(settings.Current.ScreenshotShowOverlay);   // reset
         Assert.False(settings.Current.FreezeScreen);           // Screenshots tab untouched
 
@@ -2624,26 +3361,37 @@ public class ThemedWindowTests
         // The Shortcuts tab is nothing BUT hotkey boxes, and WriteToggleSettings does not
         // reach them: the button used to show a confirm, clear every box and write nothing.
         settings.Current.HotkeyCaptureRegion = "Ctrl+Shift+F9";
+        WsTrace.T();
         list.SelectedIndex = 1;
+        WsTrace.T();
         PumpDispatcherOnce();
+        WsTrace.T();
         window.RestoreSectionDefaults(1);
+        WsTrace.T();
         Assert.Equal(new Settings().HotkeyCaptureRegion, settings.Current.HotkeyCaptureRegion);
     }
 
     private static void PumpDispatcherOnce()
     {
+        WsTrace.T();
         var frame = new System.Windows.Threading.DispatcherFrame();
+        WsTrace.T();
         System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.Background,
             new Action(() => frame.Continue = false));
+        WsTrace.T();
         System.Windows.Threading.Dispatcher.PushFrame(frame);
     }
 
     private static SD.Bitmap NewBitmap()
     {
+        WsTrace.T();
         var bitmap = new SD.Bitmap(80, 50);
+        WsTrace.T();
         using var g = SD.Graphics.FromImage(bitmap);
+        WsTrace.T();
         g.Clear(SD.Color.CornflowerBlue);
+        WsTrace.T();
         return bitmap;
     }
 
@@ -2663,5 +3411,14 @@ public class ThemedWindowTests
             try { System.IO.File.Delete(Path); }
             catch { }
         }
+    }
+}
+
+internal static class WsTrace
+{
+    public static void T([System.Runtime.CompilerServices.CallerLineNumber] int line = 0, [System.Runtime.CompilerServices.CallerMemberName] string m = "")
+    {
+        System.Console.Error.WriteLine($"TR {m}:{line}");
+        System.Console.Error.Flush();
     }
 }
