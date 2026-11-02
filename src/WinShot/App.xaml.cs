@@ -410,6 +410,9 @@ public partial class App : Application
         // The desktop-icon row's checked state is only true while WinShot is holding them
         // hidden, and a capture guard can change that behind the menu's back.
         menu.Opening += (_, _) => RefreshDesktopIconsMenuItem();
+        // Start decoding the Recent captures thumbnails while the pointer is still on its
+        // way down the menu, so the submenu usually opens with them already there.
+        menu.Opening += (_, _) => WarmRecentThumbnails();
         // Re-rasterized on every open, not once: the tray menu follows the pointer, and a
         // 100 % raster opening on the 150 % monitor is the whole defect.
         ScaleMenuGlyphs(menu);
@@ -526,30 +529,27 @@ public partial class App : Application
 
     /// <summary>The last few captures, with their own thumbnails in the icon gutter that is
     /// now there anyway.</summary>
+    /// <remarks>
+    /// The submenu opens at once and the thumbnails fill in. It used to decode six
+    /// full-size captures on the UI thread every time the pointer crossed "Recent captures",
+    /// which froze the whole tray menu for the better part of a second on 4K shots. They are
+    /// now decoded off-thread (started as soon as the tray menu itself opens, so they are
+    /// usually ready by the time the submenu is reached) and kept until the file changes.
+    /// </remarks>
     private void PopulateRecentCaptures()
     {
         if (_recentsMenuItem is null) return;
-        foreach (WF.ToolStripItem item in _recentsMenuItem.DropDownItems)
-            item.Image?.Dispose();
+        // The images belong to the thumbnail cache, not to the rows.
         _recentsMenuItem.DropDownItems.Clear();
 
-        List<string> recent;
-        try
-        {
-            recent = _history.GetItems().Take(RecentCaptureCount).ToList();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Reading recent captures for the tray menu failed", ex);
-            recent = [];
-        }
-
+        List<string> recent = ReadRecentCaptures();
         if (recent.Count == 0)
         {
             _recentsMenuItem.DropDownItems.Add(new WF.ToolStripMenuItem("No captures yet") { Enabled = false });
             return;
         }
 
+        int size = MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96);
         foreach (string path in recent)
         {
             string file = path;
@@ -557,23 +557,140 @@ public partial class App : Application
             {
                 // Same gutter as the Segoe glyphs above it, so it has to be the same size at
                 // the same DPI — a fixed 16 px thumbnail sits small in a 24 px gutter at 150%.
-                Image = TryLoadThumbnail(file, MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96)),
+                Image = CachedRecentThumbnail(file, size),
+                Tag = new RecentCaptureRow(file),
             };
             item.Click += (_, _) => EditFromHistory(file);
             _recentsMenuItem.DropDownItems.Add(item);
+        }
+        WarmRecentThumbnails(recent, size);
+    }
+
+    /// <summary>Marks a recent-capture row, so a late thumbnail finds its row. A tag of its
+    /// own type keeps ScaleMenuGlyphs (which reads string tags as glyphs) away from it.</summary>
+    private sealed record RecentCaptureRow(string Path);
+
+    private List<string> ReadRecentCaptures()
+    {
+        try
+        {
+            return _history.GetItems().Take(RecentCaptureCount).ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Reading recent captures for the tray menu failed", ex);
+            return [];
         }
     }
 
     private const int RecentCaptureCount = 6;
 
+    private readonly Dictionary<(string Path, int Size), (DateTime Stamp, SD.Image Image)> _recentThumbnails = new();
+    private bool _recentThumbnailsLoading;
+
+    private SD.Image? CachedRecentThumbnail(string path, int size)
+    {
+        if (!_recentThumbnails.TryGetValue((path, size), out var entry))
+            return null;
+        if (entry.Stamp == SafeLastWrite(path))
+            return entry.Image;
+        _recentThumbnails.Remove((path, size));
+        entry.Image.Dispose();
+        return null;
+    }
+
+    /// <summary>Decodes whichever of <paramref name="recent"/> has no thumbnail yet, off the UI
+    /// thread, then hands each to its row if the submenu is still showing it.</summary>
+    private async void WarmRecentThumbnails(List<string>? recent = null, int? size = null)
+    {
+        if (_recentThumbnailsLoading || _recentsMenuItem is null)
+            return;
+        recent ??= ReadRecentCaptures();
+        int px = size ?? MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96);
+
+        // Drop what fell off the list, so the cache never outgrows the menu.
+        var keep = new HashSet<string>(recent, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _recentThumbnails.Keys.Where(k => k.Size != px || !keep.Contains(k.Path)).ToList())
+        {
+            _recentThumbnails[key].Image.Dispose();
+            _recentThumbnails.Remove(key);
+        }
+
+        List<string> missing = recent
+            .Where(path => !HistoryService.IsVideo(path) && CachedRecentThumbnail(path, px) is null)
+            .ToList();
+        if (missing.Count == 0)
+            return;
+
+        _recentThumbnailsLoading = true;
+        try
+        {
+            var loaded = await Task.Run(() => missing
+                .AsParallel()
+                .Select(path => (Path: path, Stamp: SafeLastWrite(path), Image: TryLoadThumbnail(path, px)))
+                .ToList());
+            foreach (var (path, stamp, image) in loaded)
+            {
+                if (image is null)
+                    continue;
+                if (_recentThumbnails.ContainsKey((path, px)))
+                {
+                    image.Dispose();
+                    continue;
+                }
+                _recentThumbnails[(path, px)] = (stamp, image);
+                if (_recentsMenuItem is null)
+                    continue;
+                foreach (WF.ToolStripItem row in _recentsMenuItem.DropDownItems)
+                {
+                    if (row.Tag is RecentCaptureRow r &&
+                        string.Equals(r.Path, path, StringComparison.OrdinalIgnoreCase))
+                        row.Image = image;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Loading tray menu thumbnails failed", ex);
+        }
+        finally
+        {
+            _recentThumbnailsLoading = false;
+        }
+    }
+
+    private static DateTime SafeLastWrite(string path)
+    {
+        try { return File.GetLastWriteTimeUtc(path); }
+        catch { return DateTime.MinValue; }
+    }
+
+    /// <summary>
+    /// A <paramref name="size"/>-pixel square with the capture fitted inside it. Read from a
+    /// copy in memory so the file is never held open (History can rename or delete it while
+    /// the menu is up), and fitted rather than stretched: GetThumbnailImage(size, size)
+    /// squashed every wide capture into a square.
+    /// </summary>
     private static SD.Image? TryLoadThumbnail(string path, int size)
     {
         try
         {
-            if (!File.Exists(path) || Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+            if (!File.Exists(path))
                 return null;
-            using var source = new SD.Bitmap(path);
-            return source.GetThumbnailImage(size, size, null, IntPtr.Zero);
+            using var stream = new MemoryStream(File.ReadAllBytes(path));
+            using var source = SD.Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: false);
+            double scale = Math.Min(size / (double)Math.Max(1, source.Width), size / (double)Math.Max(1, source.Height));
+            int w = Math.Max(1, (int)Math.Round(source.Width * scale));
+            int h = Math.Max(1, (int)Math.Round(source.Height * scale));
+            var thumb = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = SD.Graphics.FromImage(thumb))
+            {
+                g.Clear(SD.Color.Transparent);
+                g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.Half;
+                g.DrawImage(source, new SD.Rectangle((size - w) / 2, (size - h) / 2, w, h));
+            }
+            return thumb;
         }
         catch (Exception ex)
         {
