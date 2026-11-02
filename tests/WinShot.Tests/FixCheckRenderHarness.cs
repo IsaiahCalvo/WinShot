@@ -58,7 +58,10 @@ public class FixCheckRenderHarness
                 var viewport = (FrameworkElement)editor.FindName("Viewport")!;
                 EditorWindow.PointerArgs P(double x, double y) =>
                     new(new Point(x, y), canvas.TranslatePoint(new Point(x, y), viewport), MouseButton.Left, 1);
-                void Down(double x, double y) { editor.PointerDown(P(x, y)); Pump(1); }
+                // Capturing the mouse on a press makes WPF raise a move at the REAL cursor, which
+                // for this off-screen window is thousands of px away; a move back to the press
+                // point undoes that before anything is judged.
+                void Down(double x, double y) { editor.PointerDown(P(x, y)); Pump(1); editor.PointerMove(P(x, y)); Pump(1); }
                 void Move(double x, double y) { editor.PointerMove(P(x, y)); Pump(2); }
                 void Up(double x, double y) { editor.PointerUp(P(x, y)); Pump(3); }
                 void Drag(double x1, double y1, double x2, double y2)
