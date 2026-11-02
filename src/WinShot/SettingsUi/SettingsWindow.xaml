@@ -76,10 +76,19 @@
                         <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                                 CornerRadius="{StaticResource RadiusInput}">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                            <Grid>
+                                <!-- The same hover layer and timing as the combo boxes beside these fields. -->
+                                <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
+                                        Background="{StaticResource ElevatedBrush}"/>
+                                <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
                                           VerticalAlignment="Center"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                            </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
                                 <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
