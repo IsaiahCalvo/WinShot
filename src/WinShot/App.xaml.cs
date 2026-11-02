@@ -205,6 +205,7 @@ public partial class App : Application
             }
             catch (Exception ex) { Log.Error("Selector prewarm failed (non-fatal)", ex); }
         }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        KeepFreezeSourceWarm();
         // Electron apps keep renderer accessibility enabled while this mutex exists —
         // required for Alt-hover element detection to see their full element tree.
         WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();
@@ -317,8 +318,86 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// The selector opens already frozen only when the Desktop Duplication device is warm.
+    /// It no longer ages out, but Windows still takes it away: a display change, the lock
+    /// screen or a UAC prompt, and sleep all lose the duplication, and the next capture then
+    /// paid the cold open. Each of those re-arms it a moment after Windows settles.
+    /// </summary>
+    private void KeepFreezeSourceWarm()
+    {
+        try
+        {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnFreezeSourceLost;
+            Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
+            Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not watch for display and session changes (non-fatal)", ex);
+        }
+    }
+
+    private void StopKeepingFreezeSourceWarm()
+    {
+        try
+        {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnFreezeSourceLost;
+            Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
+            Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        }
+        catch
+        {
+            // Exiting anyway.
+        }
+    }
+
+    private void OnFreezeSourceLost(object? sender, EventArgs e) => RewarmFreezeSourceSoon();
+
+    private void OnSessionSwitch(object? sender, Microsoft.Win32.SessionSwitchEventArgs e)
+    {
+        if (e.Reason is Microsoft.Win32.SessionSwitchReason.SessionUnlock
+            or Microsoft.Win32.SessionSwitchReason.ConsoleConnect
+            or Microsoft.Win32.SessionSwitchReason.RemoteConnect)
+            RewarmFreezeSourceSoon();
+    }
+
+    private void OnPowerModeChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume)
+            RewarmFreezeSourceSoon();
+    }
+
+    private int _rewarmPending;
+
+    /// <summary>Re-arms the freeze source after Windows has had a couple of seconds to
+    /// finish the change (monitors re-enumerate, the desktop comes back). Collapses a burst
+    /// of events into one, and never runs while a recording holds the outputs.</summary>
+    private void RewarmFreezeSourceSoon()
+    {
+        if (Interlocked.Exchange(ref _rewarmPending, 1) == 1)
+            return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(2000).ConfigureAwait(false);
+                Interlocked.Exchange(ref _rewarmPending, 0);
+                if (_recording is { IsRecording: true })
+                    return;
+                CaptureService.PrewarmFreezeSource();
+            }
+            catch (Exception ex)
+            {
+                Interlocked.Exchange(ref _rewarmPending, 0);
+                Log.Error("Re-warming the freeze source failed (non-fatal)", ex);
+            }
+        });
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
+        StopKeepingFreezeSourceWarm();
         // Persist in-memory settings (e.g. FileNamer's counter) without re-triggering hotkey registration.
         _settings.Changed -= RegisterHotkeys;
         // A second instance shuts down before Load() ever runs — nothing to persist there.
@@ -1971,6 +2050,10 @@ public partial class App : Application
     /// says a recording is live and one click on it ends the recording.</summary>
     private void OnRecordingActiveChanged(bool recording)
     {
+        // A take releases the duplication device (the recorder needs the outputs); build it
+        // again once the take is over, so the next screenshot still opens frozen.
+        if (!recording)
+            RewarmFreezeSourceSoon();
         if (_tray is null)
             return;
         _tray.Icon = recording ? TrayIconFactory.CreateRecording() : TrayIconFactory.Create();

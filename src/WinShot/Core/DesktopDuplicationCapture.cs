@@ -21,20 +21,17 @@ internal static class DesktopDuplicationCapture
     private const int AccessDeniedCooldownMs = 10 * 60 * 1000;
     private const uint DxgiErrorWaitTimeout = 0x887A0027;
     private const uint HResultAccessDenied = 0x80070005;
-    // Ten minutes, not the thirty seconds this started at. The selector's freeze frame is
-    // taken from a WARM duplication device now (TryCaptureWarm), and warm-vs-cold is the
-    // whole difference between the overlay opening already frozen and it opening blank and
-    // fading: 13 ms against 155 ms, measured on a 3847x2291 three-monitor desktop by
-    // tools/bench-capture. At thirty seconds practically every capture found a cold device,
-    // so the fast path never ran. The memory this holds (one D3D device plus a
-    // full-monitor staging texture per display, ~35 MB here) still goes back when the
-    // machine is actually idle — which is what the eviction was added for.
-    private const int IdleEvictMs = 10 * 60 * 1000;
+    // No idle eviction. The device used to be dropped after ten idle minutes (thirty
+    // seconds before that), and warm-vs-cold is the whole difference between the selector
+    // opening already frozen and it opening clear and fading: 13 ms against 155 ms on a
+    // three-monitor desktop (tools/bench-capture). A screenshot tool is mostly used after
+    // long idle stretches, so the eviction made the slow open the common one. Isaiah chose
+    // instant over the ~35 MB the device holds (2026-11-02). It is still rebuilt after a
+    // failure, a display change or an unlock (App keeps it warm), and released for a
+    // recording and on exit.
     private static readonly object Gate = new();
     private static readonly Dictionary<string, DisplayCapture> Displays = new(StringComparer.OrdinalIgnoreCase);
     private static long _disabledUntilTick;
-    private static long _lastUseTick;
-    private static int _evictionScheduled;
     // Starts in probation (1) — see WindowsGraphicsCaptureCapture._lastAttemptFailed.
     private static int _lastAttemptFailed = 1;
     private static int _probeActive;
@@ -85,8 +82,6 @@ internal static class DesktopDuplicationCapture
                 return false;
 
             bitmap = CaptureRegionCore(screenRect);
-            Interlocked.Exchange(ref _lastUseTick, Environment.TickCount64);
-            ScheduleIdleEviction();
             return true;
         }
         catch (Exception ex)
@@ -236,8 +231,6 @@ internal static class DesktopDuplicationCapture
             try
             {
                 Bitmap bitmap = CaptureRegionCore(screenRect);
-                Interlocked.Exchange(ref _lastUseTick, Environment.TickCount64);
-                ScheduleIdleEviction();
                 return bitmap;
             }
             catch (Exception ex)
@@ -370,31 +363,6 @@ internal static class DesktopDuplicationCapture
         foreach (var display in Displays.Values)
             display.Dispose();
         Displays.Clear();
-    }
-
-    /// <summary>
-    /// Disposes the cached D3D device + duplication interface ~30s after the last capture so a
-    /// tray-resident WinShot doesn't hold tens of MB of GPU/driver memory open forever (it
-    /// previously freed these only on app exit). One-shot delay, not a polling timer, so it
-    /// adds zero idle CPU; the next capture simply recreates the display via GetDisplay.
-    /// </summary>
-    private static void ScheduleIdleEviction()
-    {
-        if (Interlocked.Exchange(ref _evictionScheduled, 1) == 1)
-            return;
-
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(IdleEvictMs).ConfigureAwait(false);
-            lock (Gate)
-            {
-                Interlocked.Exchange(ref _evictionScheduled, 0);
-                if (Environment.TickCount64 - Interlocked.Read(ref _lastUseTick) >= IdleEvictMs)
-                    Reset();
-                else if (Displays.Count > 0)
-                    ScheduleIdleEviction();
-            }
-        });
     }
 
     private sealed class DisplayCapture : IDisposable
