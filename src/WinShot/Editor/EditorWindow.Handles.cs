@@ -969,6 +969,8 @@ public partial class EditorWindow : Window
             _rotateTravelled = false;
         }
         Viewport.CaptureMouse();
+        _edgeStart = null;
+        _edgeLastGood = null;
         if (_adjustingCrop || _handleKind == HandleKind.Crop)
         {
             // Crop adjust: snapshot the pending rect so a cancel/abort can restore it.
@@ -978,11 +980,19 @@ public partial class EditorWindow : Window
         if (_selection.Count > 1 && handle is >= 0 and <= RotateHandleIndex && GroupCanResize())
         {
             BeginGroupResize(handle, pos);
+            if (_groupResize is not null)
+            {
+                Rect start = GroupBoundsNow();
+                _edgeStart = start.IsEmpty ? null : start;
+                _edgeLastGood = pos;
+            }
             return;
         }
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
         {
             _resizeBefore = CaptureResizeSnapshot(_selected, meta);
+            _edgeStart = AnnotationCanvas.Children.Contains(fe) ? GetCanvasBounds(fe) : null;
+            _edgeLastGood = pos;
             // Survey freezes originalProps.angle at pointer-down and never re-reads it during
             // the drag (useSVGInteraction.js:4220-4258). Reading it live mixes frames, and the
             // shape walks away under the cursor.
@@ -1028,11 +1038,84 @@ public partial class EditorWindow : Window
             DragCropHandle(pos);
             return;
         }
-        if (_groupResize is not null)
+        bool group = _groupResize is not null;
+        void ApplyAt(Point p)
         {
-            DragGroupResize(pos);
+            if (group) DragGroupResize(p); else DragResizeTo(p);
+        }
+        ApplyAt(pos);
+        // Page-edge rule 4: a resize or turn stops at the image edge, the same as a move.
+        // Every branch of DragResizeTo and DragGroupResize works from the frozen pre-drag
+        // snapshot, so applying it again at an earlier pointer spot is exact. A lone callout
+        // keeps its own drop rules; a group is held as one piece by its union box.
+        if (_edgeStart is not Rect start || (!group && _handleKind == HandleKind.Callout)) return;
+        FrameworkElement? fe = _selected as FrameworkElement;
+        if (!group && fe is null) return;
+        bool Within() => group ? GroupWithinEdge(start) : MarkWithinEdge(fe!, start);
+        if (Within())
+        {
+            _edgeLastGood = pos;
             return;
         }
+        if (_edgeLastGood is not Point good)
+            return; // started outside what it may use (cannot happen); leave it alone
+        bool Fits(Point p)
+        {
+            ApplyAt(p);
+            return Within();
+        }
+        Point Toward(Point from, Point to)
+        {
+            if (Fits(to)) return to;
+            return from + (to - from) * PageEdgeMove.LastGood(t => Fits(from + (to - from) * t));
+        }
+        // A turn backs off along the pointer's path. A grabber slides: the across-the-edge
+        // part of the move stops and the along-the-edge part still follows the pointer.
+        Point stop;
+        if (_activeHandle == RotateHandleIndex)
+            stop = Toward(good, pos);
+        else
+        {
+            Point acrossX = Toward(good, new Point(pos.X, good.Y));
+            stop = Toward(acrossX, new Point(acrossX.X, pos.Y));
+        }
+        ApplyAt(stop);
+        _edgeLastGood = stop;
+    }
+
+    /// <summary>Page-edge rule 4: the box the mark had when the resize or turn began.</summary>
+    private Rect? _edgeStart;
+    /// <summary>The last pointer spot where the resize or turn stayed inside the edge.</summary>
+    private Point? _edgeLastGood;
+
+    private bool MarkWithinEdge(FrameworkElement fe, Rect start)
+    {
+        fe.UpdateLayout();
+        return PageEdgeMove.WithinAllowance(start, GetCanvasBounds(fe), _source.Width, _source.Height);
+    }
+
+    private bool GroupWithinEdge(Rect start)
+    {
+        Rect now = GroupBoundsNow();
+        return PageEdgeMove.WithinAllowance(start, now, _source.Width, _source.Height);
+    }
+
+    /// <summary>The union of the group members' boxes as they stand now, turns included.</summary>
+    private Rect GroupBoundsNow()
+    {
+        Rect union = Rect.Empty;
+        if (_groupResize is null) return union;
+        foreach (var m in _groupResize)
+        {
+            m.Element.UpdateLayout();
+            Rect b = GetCanvasBounds(m.Element);
+            if (!b.IsEmpty) union = union.IsEmpty ? b : Rect.Union(union, b);
+        }
+        return union;
+    }
+
+    private void DragResizeTo(Point pos)
+    {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
             return;
 

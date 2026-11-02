@@ -293,6 +293,80 @@ public class FixCheckRenderHarness
                 log.AppendLine($"rotate after marks={Boxes()}");
                 WindowShot("10b-group-rotate-after.png");
 
+                // 11. Page-edge rules carried from the page-edge branch: grabbers stay whole at
+                // the image edge, and a resize or turn stops at the edge (single and group).
+                string BoxesIn(Rect area)
+                {
+                    var parts = new List<string>();
+                    foreach (UIElement el in canvas.Children)
+                        if (el is FrameworkElement { Tag: AnnotationData d } fe
+                            && VisualTreeHelper.GetDescendantBounds(fe) is var lb && !lb.IsEmpty)
+                        {
+                            var gb = fe.TransformToAncestor(canvas).TransformBounds(lb);
+                            if (area.Contains(new Point(gb.X + gb.Width / 2, gb.Y + gb.Height / 2)))
+                                parts.Add($"{d.Type}:{gb.X:0.#},{gb.Y:0.#},{gb.Width:0.#}x{gb.Height:0.#}");
+                        }
+                    return string.Join(" ", parts);
+                }
+                // 11a. One rectangle near the bottom; its corner pulled 70 px past the bottom
+                // edge and 80 px right. The bottom should stop at 560, the right still follow.
+                Deselect();
+                Tool(EditorTool.Rectangle); Drag(40, 470, 120, 530);
+                Tool(EditorTool.Select);
+                Down(80, 500); Up(80, 500); Pump(3);
+                var area11a = new Rect(0, 440, 400, 200);
+                log.AppendLine($"11a before {BoxesIn(area11a)}");
+                Drag(120, 530, 200, 600);
+                log.AppendLine($"11a after {BoxesIn(area11a)} (bottom should be <= 560, right ~200)");
+                WindowShot("11a-single-resize-edge.png");
+
+                // 11b. A mark at the very top: grabbers draw whole over the desk, rotate grip below.
+                Deselect();
+                Tool(EditorTool.Rectangle); Drag(620, 2, 720, 50);
+                Tool(EditorTool.Select);
+                Down(670, 26); Up(670, 26); Pump(3);
+                Shot("11b-top-edge-handles.png", new Rect(600, -30, 140, 130), 20);
+                var grip11 = (FrameworkElement)typeof(EditorWindow).GetField("_rotateThumb", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor)!;
+                log.AppendLine($"11b grip top={Canvas.GetTop(grip11):0.#} (below the mark means > 50)");
+
+                // 11c. Two marks, group corner dragged 80 px past the left edge: union stops at 0.
+                Deselect();
+                Tool(EditorTool.Rectangle); Drag(40, 380, 120, 430);
+                Tool(EditorTool.Ellipse); Drag(160, 380, 240, 440);
+                Tool(EditorTool.Select);
+                Drag(25, 365, 260, 455);
+                Pump(4);
+                var area11c = new Rect(0, 360, 300, 100);
+                Rect g11 = Frame();
+                log.AppendLine($"11c before frame={g11} {BoxesIn(area11c)}");
+                Drag(g11.Left, g11.Bottom, g11.Left - 80, g11.Bottom);
+                log.AppendLine($"11c after frame={Frame()} {BoxesIn(new Rect(-200, 300, 600, 200))} (left should be >= 0)");
+                WindowShot("11c-group-resize-edge.png");
+
+                // 11d. A wide group near the top turned 45 degrees by its grip: it stops at the
+                // last angle that keeps it inside the top edge.
+                Deselect();
+                Tool(EditorTool.Rectangle); Drag(300, 12, 420, 40);
+                Tool(EditorTool.Rectangle); Drag(440, 12, 560, 40);
+                Tool(EditorTool.Select);
+                Drag(290, 6, 575, 48);
+                Pump(4);
+                Point gd = new(Canvas.GetLeft(grip11) + grip11.Width / 2, Canvas.GetTop(grip11) + grip11.Height / 2);
+                Rect fd = Frame();
+                Point pd = new(fd.Left + fd.Width / 2, fd.Top + fd.Height / 2);
+                log.AppendLine($"11d grip={gd} visible={grip11.Visibility} frame={fd}");
+                Down(gd.X, gd.Y);
+                double r0 = Math.Atan2(gd.Y - pd.Y, gd.X - pd.X), rr = (gd - pd).Length;
+                for (int i = 1; i <= 9; i++)
+                {
+                    double a = r0 + (45.0 * Math.PI / 180) * i / 9;
+                    Move(pd.X + rr * Math.Cos(a), pd.Y + rr * Math.Sin(a));
+                }
+                double a45 = r0 + 45.0 * Math.PI / 180;
+                Up(pd.X + rr * Math.Cos(a45), pd.Y + rr * Math.Sin(a45));
+                log.AppendLine($"11d after {BoxesIn(new Rect(250, -200, 400, 400))} (every top should be >= 0)");
+                WindowShot("11d-group-rotate-edge.png");
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
