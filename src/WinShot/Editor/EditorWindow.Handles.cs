@@ -525,8 +525,12 @@ public partial class EditorWindow : Window
         var cursors = new[]
         {
             Cursors.Hand, Cursors.Hand,
-            Cursors.SizeNWSE, Cursors.SizeNESW, Cursors.SizeNWSE, Cursors.SizeNESW,
+            CornerCursor(0, Cursors.SizeNWSE), CornerCursor(1, Cursors.SizeNESW),
+            CornerCursor(2, Cursors.SizeNWSE), CornerCursor(3, Cursors.SizeNESW),
         };
+        Cursor CornerCursor(int corner, Cursor fallback) =>
+            ResizeArrowCursors.For(ResizeArrowCursors.PullAngleOf(corner), VisualTreeHelper.GetDpi(this).DpiScaleX)
+            ?? fallback;
         // Survey turns EVERY handle on the callout red together while the drag is heading
         // for a spot that would be rejected on release (HANDLE_RING_INVALID ef4444).
         var ring = _calloutDragInvalid
@@ -800,10 +804,16 @@ public partial class EditorWindow : Window
     /// 8-entry cursor ring rotated by <c>round(angle / 45) % 8</c>, so the cursor follows the
     /// annotation's own rotation. 'mtr' is the pointing hand; endpoint/bend/callout handles grab.
     /// </summary>
-    private static Cursor CursorForHandle(int index, double angleDegrees)
+    private Cursor CursorForHandle(int index, double angleDegrees)
     {
         // Survey handleCursors.js ROTATE_HANDLE_CURSOR: the pointing hand (Drawboard).
         if (index == RotateHandleIndex) return Cursors.Hand;
+        // Survey resizeArrowCursor: the arrow turned to the exact pull direction. The ring of
+        // system cursors below stays as the fallback, as the CSS keyword does in Survey.
+        if (index >= 0 && index < 8
+            && ResizeArrowCursors.For(ResizeArrowCursors.PullAngleOf(index) + angleDegrees,
+                VisualTreeHelper.GetDpi(this).DpiScaleX) is Cursor turned)
+            return turned;
         // WinShot thumb order 0=TL 1=TR 2=BR 3=BL 4=T 5=R 6=B 7=L maps onto Survey's ring
         // indices tl:0 mt:1 tr:2 mr:3 br:4 mb:5 bl:6 ml:7.
         int[] baseIndex = { 0, 2, 4, 6, 1, 3, 5, 7 };
