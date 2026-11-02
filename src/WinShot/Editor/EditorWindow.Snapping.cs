@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -72,6 +72,22 @@ public partial class EditorWindow
         _settings.Save();
         App.Toast(_settings.Current.EditorSnapping ? "Snapping on" : "Snapping off",
             "Shift+S turns it back. Alt+drag moves one mark without snapping.");
+        SyncSnappingButton();
+    }
+
+    private void OnSnappingToggleClick(object sender, RoutedEventArgs e) => ToggleSnapping();
+
+    /// <summary>Survey snappingLabel + footerBtn colour: text-1 while on, text-3 and a slash while off.</summary>
+    private void SyncSnappingButton()
+    {
+        if (SnappingBtn is null) return;
+        bool on = SnappingOn;
+        SnappingBtn.Foreground = (Brush)FindResource(on ? "TextPrimaryBrush" : "TextSecondaryBrush");
+        SnappingOffSlash.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        SnappingBtn.ToolTip = on
+            ? "Snapping on (Shift+S). Hold Alt while dragging to skip it"
+            : "Snapping off (Shift+S)";
+        System.Windows.Automation.AutomationProperties.SetItemStatus(SnappingBtn, on ? "On" : "Off");
     }
 
     // ---- Survey SnapGuidesLayer: dashed guides while a dragged mark lines up ----

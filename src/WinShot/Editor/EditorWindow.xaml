@@ -1430,6 +1430,25 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
+                        <!-- Survey's snapping switch (AppShell.jsx:5320-5334, SnappingToggle.jsx): the rail
+                             footer's magnet, bright while snapping is on, dim with a slash while it is off.
+                             Owner 2026-10-22 in Survey, Isaiah 2026-11-02 here: "need to be able to turn on
+                             snapping"; Shift+S alone was not findable. -->
+                        <Button x:Name="SnappingBtn" Style="{StaticResource RailButton}" Click="OnSnappingToggleClick"
+                                AutomationProperties.Name="Snapping"
+                                ToolTipService.Placement="Left" ToolTipService.HorizontalOffset="-8">
+                            <Viewbox Width="16" Height="16">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M5 3h5v9a2 2 0 0 0 4 0V3h5v9a7 7 0 0 1-14 0V3Z" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <Path Data="M5 7h5M14 7h5" StrokeThickness="1.5"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <Path x:Name="SnappingOffSlash" Data="M3 21 21 3" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Visibility="Collapsed"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
                     </StackPanel>
                 </Border>
             </Border>

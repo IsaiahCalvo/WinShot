@@ -339,6 +339,7 @@ public partial class EditorWindow : Window
             AddKeysToToolTips();
         };
         Loaded += (_, _) => WireSelectModeMenu();
+        Loaded += (_, _) => SyncSnappingButton();
         SetEraserPartial(_settings.Current.EraserPartial);
         // Survey re-runs the CURRENT non-manual zoom mode on every layout change
         // (applyLayoutDrivenZoom, PDFViewer.jsx:7999-8009); only MANUAL opts out.

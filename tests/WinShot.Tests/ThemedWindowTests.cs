@@ -1267,6 +1267,7 @@ public class ThemedWindowTests
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
             "BtnZoomIn", "BtnZoomOut", "FitMenuBtn", "FitPageItem", "FitWidthItem", "FitHeightItem",
+            "SnappingBtn",
         };
         foreach (string name in namedControls)
         {
@@ -2755,6 +2756,9 @@ public class ThemedWindowTests
         var onClick = typeof(ButtonBase).GetMethod("OnClick",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         editor.Dispatcher.UnhandledException += OnUnhandled;
+        var snappingOn = typeof(EditorWindow).GetProperty("SnappingOn",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        bool snapBefore = (bool)snappingOn.GetValue(editor)!;
         int pressed = 0;
         try
         {
@@ -2782,6 +2786,12 @@ public class ThemedWindowTests
             // the way a user's would.
             onClick.Invoke((ButtonBase)editor.FindName("FitPageItem")!, null);
             PumpDispatcherOnce();
+            // The rail's snapping switch flips a saved setting; one press must flip it, and a
+            // second puts it back for the editors that follow.
+            Assert.NotEqual(snapBefore, (bool)snappingOn.GetValue(editor)!);
+            onClick.Invoke((ButtonBase)editor.FindName("SnappingBtn")!, null);
+            PumpDispatcherOnce();
+            Assert.Equal(snapBefore, (bool)snappingOn.GetValue(editor)!);
         }
         finally
         {
