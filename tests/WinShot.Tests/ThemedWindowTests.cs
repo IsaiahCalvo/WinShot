@@ -106,6 +106,11 @@ public class ThemedWindowTests
                 BackgroundFromEditorSmoke(editor);
                 editor.Close();
 
+                // App launch warms the editor off screen: it must leave no window behind.
+                int windowsBefore = app.Windows.Count;
+                EditorWindow.Prewarm(settings, history);
+                Assert.Equal(windowsBefore, app.Windows.Count);
+
                 var clickEditor = new EditorWindow(NewBitmap(), settings, history);
                 clickEditor.Show();
                 EditorEveryButtonClicksCleanly(clickEditor);

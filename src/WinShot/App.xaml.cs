@@ -205,6 +205,13 @@ public partial class App : Application
             }
             catch (Exception ex) { Log.Error("Selector prewarm failed (non-fatal)", ex); }
         }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        // The editor's first open paid ~750 ms more than every later one (XAML, theme,
+        // templates, text). Pay it here, at idle, after the selector is warm.
+        Dispatcher.BeginInvoke(() =>
+        {
+            try { Editor.EditorWindow.Prewarm(_settings, _history); }
+            catch (Exception ex) { Log.Error("Editor prewarm failed (non-fatal)", ex); }
+        }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         // Electron apps keep renderer accessibility enabled while this mutex exists —
         // required for Alt-hover element detection to see their full element tree.
         WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();

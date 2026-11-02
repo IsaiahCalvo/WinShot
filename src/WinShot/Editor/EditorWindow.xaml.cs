@@ -358,8 +358,11 @@ public partial class EditorWindow : Window
         };
         Closed += (_, _) =>
         {
-            PersistZoomPreference();
-            PersistSavedColors();
+            if (!_prewarm)
+            {
+                PersistZoomPreference();
+                PersistSavedColors();
+            }
             _closed = true;
             // Every timer this window owns, stopped in one place. A tick that lands after the
             // template is gone is an unhandled dispatcher exception, and an unhandled
@@ -417,6 +420,40 @@ public partial class EditorWindow : Window
                 FitEditorCombos();
             }));
     }
+
+    /// <summary>
+    /// Pays the editor's one-time costs at app idle so the first real open is as quick as
+    /// the second (measured on a real PC: 960 ms cold against 195 ms warm). Building the
+    /// window loads its XAML, theme and templates; a layout pass and an off-screen render
+    /// warm the text, geometry and brush paths. The window is never shown, and its close
+    /// writes nothing back to settings.
+    /// </summary>
+    public static void Prewarm(SettingsService settings, HistoryService history)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var bmp = new SD.Bitmap(64, 48);
+        var w = new EditorWindow(bmp, settings, history) { _prewarm = true };
+        try
+        {
+            if (w.Content is FrameworkElement root)
+            {
+                var size = new Size(Math.Max(w.Width, 400), Math.Max(w.Height, 300));
+                root.Measure(size);
+                root.Arrange(new Rect(size));
+                root.UpdateLayout();
+                var rtb = new RenderTargetBitmap(
+                    (int)size.Width, (int)size.Height, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(root);
+            }
+        }
+        finally
+        {
+            w.Close();
+        }
+        Log.Info($"Perf editor prewarm: {clock.ElapsedMilliseconds} ms");
+    }
+
+    private bool _prewarm;
 
     public static EditorWindow CreateForCapture(SD.Bitmap source, SettingsService settings, HistoryService history)
     {
