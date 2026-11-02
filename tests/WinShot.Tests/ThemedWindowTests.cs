@@ -2242,8 +2242,6 @@ public class ThemedWindowTests
     /// </summary>
     private static void EditorGrowLandsOnItsTargetSmoke(SettingsService settings, HistoryService history)
     {
-        const System.Reflection.BindingFlags NS =
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
 
         var animations = Motion.AnimationsEnabled;
         Motion.AnimationsEnabled = () => false; // the tween applies its end frame inline
@@ -2259,10 +2257,12 @@ public class ThemedWindowTests
 
             double scale = RecordingMonitorDpi.ScaleFor(origin);
             SD.Rectangle work = WF.Screen.FromRectangle(origin).WorkingArea;
-            double wantW = (double)typeof(EditorWindow).GetField("DefaultWidthDip", NS)!.GetRawConstantValue()!;
-            double wantH = (double)typeof(EditorWindow).GetField("DefaultHeightDip", NS)!.GetRawConstantValue()!;
+            // The editor asks for a size that wraps its capture (DesiredWindowDip), not a fixed one.
+            var want = (Size)typeof(EditorWindow).GetMethod("DesiredWindowDip",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(editor, null)!;
             SD.Rectangle target = EditorGrowLayout.Target(
-                work, new Size(wantW, wantH), scale, new Size(minWidth, minHeight));
+                work, want, scale, new Size(minWidth, minHeight));
 
             GetWindowRect(new System.Windows.Interop.WindowInteropHelper(editor).Handle, out RECT r);
             var landed = new SD.Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
