@@ -38,7 +38,9 @@ jobs:
           if (-not (Test-Path $tsv)) { Write-Host "no audit.tsv"; exit 0 }
           $rows = Get-Content $tsv
           Write-Host "rows: $($rows.Count)"
-          $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1] -ne '' } | ForEach-Object { Write-Host "FLAG`t$_" }
+          $bad = $rows | Select-Object -Skip 1 | Where-Object { $f = (($_ -split "`t")[-1]).Trim(); $f -ne '' -and $f -ne 'ok' }
+          Write-Host "flagged: $($bad.Count)"
+          $bad | ForEach-Object { Write-Host "FLAG`t$_" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
