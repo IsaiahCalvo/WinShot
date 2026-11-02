@@ -1102,7 +1102,8 @@ public partial class App : Application
         _delayedCountdownActive = true;
         try
         {
-            await FastSelfTimerWindow.RunAsync(options.DelaySeconds);
+            if (!await FastSelfTimerWindow.RunAsync(options.DelaySeconds))
+                return;
         }
         catch (Exception ex)
         {
@@ -1335,8 +1336,9 @@ public partial class App : Application
                     if (frozenCrop is null)
                     {
                         await WaitForOverlayDismissAsync();
-                        if (SelfTimerOptions.ShouldRunDelay(delaySeconds))
-                            await FastSelfTimerWindow.RunAsync(delaySeconds);
+                        if (SelfTimerOptions.ShouldRunDelay(delaySeconds)
+                            && !await FastSelfTimerWindow.RunAsync(delaySeconds))
+                            return;
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
                     // selector.Mode, not the mode we ASKED for: Space flips Area<->Window
@@ -1502,7 +1504,8 @@ public partial class App : Application
     private void CaptureFullscreenTimerFlow() => RunCaptureFlow(
         "Self-timer capture failed", "Capture failed", async () =>
         {
-            await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
+            if (!await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds))
+                return;
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("self-timer screen grab", sw);
@@ -1610,8 +1613,8 @@ public partial class App : Application
                     await HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
                     break;
                 case AllInOneAction.Timer:
-                    await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
-                    await HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
+                    if (await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds))
+                        await HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
                     break;
                 case AllInOneAction.Ocr:
                     using (captured) await RunOcrToClipboard(captured!);
