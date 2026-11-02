@@ -21,6 +21,9 @@ public sealed class FastQuickPreviewWindow : WF.Form
     /// for the monitor a window is born on, so every logical measurement here is scaled by
     /// hand like every other WinForms surface in the app.</summary>
     private readonly double _scale;
+    /// <summary>The monitor it opens on: History's, so a Space press with the pointer parked on
+    /// another screen still previews over the window being browsed.</summary>
+    private readonly WF.Screen _screen;
     private SD.Image? _image;
     private bool _closing;
     private bool _exiting;
@@ -29,11 +32,11 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private int S(int logical) => Recording.RecordingMonitorDpi.Px(logical, _scale);
 
-    public FastQuickPreviewWindow(string filePath)
+    public FastQuickPreviewWindow(string filePath, WF.Screen? screen = null)
     {
         _filePath = filePath;
-        _scale = Recording.RecordingMonitorDpi.ScaleFor(
-            WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
+        _screen = screen ?? WF.Screen.FromPoint(WF.Cursor.Position);
+        _scale = Recording.RecordingMonitorDpi.ScaleFor(_screen.Bounds);
         _looksLikeImage = PreviewableExtensions.Contains(Path.GetExtension(filePath).ToLowerInvariant());
         _image = _looksLikeImage ? TakePrefetched(filePath) ?? TryLoadImage(filePath) : null;
 
@@ -163,7 +166,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private SD.Size CalculateSize()
     {
-        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        SD.Rectangle area = _screen.WorkingArea;
 
         if (_image is not null)
         {
@@ -201,7 +204,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private void CenterOnScreen()
     {
-        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        SD.Rectangle area = _screen.WorkingArea;
         Location = new SD.Point(
             area.Left + Math.Max(0, (area.Width - Width) / 2),
             area.Top + Math.Max(0, (area.Height - Height) / 2));

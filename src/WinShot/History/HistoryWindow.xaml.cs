@@ -1214,7 +1214,9 @@ public partial class HistoryWindow : Window
         // The successor is about to appear in the same spot: the outgoing window has to be
         // gone in this call, not 220 ms of exit fade later, or the two overlap.
         _preview?.CloseNow();
-        var preview = new FastQuickPreviewWindow(target.FilePath);
+        var preview = new FastQuickPreviewWindow(
+            target.FilePath,
+            System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle));
         PerfLog.TrackFirstShown(preview, "history quick preview");
         _preview = preview;
         _previewOpen = true;
