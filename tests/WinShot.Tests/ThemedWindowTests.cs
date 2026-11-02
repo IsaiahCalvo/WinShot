@@ -127,6 +127,19 @@ public class ThemedWindowTests
             {
                 failure = ex;
             }
+            finally
+            {
+                // A smoke that fails part-way must not leave its windows on this thread: once
+                // the thread ends, the next message to one of those HWNDs kills the whole
+                // test host, and the real failure message is lost with it.
+                try
+                {
+                    foreach (Window w in Application.Current?.Windows.Cast<Window>().ToList() ?? new List<Window>())
+                        w.Close();
+                }
+                catch (Exception) { }
+                Dispatcher.CurrentDispatcher.InvokeShutdown();
+            }
         });
 
         thread.SetApartmentState(ApartmentState.STA);
@@ -2747,14 +2760,30 @@ public class ThemedWindowTests
             // Leave nothing behind: a popup or window still open when this STA thread ends
             // keeps an HWND whose next message lands on a dead dispatcher and kills the
             // test host at shutdown.
+            // Rotate / flip / crop finish on a worker and come back to this dispatcher; let
+            // them land before the window goes.
+            var busy = typeof(EditorWindow).GetField("_sourceOperationActive",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            for (int i = 0; i < 400 && (bool)busy.GetValue(editor)!; i++)
+            {
+                PumpDispatcherOnce();
+                Thread.Sleep(10);
+            }
             foreach (var popup in popups) popup.IsOpen = false;
+            foreach (Window owned in editor.OwnedWindows.Cast<Window>().ToList()) owned.Close();
+            PumpDispatcherOnce();
             foreach (var source in PresentationSource.CurrentSources.Cast<PresentationSource>().ToList())
             {
                 if (sourcesBefore.Contains(source) || source.IsDisposed) continue;
-                if (source.RootVisual is Window w && !ReferenceEquals(w, editor)) w.Close();
-                else if (source.RootVisual is FrameworkElement { Parent: Popup open }) open.IsOpen = false;
+                if (source.RootVisual is Window w)
+                {
+                    if (!ReferenceEquals(w, editor)) w.Close();
+                }
+                else if (source is System.Windows.Interop.HwndSource hwnd)
+                {
+                    hwnd.Dispose();
+                }
             }
-            foreach (Window owned in editor.OwnedWindows.Cast<Window>().ToList()) owned.Close();
             for (int i = 0; i < 4; i++) PumpDispatcherOnce();
         }
         Assert.True(pressed > 60, $"only {pressed} editor buttons found to press");
