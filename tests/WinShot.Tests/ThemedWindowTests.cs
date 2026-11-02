@@ -1621,8 +1621,8 @@ public class ThemedWindowTests
         WsTrace.T();
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
         WsTrace.T();
-        Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
-            "Rotate must live next to Crop, not over the image.");
+        Assert.True(IsLogicalDescendant(groupBar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
+            "Rotate is one of Crop's settings, so it sits in row 2 with them.");
         WsTrace.T();
         Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
             el => el.Name is "EditorStyleBar");
