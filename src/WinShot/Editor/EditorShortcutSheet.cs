@@ -16,7 +16,8 @@ internal static class EditorShortcutSheet
     public static IReadOnlyList<ShortcutSection> Sections()
     {
         var tools = EditorToolKeys.All.Select(k => new ShortcutRow(k.Badge, k.Label)).ToList();
-        tools.Insert(1, new ShortcutRow("Space (hold)", "Pan"));
+        tools.Insert(1, new ShortcutRow("Alt+V", "Lasso select"));
+        tools.Insert(2, new ShortcutRow("Space (hold)", "Pan"));
         return new[]
         {
             new ShortcutSection("Tools", tools),
@@ -54,6 +55,7 @@ internal static class EditorShortcutSheet
             {
                 new("Shift+Click", "Add to or remove from the selection"),
                 new("Alt+Drag", "Move without snapping"),
+                new("Right-click → Lock", "Lock a mark so it can't be moved, resized, restyled or deleted"),
             }),
             new ShortcutSection("Drawing", new ShortcutRow[]
             {

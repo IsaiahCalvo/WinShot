@@ -375,6 +375,20 @@ public partial class EditorWindow : Window
             return;
         }
 
+        // Alt+V is lasso select (Survey toolShortcuts.js); V alone goes back to the box.
+        if (e.Key == Key.System && e.SystemKey == Key.V && Keyboard.Modifiers == ModifierKeys.Alt)
+        {
+            SetLassoSelect(true);
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.None && _lassoSelect)
+        {
+            SetLassoSelect(false);
+            e.Handled = true;
+            return;
+        }
+
         // "?" opens the shortcut list (Survey isShortcutsSheetKey).
         if (e.Key == Key.OemQuestion && Keyboard.Modifiers == ModifierKeys.Shift)
         {

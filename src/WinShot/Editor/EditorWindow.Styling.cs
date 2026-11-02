@@ -358,7 +358,8 @@ public partial class EditorWindow : Window
     private IReadOnlyList<UIElement> RestyleTargets()
     {
         var selected = SelectionList();
-        if (selected.Count > 0) return selected;
+        // A locked mark keeps its style until it is unlocked.
+        if (selected.Count > 0) return selected.Where(el => !IsLocked(el)).ToArray();
         return EditTarget() is { } editing ? new[] { editing } : Array.Empty<UIElement>();
     }
 

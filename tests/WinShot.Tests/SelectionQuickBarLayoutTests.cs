@@ -147,3 +147,33 @@ public class SelectionQuickBarLayoutTests
         Assert.True(pos.Top + 36 <= 600 - SelectionQuickBarLayout.Margin);
     }
 }
+
+/// <summary>Survey's lasso: a mark is caught only when it lies wholly inside the loop.</summary>
+public class LassoSelectTests
+{
+    private static System.Windows.Media.Geometry Square(double x, double y, double size) =>
+        EditorWindow.LassoGeometry(new[]
+        {
+            new Point(x, y), new Point(x + size, y), new Point(x + size, y + size), new Point(x, y + size),
+        });
+
+    [Fact]
+    public void MarkWhollyInside_IsCaught() =>
+        Assert.True(EditorWindow.LassoCatches(Square(0, 0, 100), new Rect(20, 20, 30, 30), null));
+
+    [Fact]
+    public void MarkPokingOut_IsNotCaught() =>
+        Assert.False(EditorWindow.LassoCatches(Square(0, 0, 100), new Rect(80, 80, 40, 40), null));
+
+    [Fact]
+    public void MarkOutside_IsNotCaught() =>
+        Assert.False(EditorWindow.LassoCatches(Square(0, 0, 100), new Rect(200, 200, 10, 10), null));
+
+    [Fact]
+    public void TriangleLoop_SkipsAMarkInTheCutAwayCorner()
+    {
+        var triangle = EditorWindow.LassoGeometry(new[] { new Point(0, 0), new Point(100, 0), new Point(0, 100) });
+        Assert.True(EditorWindow.LassoCatches(triangle, new Rect(5, 5, 20, 20), null));
+        Assert.False(EditorWindow.LassoCatches(triangle, new Rect(70, 70, 20, 20), null));
+    }
+}

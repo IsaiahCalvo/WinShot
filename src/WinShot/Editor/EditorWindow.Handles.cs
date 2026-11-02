@@ -92,6 +92,12 @@ public partial class EditorWindow : Window
             HideHandles();
             return;
         }
+        // A locked mark has no grabbers: it can't be resized or turned until it is unlocked.
+        if (meta.Locked == true)
+        {
+            HideHandles();
+            return;
+        }
 
         // Survey's double-click "bbox" edit mode (PDFViewer.jsx:31272-31292): a counter, line
         // or arrow swaps its endpoint/tip chrome for the full box frame with uniform resize
@@ -1909,6 +1915,7 @@ public partial class EditorWindow : Window
     {
         if (_selected is null || _movingSelection) return;
         var items = SelectionList()
+            .Where(el => !IsLocked(el))
             .Select(el => (Element: el, Index: AnnotationCanvas.Children.IndexOf(el)))
             .Where(t => t.Index >= 0)
             .OrderBy(t => t.Index)
@@ -2072,6 +2079,11 @@ public partial class EditorWindow : Window
             return mi;
         }
 
+        // Survey's Lock / Unlock row; the label follows the pick when the menu opens.
+        var lockItem = Item("Lock", "", ToggleSelectionLock);
+        menu.Opened += (_, _) => lockItem.Header = SelectionLocked() ? "Unlock" : "Lock";
+        menu.Items.Add(lockItem);
+        menu.Items.Add(new Separator());
         menu.Items.Add(Item("Bring to Front", "Ctrl+Shift+]", () => ReorderSelected(ZMove.Front)));
         menu.Items.Add(Item("Bring Forward", "Ctrl+]", () => ReorderSelected(ZMove.Forward)));
         menu.Items.Add(Item("Send Backward", "Ctrl+[", () => ReorderSelected(ZMove.Backward)));
@@ -2084,7 +2096,7 @@ public partial class EditorWindow : Window
     /// <summary>Nudges the selected annotation by a keyboard delta as one undoable move.</summary>
     private void NudgeSelected(double dx, double dy)
     {
-        if (_selected is null || _movingSelection || _draggingCurveHandle) return;
+        if (_selected is null || _movingSelection || _draggingCurveHandle || SelectionLocked()) return;
         var moved = SelectionList().ToArray();
         foreach (UIElement el in moved)
             MoveElement(el, dx, dy);

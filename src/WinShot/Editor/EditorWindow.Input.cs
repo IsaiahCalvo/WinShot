@@ -223,6 +223,7 @@ public partial class EditorWindow : Window
             // Survey latches `active` once the drag clears MIN_DRAG_PX and never clears it
             // (useSVGInteraction.js:1159), and draws no band below the threshold.
             _marqueeArmed |= MarqueeSelection.IsDrag(_marqueeStart, marqueePos);
+            if (_lassoSelect) { AddLassoPoint(marqueePos); return; }
             if (_marqueeArmed) ShowMarquee(marqueePos);
             return;
         }
@@ -677,7 +678,7 @@ public partial class EditorWindow : Window
                 _calloutBoxBefore = existingCallout.Layout;
             }
             else
-                _movingSelection = true;
+                _movingSelection = !SelectionLocked();
             _moveLast = pos;
             _moveTotal = new Vector();
             ResetMoveSnap();
@@ -1135,6 +1136,7 @@ public partial class EditorWindow : Window
             // PointerArgs carries no modifier state, so read the keyboard here.
             _marqueeShift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
             _marqueeAlt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+            if (_lassoSelect) BeginLasso(pos);
             Viewport.CaptureMouse();
             e.Handled = true;
             return;
@@ -1142,7 +1144,7 @@ public partial class EditorWindow : Window
         // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
         // Pill Border) to reopen it for editing; the owning element carries its style.
         if (e.ClickCount == 2 && Environment.TickCount64 - _justDraggedAt >= DoubleClickGuardMs
-            && hit is FrameworkElement fe && fe.Tag is AnnotationData tm)
+            && hit is FrameworkElement fe && fe.Tag is AnnotationData tm && tm.Locked != true)
         {
             if (tm.Type == AnnotationData.TypeText)
             {
@@ -1213,7 +1215,7 @@ public partial class EditorWindow : Window
             _calloutBoxBefore = calloutHit.Layout;
         }
         else
-            _movingSelection = _selection.Contains(hit);
+            _movingSelection = _selection.Contains(hit) && !SelectionLocked();
         _moveLast = pos;
         _moveTotal = new Vector();
         ResetMoveSnap();
@@ -1302,6 +1304,7 @@ public partial class EditorWindow : Window
         _marqueeArmed = false;
         HideDragRect();
         ResetDragRectStyle();
+        HideLasso();
         Viewport.ReleaseMouseCapture();
         // Survey's release reads only the frozen snapshot, never the live keyboard
         // (useSVGInteraction.js:2717, :2782, :2804).
@@ -1319,7 +1322,8 @@ public partial class EditorWindow : Window
         var box = MarqueeSelection.RectFor(_marqueeStart, pos);
         MarqueeMode mode = MarqueeSelection.ModeFor(_marqueeStart, pos);
         var hits = new List<UIElement>();
-        foreach (UIElement child in AnnotationCanvas.Children)
+        if (_lassoSelect) hits = LassoHits(pos);
+        else foreach (UIElement child in AnnotationCanvas.Children)
         {
             if (child is TextBox) continue;
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;

@@ -333,11 +333,13 @@ public partial class EditorWindow : Window
                 _marqueeArmed = false;
                 _marqueeShift = _marqueeAlt = false;
                 HideDragRect();
+                HideLasso();
             }
         };
         Loaded += (_, _) => RestorePersistedZoom();
         Loaded += (_, _) => WirePopoverMotion();
         Loaded += (_, _) => AddKeysToToolTips();
+        Loaded += (_, _) => WireSelectModeMenu();
         SetEraserPartial(_settings.Current.EraserPartial);
         // Survey re-runs the CURRENT non-manual zoom mode on every layout change
         // (applyLayoutDrivenZoom, PDFViewer.jsx:7999-8009); only MANUAL opts out.

@@ -241,6 +241,12 @@ internal sealed class AnnotationData
         a.Dash = null;
     }
 
+    /// <summary>
+    /// Survey's Lock: a locked mark can be picked and copied but not moved, resized, restyled,
+    /// erased or deleted until it is unlocked. Null (not written) when unlocked.
+    /// </summary>
+    public bool? Locked { get; set; }
+
     public AnnotationData Clone() => (AnnotationData)MemberwiseClone();
 
     // ------------------------------ factory helpers used at commit time

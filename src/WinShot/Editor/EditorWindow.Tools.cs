@@ -839,6 +839,7 @@ public partial class EditorWindow : Window
         {
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
                 continue;
+            if (meta.Locked == true) continue; // a locked mark can't be erased
             // Survey getEraserOperation: 'partial' only for true freehand ink; everything
             // else resolves to 'entire' and is deleted whole by the same partial-mode
             // gesture (eraserPolicy.js:52-75, PageAnnotationLayer.jsx:6668-6684).
@@ -1881,6 +1882,7 @@ public partial class EditorWindow : Window
             data.Tx += offset.X;
             data.Ty += offset.Y;
             if (data.ImageIndex is not null) data.ImageIndex = 0;
+            data.Locked = null; // a copy starts unlocked
             IReadOnlyList<BitmapSource> images = mark.Image is null
                 ? Array.Empty<BitmapSource>()
                 : new[] { mark.Image };
@@ -1950,7 +1952,7 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Alt-drag: leaves a copy behind and drags the copy, so the original stays put. The
+    /// Ctrl-drag: leaves a copy behind and drags the copy, so the original stays put. The
     /// clone lands exactly on top of the original (no paste offset) — the drag itself is
     /// what separates them.
     /// </summary>
@@ -1959,6 +1961,7 @@ public partial class EditorWindow : Window
         if (source is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return null;
         var data = SnapshotAnnotation(fe, meta);
         if (data.ImageIndex is not null) data.ImageIndex = 0;
+        data.Locked = null; // the dragged copy starts unlocked, so it can be moved
         IReadOnlyList<BitmapSource> images = source is Image img && img.Source is BitmapSource bs
             ? new[] { bs }
             : Array.Empty<BitmapSource>();

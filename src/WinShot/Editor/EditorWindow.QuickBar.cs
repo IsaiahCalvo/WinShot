@@ -195,7 +195,7 @@ public partial class EditorWindow
         if (_quickBar is null || _closed) return;
         QuickBarPlan? plan = _tool == EditorTool.Select && _activeText is null && !_sourceOperationActive
                              && !_adjustingCrop && !SelectionGestureActive()
-            ? SelectionQuickBarLayout.Plan(SelectedTypes())
+            ? SelectionQuickBarLayout.Plan(SelectedTypes(), SelectionLocked())
             : null;
         if (plan is not QuickBarPlan p)
         {
