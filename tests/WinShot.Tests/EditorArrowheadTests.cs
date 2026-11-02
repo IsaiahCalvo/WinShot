@@ -158,8 +158,8 @@ public class EditorArrowheadTests
     }
 
     /// <summary>
-    /// The toggle is Survey's arrow-only control, and it sits in the arrow props row right of
-    /// the arrowhead dropdown — so it must be reachable with Arrow armed and gone on Callout,
+    /// The toggle is Survey's arrow-only control, and it sits at the foot of the arrowhead
+    /// menu — so it must be reachable with Arrow armed and gone on Callout,
     /// whose leader has one end.
     /// </summary>
     [Fact]
@@ -169,10 +169,12 @@ public class EditorArrowheadTests
         WithEditor(1400, (editor, arm) =>
         {
             var btn = (FrameworkElement)editor.FindName("ArrowBothEndsBtn")!;
+            // The toggle is the arrowhead menu's footer (Survey AppShell.jsx:4455), so it is
+            // only on screen with the menu open; its own Visibility is what follows the tool.
             arm(EditorTool.Arrow);
-            onArrow = btn.IsVisible;
+            onArrow = btn.Visibility == Visibility.Visible;
             arm(EditorTool.Callout);
-            onCallout = btn.IsVisible;
+            onCallout = btn.Visibility == Visibility.Visible;
         });
         if (onArrow is null) return;   // stood down: no Application to own
         Assert.True(onArrow);

@@ -92,8 +92,60 @@ public partial class EditorWindow
                 if (item.Tag is string tag && ArrowheadSample(tag) is { } head)
                     item.ContentTemplate = head;
             ArrowStyleBox.DropDownOpened += (_, _) => SyncImportedArrowheads();
+            MoveBothEndsIntoArrowMenu();
         }
     }
+
+    /// <summary>
+    /// Survey AppShell.jsx:4455-4473: "Both ends" is the arrowhead menu's footer, under a rule,
+    /// not a button beside it: a 28 x 14 sample with a head at each end, the words, and a
+    /// check while it is on. Arrow only (a callout's leader has one end), so the footer
+    /// follows the toggle's own visibility.
+    /// </summary>
+    private void MoveBothEndsIntoArrowMenu()
+    {
+        if (ArrowStyleBox is null || ArrowBothEndsBtn is null) return;
+        ArrowStyleBox.ApplyTemplate();
+        if (ArrowStyleBox.Template?.FindName("PART_Popup", ArrowStyleBox) is not Popup { Child: Border { Child: StackPanel card } })
+            return;
+        (ArrowBothEndsBtn.Parent as Panel)?.Children.Remove(ArrowBothEndsBtn);
+        ArrowBothEndsBtn.Style = null;
+        ArrowBothEndsBtn.Margin = new Thickness(0);
+        ArrowBothEndsBtn.Content = null;
+        ArrowBothEndsBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ArrowBothEndsBtn.Focusable = false;
+        ArrowBothEndsBtn.Cursor = Cursors.Hand;
+        ArrowBothEndsBtn.ToolTip = null;
+        ArrowBothEndsBtn.Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(BothEndsRowTemplate);
+
+        var rule = new Border { Height = 1, Margin = new Thickness(0, 4, 0, 4) };
+        rule.SetResourceReference(Border.BackgroundProperty, "BorderBrush");
+        rule.SetBinding(VisibilityProperty, new System.Windows.Data.Binding(nameof(Visibility)) { Source = ArrowBothEndsBtn });
+        card.Children.Add(rule);
+        card.Children.Add(ArrowBothEndsBtn);
+    }
+
+    /// <summary>The footer row, dressed like the menu's own rows (SurveyDropdownItem).</summary>
+    private const string BothEndsRowTemplate =
+        "<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ToggleButton'>" +
+        "<Border x:Name='Bg' Background='Transparent' CornerRadius='4' Padding='9,4' MinHeight='34'" +
+        " TextElement.FontSize='{DynamicResource TextBody}' TextElement.FontWeight='SemiBold' TextElement.Foreground='{DynamicResource TextSecondaryBrush}'>" +
+        "<Grid VerticalAlignment='Center'>" +
+        "<Grid.ColumnDefinitions><ColumnDefinition Width='Auto'/><ColumnDefinition Width='*'/><ColumnDefinition Width='Auto'/></Grid.ColumnDefinitions>" +
+        "<Canvas Width='28' Height='14' VerticalAlignment='Center'>" +
+        "<Line X1='6' Y1='7' X2='22' Y2='7' StrokeThickness='1.5' StrokeStartLineCap='Round' StrokeEndLineCap='Round' Stroke='{Binding (TextElement.Foreground), ElementName=Bg}'/>" +
+        "<Path Data='M6,3 L1,7 L6,11 M22,3 L27,7 L22,11' StrokeThickness='1.5' StrokeLineJoin='Round' StrokeStartLineCap='Round' StrokeEndLineCap='Round' Stroke='{Binding (TextElement.Foreground), ElementName=Bg}'/>" +
+        "</Canvas>" +
+        "<TextBlock Grid.Column='1' Text='Both ends' Margin='8,0,0,0' VerticalAlignment='Center'/>" +
+        "<Path x:Name='Check' Grid.Column='2' Visibility='Collapsed' Margin='10,0,0,0' Width='12' Height='12' Stretch='Uniform' VerticalAlignment='Center'" +
+        " Data='M2,6.5 L5,9.5 L10,3' StrokeThickness='1.75' StrokeLineJoin='Round' StrokeStartLineCap='Round' StrokeEndLineCap='Round' Stroke='{Binding (TextElement.Foreground), ElementName=Bg}'/>" +
+        "</Grid></Border>" +
+        "<ControlTemplate.Triggers>" +
+        "<Trigger Property='IsChecked' Value='True'><Setter TargetName='Check' Property='Visibility' Value='Visible'/>" +
+        "<Setter TargetName='Bg' Property='TextElement.Foreground' Value='{DynamicResource TextPrimaryBrush}'/></Trigger>" +
+        "<Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Bg' Property='Background' Value='{DynamicResource AccentDeepBrush}'/>" +
+        "<Setter TargetName='Bg' Property='TextElement.Foreground' Value='White'/></Trigger>" +
+        "</ControlTemplate.Triggers></ControlTemplate>";
 
     /// <summary>Tags of the heads a user can't pick, only meet on an existing mark.</summary>
     private static readonly HashSet<string> ImportedArrowheads = new(StringComparer.Ordinal)

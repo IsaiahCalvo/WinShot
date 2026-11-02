@@ -734,6 +734,12 @@ public partial class EditorWindow : Window
         else
         {
             _arrowhead = AnnotationStyle.ParseArrowhead(tag, out _);
+            // Survey AppShell.jsx:4443-4445: picking None takes the heads off both ends.
+            if (_arrowhead == ArrowheadStyle.None && _arrowBothEnds)
+            {
+                _arrowBothEnds = false;
+                if (ArrowBothEndsBtn is not null) ArrowBothEndsBtn.IsChecked = false;
+            }
             // Survey: with "Both ends" on, a newly picked ending goes on the START as well
             // (PDFViewer.jsx:8158). With it off only the end changes.
             _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
@@ -752,6 +758,15 @@ public partial class EditorWindow : Window
     {
         if (_syncingContext) return;
         _arrowBothEnds = sender is ToggleButton { IsChecked: true };
+        // Survey AppShell.jsx:4408-4412: coming back from no head, the line needs a head
+        // before "both ends" can mean anything, so it gets the default filled head.
+        if (_arrowBothEnds && _arrowhead == ArrowheadStyle.None)
+        {
+            _arrowhead = ArrowheadStyle.SolidTriangle;
+            _syncingContext = true;
+            try { SelectComboByTag(ArrowStyleBox, ArrowTag(_arrowhead)); }
+            finally { _syncingContext = false; }
+        }
         _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
         if (IsLoaded) RestyleSelectedArrowhead();
     }
