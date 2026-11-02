@@ -274,8 +274,7 @@ public class PinRenderHarness
         if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_PIN") != "1")
             return;
 
-        string output = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUT")
-            ?? Path.Combine(Path.GetTempPath(), "winshot-pin-render.png");
+        string output = OutputFile("winshot-pin-render.png");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
 
         Exception? failure = null;
@@ -391,8 +390,7 @@ public class PinRenderHarness
         if (Environment.GetEnvironmentVariable("WINSHOT_RENDER_PIN_CORNERS") != "1")
             return;
 
-        string output = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUT")
-            ?? Path.Combine(Path.GetTempPath(), "winshot-pin-corner-matrix.png");
+        string output = OutputFile("winshot-pin-corner-matrix.png");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
 
         object[][] cases = RoundedCornerScenarios().ToArray();
@@ -452,6 +450,17 @@ public class PinRenderHarness
             .GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(pin, new object[] { args });
         bitmap.Save(path, SD.Imaging.ImageFormat.Png);
+    }
+
+    /// <summary>WINSHOT_RENDER_OUT is a folder for every other render harness; these two
+    /// used to take it as a file name and failed in GDI+ when handed the shared folder.
+    /// A value with no extension is now a folder they write their own file into.</summary>
+    private static string OutputFile(string fileName)
+    {
+        string? value = Environment.GetEnvironmentVariable("WINSHOT_RENDER_OUT");
+        if (string.IsNullOrEmpty(value))
+            return Path.Combine(Path.GetTempPath(), fileName);
+        return Path.HasExtension(value) ? value : Path.Combine(value, fileName);
     }
 
     internal static void SetField(FastPinWindow pin, string name, object value)

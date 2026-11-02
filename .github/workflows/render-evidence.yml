@@ -76,13 +76,19 @@ jobs:
           Get-ChildItem -File (Join-Path $o "visual-audit") -Filter *.png -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 6 | ForEach-Object { Write-Host ("LAST " + $_.Name + " " + $_.LastWriteTime.ToString("HH:mm:ss")) }
           foreach ($f in "winforms-audit\noscale.tsv","visual-audit\states.tsv") {
             $p = Join-Path $o $f
-            if (Test-Path $p) { Write-Host "== $f"; Get-Content $p | ForEach-Object { Write-Host "TSV $_" } }
+            if (Test-Path $p) {
+              $rows = Get-Content $p
+              $bad = $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1].Trim() -notin @('', 'ok') }
+              Write-Host "== $f : $($rows.Count - 1) rows, $(@($bad).Count) not ok"
+              Write-Host $rows[0]
+              $bad | ForEach-Object { Write-Host "TSV $_" }
+            }
           }
           foreach ($f in "visual-audit\audit.tsv","winforms-audit\audit.tsv") {
             $p = Join-Path $o $f
             if (-not (Test-Path $p)) { Write-Host "== $f missing"; continue }
             $rows = Get-Content $p
-            $flagged = $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1].Trim() -ne '' }
+            $flagged = $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1].Trim() -notin @('', 'ok') }
             Write-Host "== $f : $($rows.Count - 1) rows, $(@($flagged).Count) flagged"
             Write-Host $rows[0]
             $flagged | ForEach-Object { Write-Host "AUDIT $_" }

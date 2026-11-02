@@ -190,8 +190,32 @@ public class HistoryRenderHarness
     {
         int width = (int)Math.Ceiling(window.ActualWidth);
         int height = (int)Math.Ceiling(window.ActualHeight);
+        Visual target = window;
+        if (width < 1 || height < 1)
+        {
+            // On the CI runner the window can come back from Show() never sized (ActualWidth 0),
+            // and RenderTargetBitmap threw on a zero width before anything was learned. Lay the
+            // content out at the window's own size instead and paint it over the window's
+            // background, so the frame still shows the layout being audited.
+            Console.WriteLine($"HISTORY window unsized: visible={window.IsVisible} state={window.WindowState} " +
+                $"size={window.Width}x{window.Height} actual={window.ActualWidth}x{window.ActualHeight}; laying out content");
+            width = (int)Math.Ceiling(double.IsNaN(window.Width) ? 1200 : window.Width);
+            height = (int)Math.Ceiling(double.IsNaN(window.Height) ? 760 : window.Height);
+            var content = (FrameworkElement)window.Content;
+            content.Measure(new Size(width, height));
+            content.Arrange(new Rect(0, 0, width, height));
+            content.UpdateLayout();
+            var plate = new DrawingVisual();
+            using (DrawingContext dc = plate.RenderOpen())
+            {
+                dc.DrawRectangle(window.Background ?? Brushes.Black, null, new Rect(0, 0, width, height));
+                dc.DrawRectangle(new VisualBrush(content) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top },
+                    null, new Rect(0, 0, width, height));
+            }
+            target = plate;
+        }
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(window);
+        bitmap.Render(target);
 
         var corner = new byte[4];
         bitmap.CopyPixels(new Int32Rect(1, 1, 1, 1), corner, 4, 0);
