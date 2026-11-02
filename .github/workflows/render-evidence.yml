@@ -60,7 +60,7 @@ jobs:
           }
           $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','VisualAuditHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
           $filter = ($classes | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
-          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt"
+          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --blame-hang-timeout 150s --blame-hang-dump-type none --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt"
       - name: Print audit findings
         if: always()
         shell: pwsh
@@ -85,7 +85,7 @@ jobs:
           $t = Join-Path $o "test-output.txt"
           if (Test-Path $t) {
             Write-Host "== failed tests"
-            Select-String -Path $t -Pattern '^\s+Failed ' -Context 0,8 | ForEach-Object { Write-Host "FAIL $($_.Line)"; $_.Context.PostContext | ForEach-Object { Write-Host "FAIL   $_" } }
+            Select-String -Path $t -Pattern '^\s+Failed |hang|Aborted|blame' -Context 0,8 | ForEach-Object { Write-Host "FAIL $($_.Line)"; $_.Context.PostContext | ForEach-Object { Write-Host "FAIL   $_" } }
           }
       - uses: actions/upload-artifact@v4
         if: always()
