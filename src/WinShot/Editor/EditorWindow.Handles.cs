@@ -2345,13 +2345,19 @@ public partial class EditorWindow : Window
     /// no separate ZIndex bookkeeping. Removing then re-inserting only moves the one element, so
     /// undo just puts it back at its old index. No-op (and no undo entry) when already at the edge.
     /// </summary>
-    private void ReorderSelected(ZMove move)
+    private void ReorderSelected(ZMove move) => ReorderCore(move, apply: true);
+
+    /// <summary>
+    /// Does the reorder, or with <paramref name="apply"/> false only says whether it would
+    /// change anything (the mark menu greys out a move that would not, as Survey does).
+    /// </summary>
+    private bool ReorderCore(ZMove move, bool apply)
     {
-        if (_selected is null || _movingSelection) return;
-        if (_selection.Count > 1) { ReorderSelection(move); return; }
+        if (_selected is null || _movingSelection) return false;
+        if (_selection.Count > 1) return ReorderSelection(move, apply);
         var children = AnnotationCanvas.Children;
         int oldIndex = children.IndexOf(_selected);
-        if (oldIndex < 0) return;
+        if (oldIndex < 0) return false;
         int last = children.Count - 1;
         int newIndex = move switch
         {
@@ -2364,12 +2370,14 @@ public partial class EditorWindow : Window
             ZMove.Backward => FirstOverlapping(oldIndex, -1, oldIndex),
             _ => oldIndex,
         };
-        if (newIndex == oldIndex) return; // already at the requested end — nothing to do
+        if (newIndex == oldIndex) return false; // already at the requested end — nothing to do
+        if (!apply) return true;
 
         UIElement el = _selected;
         Push(new EditorAction(
             undo: () => { children.Remove(el); children.Insert(oldIndex, el); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
             redo: () => { children.Remove(el); children.Insert(newIndex, el); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }));
+        return true;
     }
 
     /// <summary>Index of the first neighbour in <paramref name="step"/> direction whose bounds overlap.</summary>
@@ -2390,12 +2398,12 @@ public partial class EditorWindow : Window
     /// one atomic step and is NOT overlap-aware — a plain bubble-swap past unselected siblings,
     /// committed as a single undo entry so repeated calls never read stale indices.
     /// </summary>
-    private void ReorderSelection(ZMove move)
+    private bool ReorderSelection(ZMove move, bool apply = true)
     {
         var children = AnnotationCanvas.Children;
         var before = children.Cast<UIElement>().ToArray();
         bool[] sel = before.Select(_selection.Contains).ToArray();
-        if (!sel.Any(s => s) || sel.All(s => s)) return;
+        if (!sel.Any(s => s) || sel.All(s => s)) return false;
 
         var order = new List<UIElement>();
         switch (move)
@@ -2426,7 +2434,8 @@ public partial class EditorWindow : Window
                 break;
             }
         }
-        if (order.SequenceEqual(before)) return;
+        if (order.SequenceEqual(before)) return false;
+        if (!apply) return true;
 
         var after = order.ToArray();
         void Reseat(UIElement[] target)
@@ -2436,6 +2445,7 @@ public partial class EditorWindow : Window
             UpdateSelectionVisual();
         }
         Push(new EditorAction(undo: () => Reseat(before), redo: () => Reseat(after)));
+        return true;
 
         static void Swap(UIElement[] items, bool[] flags, int a, int b)
         {
@@ -2454,6 +2464,7 @@ public partial class EditorWindow : Window
         // items reach the group path (same guard the left-click path uses).
         if (!(_selection.Count > 1 && _selection.Contains(hit))) Select(hit);
         _annotationMenu ??= BuildAnnotationMenu();
+        _markMenuAt = e.GetPosition(AnnotationCanvas);
         _annotationMenu.PlacementTarget = Viewport;
         _annotationMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
         _annotationMenu.IsOpen = true;
@@ -2461,32 +2472,6 @@ public partial class EditorWindow : Window
     }
 
     private ContextMenu? _annotationMenu;
-
-    private ContextMenu BuildAnnotationMenu()
-    {
-        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu") };
-        var itemStyle = (Style)FindResource("DarkMenuItem");
-
-        MenuItem Item(string header, string gesture, Action act)
-        {
-            var mi = new MenuItem { Header = header, InputGestureText = gesture, Style = itemStyle };
-            mi.Click += (_, _) => act();
-            return mi;
-        }
-
-        // Survey's Lock / Unlock row; the label follows the pick when the menu opens.
-        var lockItem = Item("Lock", "", ToggleSelectionLock);
-        menu.Opened += (_, _) => lockItem.Header = SelectionLocked() ? "Unlock" : "Lock";
-        menu.Items.Add(lockItem);
-        menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Bring to Front", "Ctrl+Shift+]", () => ReorderSelected(ZMove.Front)));
-        menu.Items.Add(Item("Bring Forward", "Ctrl+]", () => ReorderSelected(ZMove.Forward)));
-        menu.Items.Add(Item("Send Backward", "Ctrl+[", () => ReorderSelected(ZMove.Backward)));
-        menu.Items.Add(Item("Send to Back", "Ctrl+Shift+[", () => ReorderSelected(ZMove.Back)));
-        menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Delete", "Del", DeleteSelected));
-        return menu;
-    }
 
     /// <summary>Nudges the selected annotation by a keyboard delta as one undoable move.</summary>
     private void NudgeSelected(double dx, double dy)

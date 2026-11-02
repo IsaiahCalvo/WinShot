@@ -367,6 +367,41 @@ public class FixCheckRenderHarness
                 log.AppendLine($"11d after {BoxesIn(new Rect(250, -200, 400, 400))} (every top should be >= 0)");
                 WindowShot("11d-group-rotate-edge.png");
 
+                // 12. Survey's mark menu: icon row, Lock, Arrange with its submenu.
+                Deselect();
+                Tool(EditorTool.Select);
+                Down(80, 500); Up(80, 500); Pump(3);
+                var markMenu = (ContextMenu)typeof(EditorWindow).GetMethod("BuildAnnotationMenu", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(editor, null)!;
+                void RenderEl(FrameworkElement el, string name)
+                {
+                    el.UpdateLayout();
+                    var bmp = new RenderTargetBitmap((int)Math.Ceiling(el.ActualWidth * 2), (int)Math.Ceiling(el.ActualHeight * 2), 192, 192, PixelFormats.Pbgra32);
+                    var dv = new DrawingVisual();
+                    using (var dc = dv.RenderOpen())
+                    {
+                        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(60, 64, 72)), null, new Rect(0, 0, el.ActualWidth, el.ActualHeight));
+                        dc.DrawRectangle(new VisualBrush(el), null, new Rect(0, 0, el.ActualWidth, el.ActualHeight));
+                    }
+                    bmp.Render(dv);
+                    Save(bmp, Path.Combine(outDir, name));
+                }
+                markMenu.PlacementTarget = viewport;
+                markMenu.IsOpen = true; Pump(6);
+                RenderEl(markMenu, "12a-mark-menu.png");
+                var arrangeRow = FindByName(markMenu, "Arrange");
+                log.AppendLine($"12 arrange row found={arrangeRow is not null}");
+                arrangeRow?.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+                Pump(6);
+                var sub = (System.Windows.Controls.Primitives.Popup?)typeof(EditorWindow).GetField("_markArrangePopup", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editor);
+                log.AppendLine($"12 submenu open={sub?.IsOpen}");
+                if (sub?.Child is FrameworkElement subCard) RenderEl(subCard, "12b-arrange-submenu.png");
+                markMenu.IsOpen = false; Pump(3);
+                Invoke(editor, "ToggleSelectionLock", null); Pump(3);
+                markMenu.IsOpen = true; Pump(6);
+                RenderEl(markMenu, "12c-mark-menu-locked.png");
+                markMenu.IsOpen = false; Pump(3);
+                Invoke(editor, "ToggleSelectionLock", null); Pump(3);
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
@@ -377,6 +412,19 @@ public class FixCheckRenderHarness
         thread.Join();
         File.WriteAllText(Path.Combine(outDir, "fixcheck.txt"), log + (failure?.ToString() ?? "ok"));
         if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
+    }
+
+    /// <summary>The first element under <paramref name="root"/> whose automation name is <paramref name="name"/>.</summary>
+    private static FrameworkElement? FindByName(DependencyObject root, string name)
+    {
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement fe && System.Windows.Automation.AutomationProperties.GetName(fe) == name) return fe;
+            if (FindByName(child, name) is { } hit) return hit;
+        }
+        return null;
     }
 
     private static object? Invoke(EditorWindow editor, string name, object? arg)
