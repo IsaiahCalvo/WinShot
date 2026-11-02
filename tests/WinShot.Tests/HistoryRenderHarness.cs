@@ -103,7 +103,7 @@ public class HistoryRenderHarness
                 var search = (TextBox)window.FindName("SearchBox");
                 search.Text = "video";
                 PumpUntil(() => list.Items.Count > 0 && list.Items.Count < Math.Min(fixtureCount, HistoryIncrementalCollection.DefaultPageSize));
-                window.UpdateLayout();
+                SettleReflow(list);
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-search.png"));
                 search.Text = "invoice march";
                 PumpUntil(() => list.Items.Count == 0);
@@ -252,6 +252,31 @@ public class HistoryRenderHarness
         var panel = (FrameworkElement)window.FindName("EmptyState");
         PumpUntil(() => panel.Visibility == Visibility.Visible && panel.Opacity >= 0.99);
         window.UpdateLayout();
+    }
+
+    /// <summary>
+    /// Filtering slides the surviving cards to their new slots over the glide step; a frame
+    /// taken straight after the count changes shows them part-way down the grid.
+    /// </summary>
+    private static void SettleReflow(ListBox list)
+    {
+        list.UpdateLayout();
+        ReflowWrapPanel? panel = FindChild<ReflowWrapPanel>(list);
+        if (panel is not null)
+            PumpUntil(() => !panel.IsReflowing);
+        list.UpdateLayout();
+    }
+
+    private static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindChild<T>(child) is T deeper) return deeper;
+        }
+
+        return null;
     }
 
     private static void PumpUntil(Func<bool> condition)
