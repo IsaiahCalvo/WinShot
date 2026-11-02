@@ -124,6 +124,16 @@ public partial class HistoryWindow : Window
             MemoryCleanup.Request();
         };
         DarkTitleBar.Apply(this);
+        // FadeIn ramps Window.Opacity, and on a window without AllowsTransparency WPF composes
+        // that over the HWND's clear colour, which is black. So the grid rose out of black
+        // under a title bar that was already its finished grey. Clearing to the window's own
+        // background makes the fade read as the content arriving on the window, not a flash.
+        SourceInitialized += (_, _) =>
+        {
+            if (System.Windows.PresentationSource.FromVisual(this) is System.Windows.Interop.HwndSource source
+                && Background is System.Windows.Media.SolidColorBrush brush)
+                source.CompositionTarget.BackgroundColor = brush.Color;
+        };
     }
 
     /// <summary>Opens the history window, or activates the instance that is already open.</summary>
