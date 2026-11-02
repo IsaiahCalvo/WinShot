@@ -1008,7 +1008,7 @@ public partial class App : Application
 
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
             if (stitched is not null)
-                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling, region);
+                await HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling, region);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
@@ -1175,7 +1175,7 @@ public partial class App : Application
                     // SelectedRegionPx is virtual-screen relative; the editor's target rect is
                     // in real screen coordinates, which differ by the virtual origin on any
                     // layout with a monitor above or left of the primary.
-                    HandleCapture(frozenCrop, postCaptureActionOverride,
+                    await HandleCapture(frozenCrop, postCaptureActionOverride,
                         originScreenRect: ToScreenRect(region));
                 }
             }
@@ -1267,7 +1267,7 @@ public partial class App : Application
                         await WaitForOverlayDismissAsync();
                         frozenCrop = await CaptureSelectedRegionAsync(region, "measure");
                     }
-                    HandleCapture(frozenCrop);
+                    await HandleCapture(frozenCrop);
                 }
             }
             finally
@@ -1291,7 +1291,7 @@ public partial class App : Application
                     ToastSeverity.Info, holdLong: true);
                 return;
             }
-            HandleCapture(image, PostCaptureAction.Edit);
+            await HandleCapture(image, PostCaptureAction.Edit);
         });
 
     private void CaptureFullscreenFlow() => RunCaptureFlow(
@@ -1300,7 +1300,7 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("capture-fullscreen screen grab", sw);
-            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
+            await HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureFullscreenTimerFlow() => RunCaptureFlow(
@@ -1310,7 +1310,7 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("self-timer screen grab", sw);
-            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
+            await HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureDisplayFlow() => RunCaptureFlow(
@@ -1323,7 +1323,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-display screen grab", sw);
-                HandleCapture(capture, originScreenRect: r);
+                await HandleCapture(capture, originScreenRect: r);
             }
         });
 
@@ -1335,7 +1335,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-previous screen grab", sw);
-                HandleCapture(capture, originScreenRect: r);
+                await HandleCapture(capture, originScreenRect: r);
             }
             else
                 // Info, not Error: nothing went wrong, a prerequisite is simply not met yet —
@@ -1411,11 +1411,11 @@ public partial class App : Application
             switch (action)
             {
                 case AllInOneAction.Capture:
-                    HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
+                    await HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
                     break;
                 case AllInOneAction.Timer:
                     await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
-                    HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
+                    await HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
                     break;
                 case AllInOneAction.Ocr:
                     using (captured) await RunOcrToClipboard(captured!);
@@ -1428,7 +1428,7 @@ public partial class App : Application
                     region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
                     var (stitched, cancelled) = await ScrollingStatusWindow.Run(region);
                     if (stitched is not null)
-                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: region);
+                        await HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: region);
                     else if (!cancelled)
                         ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
                     break;
@@ -1535,7 +1535,16 @@ public partial class App : Application
 
     /// <summary>Every captured bitmap funnels through here: optional downscale, then the
     /// after-capture set (history included).</summary>
-    private void HandleCapture(
+    /// <remarks>
+    /// The two optional pixel passes (HiDPI downscale and the standing screenshot backdrop)
+    /// run on a worker thread. A backdrop with a shadow over a 4K capture is a few hundred
+    /// milliseconds of GDI+, and running it inline froze the UI thread between the selector
+    /// closing and the card appearing, which read as capture lag and stalled any motion in
+    /// flight. The window-capture backdrop already moved off-thread for the same reason.
+    /// With both passes off (the defaults) nothing awaits, so the whole set still runs
+    /// before this returns.
+    /// </remarks>
+    private async Task HandleCapture(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
@@ -1551,35 +1560,20 @@ public partial class App : Application
         // delays the capture or the surface that follows it.
         CaptureSound.Play(_settings.Current);
 
-        if (_settings.Current.DownscaleHiDpi)
-        {
-            if (HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out int w, out int h))
-            {
-                try
-                {
-                    var scaled = BitmapEffects.Resize(bmp, w, h);
-                    bmp.Dispose();
-                    bmp = scaled;
-                }
-                catch (Exception ex) { Log.Error("HiDPI downscale failed", ex); }
-            }
-        }
-
-        // The standing "frame every shot like this" preference, applied after the downscale
-        // so the padding is measured against the pixels that ship. None (the default) does
-        // nothing, and a backdrop that fails to compose returns null rather than a capture.
-        //
+        Settings current = _settings.Current;
+        bool downscale = current.DownscaleHiDpi &&
+            HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out _, out _);
         // AppliesTo, not IsEnabled: the "Capture window with background" override is on its
         // way to the interactive composer, which frames the shot itself.
-        if (ScreenshotBackdrop.AppliesTo(_settings.Current.ScreenshotBackground, postCaptureActionOverride) &&
-            ScreenshotBackdrop.Compose(
-                bmp,
-                _settings.Current.ScreenshotBackground,
-                _settings.Current.ScreenshotBackgroundColor,
-                _settings.Current.ScreenshotBackgroundShadow) is SD.Bitmap framed)
+        bool backdrop = ScreenshotBackdrop.AppliesTo(current.ScreenshotBackground, postCaptureActionOverride);
+        if (downscale || backdrop)
         {
-            bmp.Dispose();
-            bmp = framed;
+            SD.Bitmap source = bmp;
+            double dpiScale = SystemDpiScale;
+            string? mode = current.ScreenshotBackground;
+            string? color = current.ScreenshotBackgroundColor;
+            bool shadow = current.ScreenshotBackgroundShadow;
+            bmp = await RunCaptureWorkAsync(() => PrepareCapturePixels(source, downscale, dpiScale, backdrop, mode, color, shadow));
         }
 
         // "Add background" has no matrix cell — it only ever arrives as a per-invocation
@@ -1608,6 +1602,34 @@ public partial class App : Application
             actions = actions with { Overlay = true };
 
         RunPostCaptureSet(bmp, actions, historyKind, originScreenRect);
+    }
+
+    /// <summary>The optional pixel passes, in order: downscale first, so the backdrop's
+    /// padding is measured against the pixels that ship. Runs on a worker thread and owns
+    /// <paramref name="bmp"/>; a pass that fails leaves the previous pixels in place.</summary>
+    private static SD.Bitmap PrepareCapturePixels(
+        SD.Bitmap bmp, bool downscale, double dpiScale,
+        bool backdrop, string? mode, string? color, bool shadow)
+    {
+        if (downscale && HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, dpiScale, out int w, out int h))
+        {
+            try
+            {
+                var scaled = BitmapEffects.Resize(bmp, w, h);
+                bmp.Dispose();
+                bmp = scaled;
+            }
+            catch (Exception ex) { Log.Error("HiDPI downscale failed", ex); }
+        }
+
+        // None does nothing, and a backdrop that fails to compose returns null rather than
+        // a capture.
+        if (backdrop && ScreenshotBackdrop.Compose(bmp, mode, color, shadow) is SD.Bitmap framed)
+        {
+            bmp.Dispose();
+            bmp = framed;
+        }
+        return bmp;
     }
 
     /// <summary>
@@ -1752,8 +1774,13 @@ public partial class App : Application
         string? postCaptureActionOverride = null,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
         SD.Rectangle? originScreenRect = null,
-        PostCaptureSet? actionsOverride = null) =>
-        HandleCapture(bmp, postCaptureActionOverride, historyKind, originScreenRect, actionsOverride);
+        PostCaptureSet? actionsOverride = null)
+    {
+        // With the optional pixel passes off this finishes synchronously; surface its fault.
+        Task handled = HandleCapture(bmp, postCaptureActionOverride, historyKind, originScreenRect, actionsOverride);
+        if (handled.IsCompleted)
+            handled.GetAwaiter().GetResult();
+    }
 
     internal void SetHistoryForTest(HistoryService history) => _history = history;
 
@@ -2406,7 +2433,7 @@ public partial class App : Application
             // run that came back with nothing to show for it is a failure worth a red card.
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick, reverse: reverse);
             if (stitched is not null)
-                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: refined);
+                await HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: refined);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
