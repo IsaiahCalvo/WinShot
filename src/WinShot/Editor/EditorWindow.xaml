@@ -230,8 +230,8 @@
                              tool bar shows the TOOLS inside the chosen group, behind the same rule
                              as the one on the cluster's left. Select with nothing picked shows its
                              Box / Lasso modes here instead (w46). The settings live in row 2. -->
-                        <Rectangle x:Name="ToolSlotDivider" Style="{StaticResource ToolbarDivider}" Margin="4,0,6,0" Visibility="Collapsed"/>
-                        <StackPanel x:Name="SelectModePanel" Orientation="Horizontal" Visibility="Collapsed">
+                        <Rectangle x:Name="ToolSlotDivider" Style="{StaticResource ToolbarDivider}" Margin="4,0,6,0"/>
+                        <StackPanel x:Name="SelectModePanel" Orientation="Horizontal">
                             <RadioButton x:Name="SelectBoxModeBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="SelectMode"
                                          IsChecked="True" Checked="OnSelectModeChecked" Tag="Box" ToolTip="Box select"
                                          AutomationProperties.Name="Box select"
