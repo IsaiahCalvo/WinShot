@@ -34,7 +34,7 @@ public class EditorShellContractTests
         // draws. The three marks that act on the pixels underneath share the Effects row.
         Assert.Equal(new[] { "Redact", "Spotlight", "Magnifier" },
             EditorShellContract.ToolsIn(EditorToolCategory.Redact));
-        Assert.Equal(new[] { "Crop" }, EditorShellContract.ToolsIn(EditorToolCategory.Image));
+        Assert.Empty(EditorShellContract.ToolsIn(EditorToolCategory.Image));
         Assert.Empty(EditorShellContract.MoreToolOrder);
 
         string[] buttons = EditorShellContract.PointerToolOrder

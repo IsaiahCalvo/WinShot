@@ -117,7 +117,9 @@ internal static class EditorShellContract
         },
         EditorToolCategory.Text => new[] { "Text", "Callout" },
         EditorToolCategory.Redact => new[] { "Redact", "Spotlight", "Magnifier" },
-        EditorToolCategory.Image => new[] { "Crop" },
+        // The Image row holds one-shot actions (add image, add capture, background, OCR,
+        // GIF), not tools. Crop is the single crop button in the top bar, beside Undo.
+        EditorToolCategory.Image => Array.Empty<string>(),
         _ => Array.Empty<string>(),
     };
 
