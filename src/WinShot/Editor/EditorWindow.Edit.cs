@@ -275,6 +275,8 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
+        // A live brush drag owns Escape: nothing changes (Survey brushAdjustGesture.js).
+        if (_brushAdjust is not null && e.Key == Key.Escape) { EndBrushAdjust(commit: false); e.Handled = true; return; }
         // Survey listens for the counter drag's Shift / Escape on the WINDOW in the capture
         // phase, ahead of every in-page handler, and only while a drag is live
         // (PDFViewer.jsx:26202-26257). Escape cancels the placement outright; Shift freezes

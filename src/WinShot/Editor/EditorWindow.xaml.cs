@@ -314,8 +314,12 @@ public partial class EditorWindow : Window
         Width = Math.Min(1167, wa.Width * 0.9);
         Height = Math.Min(590, wa.Height * 0.9);
 
+        WireSelectionQuickBar();
+        WireBrushAdjust();
         Viewport.LostMouseCapture += (_, _) =>
         {
+            // A brush drag that loses the mouse changes nothing (Survey: a cancelled pointer).
+            EndBrushAdjust(commit: false);
             // A counter drag owns PointerMove outright, so it must never survive a lost capture.
             CancelCounterDrag();
             AbortDrag();
@@ -346,6 +350,7 @@ public partial class EditorWindow : Window
         Viewport.SizeChanged += (_, _) => ReapplyFit();
         Deactivated += (_, _) =>
         {
+            EndBrushAdjust(commit: false);
             _spaceDown = false;
             if (!_panning) UpdateCursor();
         };
@@ -1249,6 +1254,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void UpdateContextPanels()
     {
+        QueueQuickBarUpdate();
         EditorTool chrome = ChromeTool();
         bool filled = ChromeFilledRectangle();
         EditorContextControls controls = EditorShellContract.ContextFor(chrome, filled);
