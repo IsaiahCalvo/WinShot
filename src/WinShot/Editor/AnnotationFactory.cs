@@ -323,6 +323,11 @@ internal static class AnnotationFactory
         PathGeometry geometry, Point tip, double angle, double headSize, double thickness, ArrowheadStyle style)
     {
         if (style == ArrowheadStyle.None) return;
+        // Survey's triangle (lineRenderHelpers.js:129-152): points (-h/3, -h/2), (2h/3, 0),
+        // (-h/3, h/2) about the line's end, so the head is h long and h wide and its point
+        // sits 2h/3 PAST the end. WinShot used to put the point on the end itself, which
+        // drew a squat wedge a third as long as Survey's.
+        Point apex = tip + Polar(angle, headSize * 2 / 3);
         if (style == ArrowheadStyle.SolidTriangle)
         {
             double back = headSize / 3;
@@ -330,7 +335,7 @@ internal static class AnnotationFactory
             Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
             Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
             var solid = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = true };
-            solid.Segments.Add(new LineSegment(tip, isStroked: false));
+            solid.Segments.Add(new LineSegment(apex, isStroked: false));
             solid.Segments.Add(new LineSegment(right, isStroked: false));
             geometry.Figures.Add(solid);
             return;
@@ -346,7 +351,7 @@ internal static class AnnotationFactory
                 Point left = tip + Polar(angle + Math.PI, back) + Polar(angle + Math.PI / 2, half);
                 Point right = tip + Polar(angle + Math.PI, back) + Polar(angle - Math.PI / 2, half);
                 var fig = new PathFigure { StartPoint = left, IsClosed = true, IsFilled = false };
-                fig.Segments.Add(new LineSegment(tip, isStroked: true));
+                fig.Segments.Add(new LineSegment(apex, isStroked: true));
                 fig.Segments.Add(new LineSegment(right, isStroked: true));
                 outline.Figures.Add(fig);
                 break;

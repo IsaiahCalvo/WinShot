@@ -288,10 +288,17 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
-                // Survey's in-progress guide is shaft-only: no arrowhead until commit
-                // (SVGAnnotationLayer.jsx:4992-5005).
-                arrow.Data = LineCurve.Stroke(_dragStart, pos, null);
+            {
+                // Survey (SVGAnnotationLayer.jsx:8058-8085, owner 2026-10-02): "the preview IS
+                // the mark", built by the commit builder, so its dash and heads are what lands
+                // on release. A short drag is still just a dot until it has a direction.
+                var (tail, head) = ArrowEnds(_dragStart, pos);
+                arrow.Data = (head - tail).Length < 0.5
+                    ? LineCurve.Stroke(tail, head, null)
+                    : AnnotationFactory.ArrowGeometry(tail, head, arrow.StrokeThickness,
+                        _arrowhead, _startArrowhead, thin: _arrowStyle == ArrowStyle.Thin, mid: null);
                 break;
+            }
             case EditorTool.Callout:
                 UpdateCalloutPreview(_dragStart, CalloutLayout.PushBoxOffTip(_dragStart, pos));
                 break;
@@ -1255,18 +1262,16 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Survey's line/arrow draw-time guide (SVGAnnotationLayer.jsx:4992-5005): translucent,
-    /// dashed 5/5, round caps, no fill and no arrowhead. The solid stroke, the user's own line
-    /// style and the head all appear only on commit.
+    /// Survey's line/arrow draw-time preview (SVGAnnotationLayer.jsx:8058-8085): since owner
+    /// ruling 2026-10-02 "the preview IS the mark" — the user's colour, width, line style and
+    /// heads, exactly what lands on release. WinShot still drew the old translucent dashed
+    /// guide, so a Solid arrow looked dashed the whole time it was being drawn.
     /// </summary>
-    private static void ApplyLinePreviewStyle(Shape shape, double strokeWidth)
+    private void ApplyLinePreviewStyle(Shape shape, double strokeWidth)
     {
-        shape.Fill = null;
-        shape.Opacity = 0.6;
-        // WPF dash units are multiples of StrokeThickness, so divide to land on 5 px.
-        double t = strokeWidth > 0 ? strokeWidth : 1;
-        shape.StrokeDashArray = new DoubleCollection { 5 / t, 5 / t };
-        shape.StrokeDashCap = PenLineCap.Round;
+        _ = strokeWidth;
+        shape.Opacity = 1;
+        AnnotationFactory.ApplyDash(shape, _lineStyle);
     }
 
     /// <summary>Swaps a line/arrow preview back to its committed look.</summary>
@@ -1452,6 +1457,13 @@ public partial class EditorWindow : Window
                 : null;
         if (geo is null) return false;
 
+        // An arrow's heads are fill-only figures (unstroked segments) in the same Path as
+        // the stroked shaft, so a stroked halo traced the shaft and skipped the head. Survey
+        // glows the head too (SVGAnnotationLayer.jsx hover halo: line + arrowhead spec), so
+        // every segment is stroked in the halo's copy.
+        if (meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeLine)
+            geo = StrokeEverySegment(geo);
+
         double sw = meta.Thickness ?? (fe is Shape sh ? sh.StrokeThickness : 1);
         double inv = 1 / _zoom;
         bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
@@ -1507,6 +1519,17 @@ public partial class EditorWindow : Window
                 && PaintHalo(_selectionHalos[i], fe);
             if (!painted) _selectionHalos[i].Visibility = Visibility.Collapsed;
         }
+    }
+
+    private static Geometry StrokeEverySegment(Geometry geo)
+    {
+        // Clone keeps the canvas transform ToCanvasSpace put on it, untouched.
+        if (geo is not PathGeometry path) return geo;
+        var copy = path.Clone();
+        foreach (var fig in copy.Figures)
+            foreach (var seg in fig.Segments)
+                seg.IsStroked = true;
+        return copy;
     }
 
     /// <summary>The counter's pin outline in canvas space (its badge Grid holds the Path).</summary>

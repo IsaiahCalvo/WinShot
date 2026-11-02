@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using WinShot.Editor;
 using Xunit;
@@ -106,5 +106,24 @@ public class ArrowheadParityTests
         // no caps to approximate, so they hold to 6.
         Assert.Equal(HeadSize * Math.Cos(Math.PI / 6) + pen, b.Height, 2);
         Assert.Equal(300 + HeadSize * Math.Sin(Math.PI / 6) / 2 + pen / 2, b.Right, 2);
+    }
+
+    /// <summary>
+    /// Survey's triangle (lineRenderHelpers.js:129-152) is headSize long and headSize wide,
+    /// with its point 2/3 of headSize PAST the line's end. WinShot put the point on the end,
+    /// which drew a squat wedge a third as long ("the filled arrowhead looks wrong").
+    /// </summary>
+    [Theory]
+    [InlineData(ArrowheadStyle.SolidTriangle)]
+    [InlineData(ArrowheadStyle.OpenTriangle)]
+    public void TheTriangleHeadIsSurveysShape(ArrowheadStyle style)
+    {
+        var pg = (PathGeometry)Arrow(style);
+        var head = new PathGeometry { Figures = { pg.Figures[1] } };
+        double pen = style == ArrowheadStyle.OpenTriangle ? Math.Max(2, Thickness) : 0;
+        // The line ends at x = 300; the point is 2h/3 past it, the base h/3 short of it.
+        Assert.InRange(head.Bounds.Right, 300 + HeadSize * 2 / 3 - 0.01, 300 + HeadSize * 2 / 3 + pen + 0.01);
+        Assert.InRange(head.Bounds.Width, HeadSize - 0.01, HeadSize + pen + 0.01);
+        Assert.InRange(head.Bounds.Height, HeadSize - 0.01, HeadSize + pen + 0.01);
     }
 }

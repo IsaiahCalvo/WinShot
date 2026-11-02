@@ -2360,6 +2360,7 @@ public partial class EditorWindow : Window
         _pillHideTimer?.Stop();
         _pillShowTimer?.Stop();
         RotationPill.Visibility = Visibility.Visible;
+        QueueQuickBarUpdate();   // the bar steps clear of the degree box while it is up
     }
 
     /// <summary>
@@ -2416,6 +2417,7 @@ public partial class EditorWindow : Window
         if (_closed || RotationPill is null || RotationInput is null) return;
         if (RotationInput.IsKeyboardFocused || RotationPill.IsMouseOver || _activeHandle == RotateHandleIndex) return;
         RotationPill.Visibility = Visibility.Collapsed;
+        QueueQuickBarUpdate();
     }
 
     private void HideRotationPill()

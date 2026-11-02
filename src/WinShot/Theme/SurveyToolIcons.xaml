@@ -549,12 +549,12 @@
     <!-- Bottom bar: pin to screen. -->
     <Viewbox x:Key="SurveyIcon.Pin" x:Shared="False" Width="16" Height="16">
         <Canvas Width="24" Height="24">
-            <!-- A thumbtack straight on: head bar, shoulders, flared collar, needle. Drawn
-                 with lines, not arcs — the arc-heavy lucide pin came out as a bowtie at 18 px
-                 because two sweep flags were transcribed the wrong way round. -->
+            <!-- Survey's PinIcon (pinnedToolsShared.jsx:21-28, lucide "pin"), path data copied
+                 character for character: WPF's path markup reads SVG arc flags the same way,
+                 so nothing is re-derived. The old hand-drawn tack did not match it. -->
+            <Path Style="{StaticResource SurveyIconStroke}" Data="M12 17v5"/>
             <Path Style="{StaticResource SurveyIconStroke}"
-                  Data="M9.5,2.5 H14.5 V8 L17,11.5 H7 L9.5,8 Z"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M12,11.5 V21"/>
+                  Data="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78 0.9A2 2 0 0 0 5 15.24V16 a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-0.76a2 2 0 0 0-1.11-1.79l-1.78 -0.9A2 2 0 0 1 15 10.76V7 a1 1 0 0 1 1-1 a2 2 0 0 0 0-4 H8 a2 2 0 0 0 0 4 a1 1 0 0 1 1 1 z"/>
         </Canvas>
     </Viewbox>
 

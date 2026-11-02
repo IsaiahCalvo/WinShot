@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -223,7 +223,16 @@ public partial class EditorWindow
         _quickBar.Visibility = Visibility.Visible;
         _quickBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         Size size = _quickBar.DesiredSize;
-        var bounds = new Rect(0, 0, Viewport.ActualWidth, Viewport.ActualHeight);
+        // Survey's viewerBounds: the visible viewer area UNDER the tool bars. WinShot's sub-row
+        // overlays the top of the canvas (as Survey's does), so a bar placed against the
+        // viewport's own top edge slid under the row and was cut in half.
+        double top0 = 0;
+        if (EditorGroupBar is { IsVisible: true } row && row.ActualHeight > 0)
+        {
+            try { top0 = Math.Max(0, row.TransformToVisual(OverlayCanvas).TransformBounds(new Rect(row.RenderSize)).Bottom); }
+            catch (InvalidOperationException) { }
+        }
+        var bounds = new Rect(0, top0, Viewport.ActualWidth, Math.Max(0, Viewport.ActualHeight - top0));
         var pos = SelectionQuickBarLayout.Position(sel, keepOut, preferBelow, bounds, size.Width, size.Height);
         if (pos is not var (left, top, _))
         {
@@ -276,14 +285,21 @@ public partial class EditorWindow
         }
         var centre = new Point(selection.X + selection.Width / 2, selection.Y + selection.Height / 2);
         var gripCentre = new Point(grip.X + grip.Width / 2, grip.Y + grip.Height / 2);
-        Vector dir = gripCentre - centre;
-        if (dir.Length < 0.001) dir = new Vector(0, -1);
-        dir.Normalize();
-        // RotationPill is 60 x 28 and sits 16 px past the grip (PlaceRotationPill).
-        double reach = Math.Max(grip.Width, grip.Height) / 2 + 16 + 30;
-        Point pillCentre = gripCentre + dir * reach;
-        var pill = new Rect(pillCentre.X - 30, pillCentre.Y - 14, 60, 28);
-        return (new[] { grip, pill }, gripCentre.Y < centre.Y - 0.5);
+        bool up = gripCentre.Y < centre.Y - 0.5;
+        // Survey also keeps the degree box's spot clear even while the box is hidden, which
+        // parked the bar a whole pill's height past the grip (Isaiah: "really far away from
+        // the rotation handle"). The degree box only shows while the grip is hovered or
+        // turned, so the bar keeps clear of the grip, and of the box only when it is up.
+        if (RotationPill is { IsVisible: true } box)
+        {
+            try
+            {
+                Rect pill = box.TransformToVisual(OverlayCanvas).TransformBounds(new Rect(box.RenderSize));
+                return (new[] { grip, pill }, up);
+            }
+            catch (InvalidOperationException) { }
+        }
+        return (new[] { grip }, up);
     }
 
     private void OpenQuickBarColourPicker()
