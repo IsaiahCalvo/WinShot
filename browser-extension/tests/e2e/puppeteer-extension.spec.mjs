@@ -378,14 +378,18 @@ test("URL-list batch closes its disposable fixture tabs", async () => {
       return (await chrome.storage.local.get(`batch:${id}`))[`batch:${id}`];
     });
     expect(urlBatch.results).toHaveLength(2);
-    // Name each result so a failure says which page did not complete and why.
-    expect(urlBatch.results.map((item) => `${item.url}: ${item.state}${item.error ? ` (${item.error})` : ""}`))
-      .toEqual(["http://127.0.0.1:4173/frame: complete", "http://127.0.0.1:4173/sticky: complete"]);
-    expect(urlBatch.mode).toBe("full-page");
     const urlRecords = await urlSummary.evaluate(async (results) => {
       const store = await import(chrome.runtime.getURL("src/store.js"));
-      return await Promise.all(results.map((item) => store.getRecord(item.captureId)));
+      return await Promise.all(results.map((item) => item.captureId ? store.getRecord(item.captureId) : null));
     }, urlBatch.results);
+    // Name each result (and its capture warnings) so a failure says which page did not complete and why.
+    expect(urlBatch.results.map((item, index) => {
+      const warnings = urlRecords[index]?.report?.warnings || [];
+      const seam = urlRecords[index]?.report?.seamConfidence?.minimum;
+      const detail = item.state === "complete" ? "" : ` (${[item.error, ...warnings, seam != null ? `seam ${seam.toFixed(3)}` : ""].filter(Boolean).join("; ")})`;
+      return `${item.url}: ${item.state}${detail}`;
+    })).toEqual(["http://127.0.0.1:4173/frame: complete", "http://127.0.0.1:4173/sticky: complete"]);
+    expect(urlBatch.mode).toBe("full-page");
     expect(urlRecords.every((record) => record.report.mode === "full-page" && record.report.tileCount > 1)).toBe(true);
     const remainingFixturePages = (await run.browser.pages()).filter((page) => /^http:\/\/127\.0\.0\.1:4173\/(frame|sticky)$/.test(page.url()));
     expect(remainingFixturePages).toHaveLength(0);
