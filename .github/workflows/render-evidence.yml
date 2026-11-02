@@ -57,6 +57,26 @@ jobs:
           $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','VisualAuditHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
           $filter = ($classes | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
           dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --logger "console;verbosity=normal"
+      - name: Print audit findings
+        if: always()
+        shell: pwsh
+        run: |
+          $o = $env:OUT
+          foreach ($f in "visual-audit\audit.tsv","winforms-audit\audit.tsv") {
+            $p = Join-Path $o $f
+            if (-not (Test-Path $p)) { Write-Host "== $f missing"; continue }
+            $rows = Get-Content $p
+            $flagged = $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1].Trim() -ne '' }
+            Write-Host "== $f : $($rows.Count - 1) rows, $(@($flagged).Count) flagged"
+            Write-Host $rows[0]
+            $flagged | ForEach-Object { Write-Host "AUDIT $_" }
+          }
+          foreach ($f in "winforms-audit\noscale.tsv","visual-audit\states.tsv") {
+            $p = Join-Path $o $f
+            if (Test-Path $p) { Write-Host "== $f"; Get-Content $p | ForEach-Object { Write-Host "TSV $_" } }
+          }
+          Write-Host "== files"
+          Get-ChildItem -Recurse -File $o | ForEach-Object { Write-Host ("FILE " + $_.FullName.Substring($o.Length + 1) + " " + $_.Length) }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
