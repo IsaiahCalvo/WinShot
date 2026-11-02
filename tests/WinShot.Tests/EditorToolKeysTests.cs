@@ -1,4 +1,4 @@
-using System.Windows.Input;
+﻿using System.Windows.Input;
 using WinShot.Editor;
 using Xunit;
 
@@ -28,7 +28,8 @@ public class EditorToolKeysTests
     // WinShot's own tools, on letters Survey leaves free.
     [InlineData(Key.X, false, EditorTool.Redact)]
     [InlineData(Key.C, true, EditorTool.Crop)]
-    [InlineData(Key.M, false, EditorTool.Magnifier)]
+    [InlineData(Key.M, true, EditorTool.Magnifier)]
+    [InlineData(Key.M, false, EditorTool.Pan)]
     public void LettersArmSurveysTools(Key key, bool shift, EditorTool expected) =>
         Assert.Equal(expected, EditorToolKeys.Resolve(key, shift)?.Tool);
 

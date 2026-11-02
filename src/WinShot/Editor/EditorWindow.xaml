@@ -371,7 +371,7 @@
                                          AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
                                          Content="{StaticResource SurveyIcon.Spotlight}"/>
                             <RadioButton x:Name="MagnifierToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
-                                         Tag="Magnifier" Content="{StaticResource SurveyIcon.Magnifier}" Checked="OnToolChecked" ToolTip="Magnify (M)"
+                                         Tag="Magnifier" Content="{StaticResource SurveyIcon.Magnifier}" Checked="OnToolChecked" ToolTip="Magnify (Shift+M)"
                                          AutomationProperties.Name="Magnify"
                                          AutomationProperties.HelpText="Drag a bubble that shows a piece of the picture blown up. Drag its ring to aim it somewhere else. Shortcut M."/>
                         </StackPanel>
