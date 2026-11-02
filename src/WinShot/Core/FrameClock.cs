@@ -84,8 +84,9 @@ internal sealed class FrameTimer : IDisposable
 /// the gap between ticks.
 ///
 /// Where there is no real vertical blank to wait for (a remote session, a display that is
-/// asleep, a headless test desktop) the wait returns at once; the pacer notices and falls back
-/// to sleeping out <see cref="Motion.FrameIntervalMs"/>, which is what the old timer did.
+/// asleep, a headless test desktop) ticks fall back to every <see cref="Motion.FrameIntervalMs"/>,
+/// which is what the old timer did, and a tick never waits on the display for more than two
+/// frames, so a display that stalls cannot stall the animation with it.
 /// </summary>
 internal sealed class FrameClock
 {
@@ -178,8 +179,6 @@ internal sealed class FrameClock
 
     private void PaceLoop()
     {
-        var vblank = new VBlankSource();
-        long last = Stopwatch.GetTimestamp();
         while (true)
         {
             // Idle until a timer starts, waking now and then to see whether the UI thread
@@ -191,17 +190,13 @@ internal sealed class FrameClock
                 continue;
             }
 
-            bool waited = vblank.Wait();
-            long now = Stopwatch.GetTimestamp();
-            if (!waited || now - last < MinPeriodTicks)
-            {
-                // No real refresh to pace by. Sleep out the old timer's interval instead of
-                // spinning; the tween clocks read wall time, so motion stays correct.
-                int elapsedMs = (int)((now - last) * 1000 / Stopwatch.Frequency);
-                Thread.Sleep(Math.Max(1, Motion.FrameIntervalMs - elapsedMs));
-                now = Stopwatch.GetTimestamp();
-            }
-            last = now;
+            // Tick on the next refresh, but never wait on the display for long. Waiting on the
+            // vertical blank inline meant the first frame of every new clock sat behind the
+            // DXGI lookup (tens of milliseconds, more on a cold machine), and a display that
+            // stops reporting refreshes (asleep, mid mode-change) froze every animation with
+            // it. While refreshes are arriving the timeout is a generous two frames; once they
+            // stop, ticks fall back to the old timer's interval until they come back.
+            VBlankPulse.WaitForNext(VBlankPulse.IsHealthy ? HealthyWaitMs : Motion.FrameIntervalMs);
 
             if (!_active.IsSet)
                 continue;
@@ -213,6 +208,101 @@ internal sealed class FrameClock
                 if (!_ownerThread.IsAlive)
                     return;
                 Volatile.Write(ref _pending, 0);
+            }
+        }
+    }
+
+    /// <summary>Longest a tick waits for a refresh while refreshes are arriving: two 60 Hz
+    /// frames and a bit, so one late vblank costs a frame, not a stall.</summary>
+    private const int HealthyWaitMs = 34;
+
+    /// <summary>
+    /// One thread for the whole process that waits on the display's vertical blank and wakes
+    /// every clock waiting for it. One DXGI output instead of one per UI thread, looked up once
+    /// instead of on each new selector thread, and it sleeps when no animation is asking.
+    /// </summary>
+    private static class VBlankPulse
+    {
+        private static readonly object Gate = new();
+        private static readonly ManualResetEventSlim Demand = new(false);
+        private static long _frame;
+        private static long _lastPulse;
+        private static long _lastDemand;
+        private static int _started;
+
+        /// <summary>A real refresh arrived in the last 100 ms.</summary>
+        public static bool IsHealthy =>
+            Stopwatch.GetTimestamp() - Volatile.Read(ref _lastPulse) < Stopwatch.Frequency / 10;
+
+        /// <summary>Blocks until the next vertical blank or the timeout; true if a blank came.</summary>
+        public static bool WaitForNext(int timeoutMs)
+        {
+            Volatile.Write(ref _lastDemand, Environment.TickCount64);
+            Demand.Set();
+            if (Interlocked.Exchange(ref _started, 1) == 0)
+            {
+                new Thread(Loop)
+                {
+                    IsBackground = true,
+                    Name = "WinShot vblank",
+                    Priority = ThreadPriority.AboveNormal,
+                }.Start();
+            }
+
+            long deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * timeoutMs / 1000;
+            lock (Gate)
+            {
+                long seen = _frame;
+                while (_frame == seen)
+                {
+                    long remainingMs = (deadline - Stopwatch.GetTimestamp()) * 1000 / Stopwatch.Frequency;
+                    if (remainingMs <= 0)
+                        return false;
+                    Monitor.Wait(Gate, (int)remainingMs);
+                }
+                return true;
+            }
+        }
+
+        private static void Loop()
+        {
+            var vblank = new VBlankSource();
+            long last = Stopwatch.GetTimestamp();
+            while (true)
+            {
+                // Nobody has asked for a frame in a second: sleep until someone does. Reset
+                // first and re-check after, so a request landing in between is not lost.
+                if (Environment.TickCount64 - Volatile.Read(ref _lastDemand) > 1000)
+                {
+                    Demand.Reset();
+                    if (Environment.TickCount64 - Volatile.Read(ref _lastDemand) > 1000)
+                        Demand.Wait();
+                }
+
+                bool waited = vblank.Wait();
+                long now = Stopwatch.GetTimestamp();
+                if (!waited)
+                {
+                    // No output to wait on; the clocks are already ticking on their timeout.
+                    Thread.Sleep(100);
+                    last = Stopwatch.GetTimestamp();
+                    continue;
+                }
+                if (now - last < MinPeriodTicks)
+                {
+                    // Returned at once: there is no real refresh behind it (a remote session,
+                    // a sleeping display). Do not pulse, and do not spin.
+                    Thread.Sleep(Motion.FrameIntervalMs);
+                    last = Stopwatch.GetTimestamp();
+                    continue;
+                }
+                last = now;
+                Volatile.Write(ref _lastPulse, now);
+                lock (Gate)
+                {
+                    _frame++;
+                    Monitor.PulseAll(Gate);
+                }
             }
         }
     }
