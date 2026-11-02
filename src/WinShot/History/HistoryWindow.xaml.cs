@@ -356,7 +356,25 @@ public partial class HistoryWindow : Window
         switch (key)
         {
             case Key.Escape:
+                // Escape backs out one level, the way Explorer and Finder do: out of selection
+                // mode first, and only then out of History. Closing the window from the middle
+                // of a batch threw away the selection along with it.
+                if (_selectionMode)
+                {
+                    SetSelectionMode(false);
+                    return true;
+                }
                 Dismiss();
+                return true;
+            case Key.A when modifiers == ModifierKeys.Control:
+                // Ctrl+A is the select-all gesture everywhere else on Windows; in the single-select
+                // grid it did nothing at all. It switches to selection mode and takes every tile.
+                if (_items.Count == 0)
+                    return false;
+                SetSelectionMode(true);
+                ItemsList.SelectAll();
+                _selectionAnchor = _items.FirstOrDefault();
+                UpdateSelectionState();
                 return true;
             // Rotate, Rename, Print and Open-with live only on the tile's context menu, and
             // that menu hangs off the card INSIDE the item template. ContextMenuService walks

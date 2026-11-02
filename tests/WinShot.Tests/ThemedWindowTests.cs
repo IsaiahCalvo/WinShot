@@ -277,6 +277,15 @@ public class ThemedWindowTests
             Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
             Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
 
+            // Ctrl+A takes every tile (switching to selection mode to do it), and Escape then
+            // backs out of the selection rather than closing History with it.
+            Assert.True(window.HandleKey(Key.A, ModifierKeys.Control));
+            Assert.Equal(SelectionMode.Extended, list.SelectionMode);
+            Assert.Equal(items.Count, list.SelectedItems.Count);
+            Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.Equal(SelectionMode.Single, list.SelectionMode);
+            Assert.True(window.IsVisible, "Escape in selection mode should leave History open");
+
             // Rotate, Rename, Print and Open-with are only on the tile's context menu, and that
             // menu hangs off the card inside the item template - so the Menu key, which looks up
             // from the focused CONTAINER, found nothing until the grid opened it explicitly.
