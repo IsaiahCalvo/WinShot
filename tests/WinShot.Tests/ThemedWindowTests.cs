@@ -106,6 +106,11 @@ public class ThemedWindowTests
                 BackgroundFromEditorSmoke(editor);
                 editor.Close();
 
+                var clickEditor = new EditorWindow(NewBitmap(), settings, history);
+                clickEditor.Show();
+                EditorEveryButtonClicksCleanly(clickEditor);
+                clickEditor.Close();
+
                 var composer = new BackgroundComposerWindow(NewBitmap(), settings, history);
                 composer.Show();
                 composer.Close();
@@ -2631,6 +2636,71 @@ public class ThemedWindowTests
         PumpDispatcherOnce();
         window.RestoreSectionDefaults(1);
         Assert.Equal(new Settings().HotkeyCaptureRegion, settings.Current.HotkeyCaptureRegion);
+    }
+
+    /// <summary>
+    /// "Every button works": presses every button, toggle and radio in the editor (the
+    /// tool rows, sub-toolbars, format bar, colour picker, fit menu, popups) the way a
+    /// mouse click does, and fails on the first one whose handler throws, either right
+    /// away or on the dispatcher afterwards. Buttons that open a file dialog, a modal
+    /// window, the clipboard, OCR or close the editor are left out; their own smokes
+    /// cover them.
+    /// </summary>
+    private static void EditorEveryButtonClicksCleanly(EditorWindow editor)
+    {
+        var skip = new HashSet<string>
+        {
+            "BtnSave", "BtnDone", "BtnDragOut", "BtnPin", "BtnCopy",
+            "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "ExportGifBtn",
+            "ResizeImageBtn", "OcrRegionBtn",
+        };
+        var buttons = new List<ButtonBase>();
+        void Walk(object node)
+        {
+            if (node is ButtonBase b) buttons.Add(b);
+            if (node is DependencyObject d)
+                foreach (object child in LogicalTreeHelper.GetChildren(d)) Walk(child);
+        }
+        Walk(editor);
+        for (int i = 0; i < 4; i++) PumpDispatcherOnce();
+
+        Exception? late = null;
+        void OnUnhandled(object s, DispatcherUnhandledExceptionEventArgs e)
+        {
+            late ??= e.Exception;
+            e.Handled = true;
+        }
+        var onClick = typeof(ButtonBase).GetMethod("OnClick",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        editor.Dispatcher.UnhandledException += OnUnhandled;
+        int pressed = 0;
+        try
+        {
+            foreach (var button in buttons)
+            {
+                string label = string.IsNullOrEmpty(button.Name)
+                    ? $"{button.GetType().Name} '{button.ToolTip ?? button.Content}'"
+                    : button.Name;
+                if (skip.Contains(button.Name)) continue;
+                try
+                {
+                    onClick.Invoke(button, null);
+                    PumpDispatcherOnce();
+                }
+                catch (System.Reflection.TargetInvocationException ex)
+                {
+                    throw new Xunit.Sdk.XunitException($"pressing {label} threw: {ex.InnerException}");
+                }
+                if (late is not null)
+                    throw new Xunit.Sdk.XunitException($"pressing {label} threw later: {late}");
+                pressed++;
+            }
+        }
+        finally
+        {
+            editor.Dispatcher.UnhandledException -= OnUnhandled;
+        }
+        Assert.True(pressed > 60, $"only {pressed} editor buttons found to press");
     }
 
     private static void PumpDispatcherOnce()
