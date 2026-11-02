@@ -26,10 +26,13 @@ internal sealed class DirectEditCaptureHandoff
 
     public Task RunAsync()
     {
-        Task history = RunExclusiveAsync(_historyWork);
+        // The clipboard takes the bitmap first. It is a quick CF_DIB write the user may be
+        // about to paste; history is a PNG encode and a disk write. In the other order a
+        // paste made right after the capture got the old clipboard.
         Task autoCopy = _autoCopyWork is null
             ? Task.CompletedTask
             : RunExclusiveAsync(_autoCopyWork);
+        Task history = RunExclusiveAsync(_historyWork);
         return Task.WhenAll(history, autoCopy);
     }
 

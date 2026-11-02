@@ -1990,6 +1990,12 @@ public partial class App : Application
     {
         try
         {
+            // The clipboard first and alongside history, never behind it. History encodes a
+            // PNG and writes it to disk, which on a large capture is hundreds of ms, and the
+            // copy used to wait for all of it: select, press Ctrl+V straight away, and the
+            // OLD clipboard pasted. Both clone under CloneBitmap's lock on bmp, so running
+            // them together is safe.
+            Task copy = autoCopy ? QueueAutoClipboardCopy(bmp) : Task.CompletedTask;
             string? sourceApp = _captureSourceApp;
             string? historyPath = await Task.Run(() =>
             {
@@ -2010,8 +2016,7 @@ public partial class App : Application
             // bmp, and the copy's clone happens on its own STA thread — completing the
             // gate with the copy still in flight let a quickly-dismissed overlay dispose
             // bmp under the clone (auto-copy silently died + armed the 8s suppression).
-            if (autoCopy)
-                await QueueAutoClipboardCopy(bmp).ConfigureAwait(false);
+            await copy.ConfigureAwait(false);
 
             captureWorkCompletion.TrySetResult(null);
         }
