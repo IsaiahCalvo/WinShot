@@ -84,6 +84,71 @@ public partial class EditorWindow
             foreach (ComboBoxItem item in LineStyleBox.Items.OfType<ComboBoxItem>())
                 item.ContentTemplate = sample;
         }
+
+        // Survey's arrowhead menu draws each row's arrow (StrokeSample 28 x 14, endHead).
+        if (ArrowStyleBox is not null)
+        {
+            foreach (ComboBoxItem item in ArrowStyleBox.Items.OfType<ComboBoxItem>())
+                if (item.Tag is string tag && ArrowheadSample(tag) is { } head)
+                    item.ContentTemplate = head;
+            ArrowStyleBox.DropDownOpened += (_, _) => SyncImportedArrowheads();
+        }
+    }
+
+    /// <summary>Tags of the heads a user can't pick, only meet on an existing mark.</summary>
+    private static readonly HashSet<string> ImportedArrowheads = new(StringComparer.Ordinal)
+    {
+        "openTriangle", "diamond", "slash",
+    };
+
+    /// <summary>
+    /// Survey AppShell.jsx:4386-4389: the menu lists the six heads, and prepends the live head
+    /// only when it is one of the three that arrive from an existing mark.
+    /// </summary>
+    private void SyncImportedArrowheads()
+    {
+        if (ArrowStyleBox is null) return;
+        foreach (ComboBoxItem item in ArrowStyleBox.Items.OfType<ComboBoxItem>())
+            if (item.Tag is string tag && ImportedArrowheads.Contains(tag))
+                item.Visibility = ReferenceEquals(ArrowStyleBox.SelectedItem, item)
+                    ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// A 28 x 14 arrow with the head <paramref name="tag"/> at its right end, then the word.
+    /// Heads follow Survey's menu drawings (Icons.jsx arrowheadNone ... arrowheadBar) on a
+    /// 1.5px shaft; the three imported heads are drawn the same way.
+    /// </summary>
+    private static DataTemplate? ArrowheadSample(string tag)
+    {
+        // (shaft end x, stroked head data, filled head data)
+        (double shaftTo, string? stroked, string? filled)? spec = tag switch
+        {
+            "none" => (27, null, null),
+            "solidTriangle" => (22, null, "M21,3.5 L27,7 L21,10.5 Z"),
+            "vShape" => (27, "M22,3 L27,7 L22,11", null),
+            "openCircle" => (21, "M21,7 A3,3 0 1 1 27,7 A3,3 0 1 1 21,7 Z", null),
+            "square" => (21, "M21,4 L27,4 L27,10 L21,10 Z", null),
+            "horizontalLine" => (26, "M26,3 L26,11", null),
+            "openTriangle" => (21, "M21,3.5 L27,7 L21,10.5 Z", null),
+            "diamond" => (20, "M20,7 L23.5,3.5 L27,7 L23.5,10.5 Z", null),
+            "slash" => (27, "M23,11 L27,3", null),
+            _ => null,
+        };
+        if (spec is not { } h) return null;
+        const string ink = "{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}";
+        var xaml = new System.Text.StringBuilder(
+            "<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+            "<StackPanel Orientation='Horizontal' VerticalAlignment='Center'>" +
+            "<Canvas Width='28' Height='14' VerticalAlignment='Center'>");
+        xaml.Append(System.FormattableString.Invariant(
+            $"<Line X1='1' Y1='7' X2='{h.shaftTo}' Y2='7' StrokeThickness='1.5' StrokeStartLineCap='Round' StrokeEndLineCap='Round' Stroke='{ink}'/>"));
+        if (h.stroked is not null)
+            xaml.Append($"<Path Data='{h.stroked}' StrokeThickness='1.5' StrokeLineJoin='Round' StrokeStartLineCap='Round' StrokeEndLineCap='Round' Stroke='{ink}'/>");
+        if (h.filled is not null)
+            xaml.Append($"<Path Data='{h.filled}' StrokeThickness='1.5' StrokeLineJoin='Round' Stroke='{ink}' Fill='{ink}'/>");
+        xaml.Append("</Canvas><TextBlock Text='{Binding}' Margin='8,0,0,0' VerticalAlignment='Center'/></StackPanel></DataTemplate>");
+        return (DataTemplate)System.Windows.Markup.XamlReader.Parse(xaml.ToString());
     }
 
     /// <summary>A 28 x 14 stroke sample, then the style's name. Keyed on the item's own word.</summary>
@@ -206,6 +271,8 @@ public partial class EditorWindow
             }
             if (_customDotFace is not null) PaintDot(_customDotFace, current, !preset, custom: true);
         }
+
+        SyncImportedArrowheads();
 
         bool eraser = _tool == EditorTool.Eraser;
         if (_eraserToggle is not null) _eraserToggle.Visibility = eraser ? Visibility.Visible : Visibility.Collapsed;

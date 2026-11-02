@@ -946,27 +946,24 @@
                                                              2026-09-17. Letting the ComboBox size itself to its widest row made it
                                                              257 DIP, and a control more than twice as wide as it should be is what
                                                              pushed the arrowhead into the overflow flyout at a 1400 DIP window. -->
-                                                        <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="1"
+                                                        <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="4"
                                                                   Width="112"
                                                                   SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
+                                                            <!-- Survey PASS 7 (board 15) offers SIX heads, in board order, each drawn as the head it puts on
+                                                                 the line, with the short words of ARROWHEAD_SHORT_LABELS ("Filled", not "Solid triangle").
+                                                                 Triangle, Diamond and Slash only ever arrive on an imported or older mark: they stay
+                                                                 hidden and the menu prepends whichever one is live (AppShell.jsx:4386-4389). -->
+                                                            <ComboBoxItem Content="Triangle" Tag="openTriangle" Visibility="Collapsed"/>
+                                                            <ComboBoxItem Content="Diamond" Tag="diamond" Visibility="Collapsed"/>
+                                                            <ComboBoxItem Content="Slash" Tag="slash" Visibility="Collapsed"/>
                                                             <ComboBoxItem Content="None" Tag="none"/>
-                                                            <ComboBoxItem Content="Solid triangle" Tag="solidTriangle"/>
-                                                            <ComboBoxItem Content="V-shape" Tag="vShape"/>
-                                                            <ComboBoxItem Content="Open circle" Tag="openCircle"/>
-                                                            <ComboBoxItem Content="Open triangle" Tag="openTriangle"/>
-                                                            <!-- Survey's vocabulary is these NINE ARROWHEAD_STYLE_LABELS: one head,
-                                                                 at the end point. It was six when this was ported; Diamond, Slash and
-                                                                 Square are PDF /LE endings Survey has offered since its line-endings
-                                                                 work, verified on the running app 2026-09-17. The old CleanShot
-                                                                 "Double" entry had no Survey counterpart; the geometry still loads
-                                                                 old .winshot files. -->
-                                                            <ComboBoxItem Content="Horizontal line" Tag="horizontalLine"/>
-                                                            <ComboBoxItem Content="Diamond" Tag="diamond"/>
-                                                            <ComboBoxItem Content="Slash" Tag="slash"/>
+                                                            <ComboBoxItem Content="Filled" Tag="solidTriangle"/>
+                                                            <ComboBoxItem Content="Open" Tag="vShape"/>
+                                                            <ComboBoxItem Content="Circle" Tag="openCircle"/>
                                                             <ComboBoxItem Content="Square" Tag="square"/>
-                                                            <!-- Survey's six are HEADS on a stroked shaft. WinShot's two are whole-arrow
-                                                                 looks, so they live under them in the same menu rather than in a second
-                                                                 control: Fancy is one filled silhouette, Curved arms the curved tool. -->
+                                                            <ComboBoxItem Content="Bar" Tag="horizontalLine"/>
+                                                            <!-- WinShot's own whole-arrow looks, under Survey's heads: Fancy is one filled silhouette,
+                                                                 Curved arms the curved tool. -->
                                                             <Separator/>
                                                             <ComboBoxItem Content="Fancy" Tag="Fancy"/>
                                                             <ComboBoxItem Content="Curved" Tag="Curved"/>

@@ -1305,6 +1305,14 @@ public partial class EditorWindow : Window
     /// </summary>
     private void UpdateContextPanels()
     {
+        // Survey's row 2 swap / leave motion wraps every change (EditorWindow.RowMotion.cs).
+        var motion = BeginRowMotion();
+        try { UpdateContextPanelsCore(); }
+        finally { EndRowMotion(motion); }
+    }
+
+    private void UpdateContextPanelsCore()
+    {
         QueueQuickBarUpdate();
         EditorTool chrome = ChromeTool();
         bool filled = ChromeFilledRectangle();
@@ -1979,6 +1987,8 @@ public partial class EditorWindow : Window
         // SizeField is a fixed-width composite (43px input + 24px chevron), so it
         // never needs measuring.
         FitComboToLongestItem(ArrowStyleBox);
+        // Room for the 28px arrow sample and its 8px gap in front of each head's name.
+        if (ArrowStyleBox is not null) ArrowStyleBox.Width += 36;
         FitComboToLongestItem(LineStyleBox);
         // Room for the 28px stroke sample and its 8px gap in front of each style name.
         if (LineStyleBox is not null) LineStyleBox.Width += 36;
