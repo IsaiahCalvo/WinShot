@@ -1884,9 +1884,13 @@ public class ThemedWindowTests
         {
             // The narrowest real case: a 1920x1080 display at 200 % is 960 DIP.
             editor.MinWidth = 400;
-            editor.Width = 700;
+            // Survey's leaner rows (90 px arrowhead pill, no counter Mode / Reset) fit far
+            // more at 700 DIP than they used to, so the narrower pass is what reaches the
+            // packing case.
+            foreach (double rowWidth in new[] { 700.0, 520.0 })
             foreach (EditorTool tool in Enum.GetValues<EditorTool>())
             {
+                editor.Width = rowWidth;
                 check.Invoke(editor, new object[] { tool });
                 editor.UpdateLayout();
                 PackEditorFormat(editor);
@@ -1905,7 +1909,7 @@ public class ThemedWindowTests
 
             // Otherwise the assertion above is true of a row that always fits, and the case
             // this method exists for was never reached.
-            Assert.True(overflowed > 0, "no tool overflowed a 700 DIP row, so nothing was tested.");
+            Assert.True(overflowed > 0, "no tool overflowed a 700 or 520 DIP row, so nothing was tested.");
         }
         finally
         {
