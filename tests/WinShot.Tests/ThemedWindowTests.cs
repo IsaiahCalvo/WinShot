@@ -286,6 +286,21 @@ public class ThemedWindowTests
             Assert.Equal(SelectionMode.Single, list.SelectionMode);
             Assert.True(window.IsVisible, "Escape in selection mode should leave History open");
 
+            // Search narrows the grid by what a capture is called, where it came from and what
+            // kind it is; Escape clears it before it would close History.
+            var search = (TextBox)window.FindName("SearchBox");
+            search.Text = "video";
+            WaitUntil(() => list.Items.Count == 1);
+            Assert.Same(items[1], list.Items[0]);
+            Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.Equal(string.Empty, search.Text);
+            Assert.Equal(items.Count, list.Items.Count);
+            Assert.True(window.IsVisible, "Escape with a search should clear it, not close History");
+            search.Text = "no-such-capture";
+            WaitUntil(() => list.Items.Count == 0);
+            search.Clear();
+            Assert.Equal(items.Count, list.Items.Count);
+
             // Rotate, Rename, Print and Open-with are only on the tile's context menu, and that
             // menu hangs off the card inside the item template - so the Menu key, which looks up
             // from the focused CONTAINER, found nothing until the grid opened it explicitly.

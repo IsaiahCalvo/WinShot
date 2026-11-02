@@ -98,6 +98,21 @@ public class HistoryRenderHarness
                 // The states a grid full of cards never shows: a filter that matched nothing, and
                 // a save folder that could not be read. Both are new in this track and neither is
                 // reachable from the idle render, so they get their own frames to scan.
+                // Search: a query that keeps some tiles, then one that keeps none.
+                window.HandleKey(System.Windows.Input.Key.Escape, System.Windows.Input.ModifierKeys.None);
+                var search = (TextBox)window.FindName("SearchBox");
+                search.Text = "video";
+                PumpUntil(() => list.Items.Count > 0 && list.Items.Count < Math.Min(fixtureCount, HistoryIncrementalCollection.DefaultPageSize));
+                window.UpdateLayout();
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-search.png"));
+                search.Text = "invoice march";
+                PumpUntil(() => list.Items.Count == 0);
+                Pump();
+                window.UpdateLayout();
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-search-empty.png"));
+                search.Clear();
+                Pump();
+
                 ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipGif")).IsChecked = true;
                 Pump();
                 window.UpdateLayout();

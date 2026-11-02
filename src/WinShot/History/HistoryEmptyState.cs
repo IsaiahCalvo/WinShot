@@ -20,13 +20,14 @@ internal readonly record struct HistoryEmptyState(
     private const string PictureGlyph = "SurveyIcon.Photo";
     private const string WarningGlyph = "SurveyIcon.Warning";
     private const string BlockedGlyph = "SurveyIcon.Lock";
+    private const string SearchGlyph = "SurveyIcon.Magnifier";
 
     /// <summary>
     /// <paramref name="filter"/> is the active chip id ("all", "images", "scrolling", "video",
     /// "gif"). A failed load wins over everything: the grid being empty is a symptom of it, not
     /// a fact about the library.
     /// </summary>
-    public static HistoryEmptyState For(string filter, bool historyEnabled, string? loadError)
+    public static HistoryEmptyState For(string filter, bool historyEnabled, string? loadError, string? query = null)
     {
         if (!string.IsNullOrWhiteSpace(loadError))
         {
@@ -50,6 +51,23 @@ internal readonly record struct HistoryEmptyState(
                 ShowNewCapture: false,
                 ShowRetry: false,
                 ShowSettings: true);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            // A search that found nothing is about the words typed, not the library: the chip
+            // sentences below would blame the filter, and "No captures yet" would be a lie.
+            string shown = query!.Trim();
+            if (shown.Length > 40)
+                shown = shown[..39] + "…";
+            return new HistoryEmptyState(
+                SearchGlyph,
+                $"Nothing matches \u201C{shown}\u201D",
+                filter == "all"
+                    ? "Try other words, or press Escape to clear the search."
+                    : "Try other words, pick All, or press Escape to clear the search.",
+                ShowNewCapture: false,
+                ShowRetry: false);
         }
 
         return filter switch

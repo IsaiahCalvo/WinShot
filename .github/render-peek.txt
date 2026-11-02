@@ -1,0 +1,3 @@
+# Frames to print into the render-evidence log (paths under render-out).
+history\history-search.png
+history\history-search-empty.png
