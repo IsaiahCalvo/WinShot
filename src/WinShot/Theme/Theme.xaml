@@ -2775,6 +2775,10 @@
                     <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10"
                             Padding="8,0,6,0" SnapsToDevicePixels="True">
                         <Grid>
+                            <!-- Hover wash under the content, faded by HoverIn/HoverOut like
+                                 every other chrome template, never a snapped Background. -->
+                            <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" Margin="-8,0,-6,0"
+                                    CornerRadius="10" Background="{StaticResource ElevatedBrush}"/>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -2789,8 +2793,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
