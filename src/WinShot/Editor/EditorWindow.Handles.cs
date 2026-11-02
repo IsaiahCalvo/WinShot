@@ -902,6 +902,7 @@ public partial class EditorWindow : Window
         {
             HandleKind.Endpoints or HandleKind.Vertex => Cursors.Hand,
             HandleKind.Callout => _handleThumbs[handle].Cursor ?? Cursors.Hand,
+            _ when _selection.Count > 1 => CursorForHandle(handle, 0),
             _ when _selected is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeStep } }
                 => Cursors.Hand,
             _ => CursorForHandle(handle, angle),
@@ -934,6 +935,11 @@ public partial class EditorWindow : Window
         {
             // Crop adjust: snapshot the pending rect so a cancel/abort can restore it.
             _resizeBefore = null;
+            return;
+        }
+        if (_selection.Count > 1 && handle is >= 0 and < 8 && GroupCanResize())
+        {
+            BeginGroupResize(handle);
             return;
         }
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
@@ -970,6 +976,11 @@ public partial class EditorWindow : Window
         if (_handleKind == HandleKind.Crop || _adjustingCrop)
         {
             DragCropHandle(pos);
+            return;
+        }
+        if (_groupResize is not null)
+        {
+            DragGroupResize(pos);
             return;
         }
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
@@ -1160,6 +1171,11 @@ public partial class EditorWindow : Window
             UpdateSelectionVisual();
             return;
         }
+        if (_groupResize is not null)
+        {
+            EndGroupResize();
+            return;
+        }
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
         {
             _resizeBefore = null;
@@ -1205,7 +1221,8 @@ public partial class EditorWindow : Window
     {
         if (_activeHandle < 0) return;
         _activeHandle = -1;
-        if (!_adjustingCrop && _selected is not null && _resizeBefore is { } snap)
+        if (_groupResize is not null) AbortGroupResize();
+        else if (!_adjustingCrop && _selected is not null && _resizeBefore is { } snap)
             ApplyResizeSnapshot(_selected, snap);
         _calloutDragStart = null;
         _calloutDragInvalid = false;
@@ -1393,7 +1410,9 @@ public partial class EditorWindow : Window
         bool curved = meta.Type == AnnotationData.TypeCurvedArrow && basePts.Length >= 3;
         Point from = Map(basePts[0]);
         Point to = Map(curved ? basePts[2] : basePts[^1]);
-        Point? mid = LineCurve.ParseMid(meta.Mid) is Point m ? Map(m) : null;
+        // From the PRE-DRAG bend: meta.Mid is rewritten every frame, so mapping the live
+        // value would compound the scale on each mouse move.
+        Point? mid = LineCurve.ParseMid(_resizeBefore.Meta.Mid) is Point m ? Map(m) : null;
         stroke.RenderTransform = null;
         if (curved)
         {
@@ -1790,6 +1809,24 @@ public partial class EditorWindow : Window
                 meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
                 meta.Tx = 0;
                 meta.Ty = 0;
+                break;
+
+            case AnnotationData.TypeText when fe is Grid textBox && snap.Meta.Rect is { Length: >= 4 }:
+                // A boxed label: a resize writes its position and size into Canvas.Left/Top and
+                // Width/Height, so undo has to put those back, not just the move offset.
+                fe.RenderTransform = null;
+                Canvas.SetLeft(fe, snap.Bounds.X);
+                Canvas.SetTop(fe, snap.Bounds.Y);
+                fe.Width = snap.Bounds.Width;
+                fe.Height = snap.Bounds.Height;
+                if (textBox.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock boxedTb)
+                    boxedTb.Width = Math.Max(1, fe.Width - 2 * AnnotationFactory.TextPadding);
+                if (snap.FontSize is double boxedFs) SetFontSize(fe, boxedFs);
+                meta.FontSize = snap.FontSize ?? meta.FontSize;
+                meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
+                meta.Tx = 0;
+                meta.Ty = 0;
+                fe.UpdateLayout();
                 break;
 
             case AnnotationData.TypeText:

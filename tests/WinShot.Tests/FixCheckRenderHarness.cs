@@ -188,6 +188,63 @@ public class FixCheckRenderHarness
                     Save(new CroppedBitmap(bmp, r), Path.Combine(outDir, "6-bottom-bar.png"));
                 }
 
+                // 7. Rail footer: the snapping switch on, then off.
+                void RailShot(string name)
+                {
+                    var btn = (FrameworkElement)editor.FindName("SnappingBtn")!;
+                    Point at = btn.TranslatePoint(new Point(0, 0), editor);
+                    editor.UpdateLayout();
+                    var bmp = new RenderTargetBitmap((int)(editor.ActualWidth * 2), (int)(editor.ActualHeight * 2), 192, 192, PixelFormats.Pbgra32);
+                    bmp.Render(editor);
+                    int rx = Math.Max(0, (int)((at.X - 20) * 2));
+                    int ry = Math.Max(0, (int)((at.Y - 120) * 2));
+                    var r = new Int32Rect(rx, ry, Math.Min(bmp.PixelWidth - rx, 80 * 2), Math.Min(bmp.PixelHeight - ry, 200 * 2));
+                    Save(new CroppedBitmap(bmp, r), Path.Combine(outDir, name));
+                }
+                Deselect();
+                RailShot("7a-snapping-on.png");
+                Invoke(editor, "ToggleSnapping", null); Pump(3);
+                RailShot("7b-snapping-off.png");
+                Invoke(editor, "ToggleSnapping", null); Pump(3);
+
+                // 8. Group resize: three marks selected together, then the frame dragged by a
+                // corner and by the right side.
+                Size(3);
+                Tool(EditorTool.Rectangle); Drag(640, 300, 720, 360);
+                Tool(EditorTool.Ellipse); Drag(740, 300, 800, 350);
+                Tool(EditorTool.Arrow); Drag(640, 400, 780, 430);
+                Tool(EditorTool.Select);
+                Drag(625, 285, 870, 450);
+                Pump(4);
+                var sel = (FrameworkElement)editor.FindName("SelectionRect")!;
+                Rect Frame() => new(Canvas.GetLeft(sel), Canvas.GetTop(sel), sel.Width, sel.Height);
+                string Boxes()
+                {
+                    var parts = new List<string>();
+                    foreach (UIElement el in canvas.Children)
+                        if (el is FrameworkElement { Tag: AnnotationData d } fe && fe.TranslatePoint(new Point(0, 0), canvas) is var p
+                            && VisualTreeHelper.GetDescendantBounds(fe) is var lb && !lb.IsEmpty)
+                        {
+                            var gb = fe.TransformToAncestor(canvas).TransformBounds(lb);
+                            if (gb.Left >= 600 && gb.Top >= 270) parts.Add($"{d.Type}:{gb.X:0},{gb.Y:0},{gb.Width:0}x{gb.Height:0}");
+                        }
+                    return string.Join(" ", parts);
+                }
+                Rect f0 = Frame();
+                log.AppendLine($"group before frame={f0} marks={Boxes()}");
+                WindowShot("8a-group-selected.png");
+                Drag(f0.Right, f0.Bottom, f0.Right + 60, f0.Bottom + 45);
+                Rect f1 = Frame();
+                log.AppendLine($"group corner frame={f1} marks={Boxes()}");
+                WindowShot("8b-group-corner.png");
+                Drag(f1.Right, f1.Top + f1.Height / 2, f1.Right - 70, f1.Top + f1.Height / 2);
+                Rect f2 = Frame();
+                log.AppendLine($"group side frame={f2} marks={Boxes()}");
+                WindowShot("8c-group-side.png");
+                Invoke(editor, "UndoAsync", null); Pump(4);
+                Invoke(editor, "UndoAsync", null); Pump(4);
+                log.AppendLine($"group undone frame={Frame()} marks={Boxes()}");
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
@@ -196,7 +253,7 @@ public class FixCheckRenderHarness
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         thread.Join();
-        File.WriteAllText(Path.Combine(outDir, "fixcheck.txt"), failure?.ToString() ?? "ok");
+        File.WriteAllText(Path.Combine(outDir, "fixcheck.txt"), log + (failure?.ToString() ?? "ok"));
         if (failure is not null) throw new Xunit.Sdk.XunitException(failure.ToString());
     }
 

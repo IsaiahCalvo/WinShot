@@ -54,6 +54,24 @@ internal static class ObjectSnap
             double.IsNaN(bestY) ? 0 : bestY);
     }
 
+    /// <summary>
+    /// Survey findSnapOffset with one edge candidate (the group-resize pull): the nudge that
+    /// puts a dragged edge at <paramref name="value"/> exactly on a neighbour's edge along the
+    /// same axis, or 0 when none is within <paramref name="tolerance"/>.
+    /// </summary>
+    public static double EdgeOffset(double value, IEnumerable<Rect> others, bool axisX, double tolerance = Tolerance)
+    {
+        if (tolerance <= 0 || double.IsNaN(value)) return 0;
+        double best = double.NaN;
+        foreach (Rect other in others)
+        {
+            if (other.IsEmpty) continue;
+            Consider(value, axisX ? other.Left : other.Top, tolerance, ref best);
+            Consider(value, axisX ? other.Right : other.Bottom, tolerance, ref best);
+        }
+        return double.IsNaN(best) ? 0 : best;
+    }
+
     /// <summary>One dashed guide: a vertical line at x = Value (axis X) or a horizontal one
     /// at y = Value (axis Y), running from Min to Max along the other axis.</summary>
     public readonly record struct Guide(bool AxisX, double Value, double Min, double Max);

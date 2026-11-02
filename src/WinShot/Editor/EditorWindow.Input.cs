@@ -1915,14 +1915,17 @@ public partial class EditorWindow : Window
                 return;
             }
             // Survey's overlay padding is 2 page units, so it scales with zoom like the mark.
-            const double padMany = 2;
-            union.Inflate(padMany, padMany);
-            Canvas.SetLeft(SelectionRect, union.X);
-            Canvas.SetTop(SelectionRect, union.Y);
-            SelectionRect.Width = union.Width;
-            SelectionRect.Height = union.Height;
+            Rect frame = union;
+            frame.Inflate(GroupFramePadding, GroupFramePadding);
+            Canvas.SetLeft(SelectionRect, frame.X);
+            Canvas.SetTop(SelectionRect, frame.Y);
+            SelectionRect.Width = frame.Width;
+            SelectionRect.Height = frame.Height;
             SelectionRect.Visibility = Visibility.Visible;
-            HideHandles();
+            // Survey (2026-10-22): the group frame carries its eight resize grabbers when
+            // every member can take a resize; otherwise it stays move-only.
+            if (GroupCanResize()) LayoutGroupHandles(union);
+            else HideHandles();
             return;
         }
         if (_selected is null || !AnnotationCanvas.Children.Contains(_selected))
