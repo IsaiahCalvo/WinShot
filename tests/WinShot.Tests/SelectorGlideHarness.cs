@@ -334,10 +334,12 @@ public class SelectorGlideHarness
                     moves++;
             }
 
-            // A 200 ms glide has 25 frames in it. Anything approaching 50 is the second
-            // surface advancing the clock a second time, which is both a double-speed glide
-            // and, for the frame it happens on, a border whose two halves are a pixel apart.
-            int budget = (Motion.GlideDurationMs / Motion.FrameIntervalMs) + 2;
+            // A paint round holds its answer for RectangleTween.PaintRoundMs, so a 200 ms
+            // glide painted flat out can move at most once per round. The second surface
+            // advancing the clock a second time would double that, which is both a
+            // double-speed glide and, for the frame it happens on, a border whose two halves
+            // are a pixel apart.
+            int budget = (Motion.GlideDurationMs / RectangleTween.PaintRoundMs) + 2;
             Assert.True(moves <= budget,
                 $"the glide moved {moves} times over one 200 ms flight, against a budget of {budget}");
         }
