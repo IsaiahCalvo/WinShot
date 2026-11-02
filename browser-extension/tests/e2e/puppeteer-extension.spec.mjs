@@ -68,7 +68,10 @@ async function launchExactExtension() {
   });
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
-    const page = await target.page().catch(() => null);
+    // Tabs the extension opens straight onto a web page (URL batches) are watched without
+    // puppeteer's viewport emulation: applying it late resizes the page mid-capture, which
+    // a real browser never does. Test-made tabs start blank and keep the emulated viewport.
+    const page = await (/^https?:/.test(target.url()) ? target.asPage() : target.page()).catch(() => null);
     if (page) monitorPage(page, errors);
   });
   const extensionId = await browser.installExtension(extensionPath);
