@@ -2775,14 +2775,14 @@
                     <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10"
                             Padding="8,0,6,0" SnapsToDevicePixels="True">
                         <Grid>
-                            <!-- Hover wash under the content, faded by HoverIn/HoverOut like
-                                 every other chrome template, never a snapped Background. -->
-                            <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" Margin="-8,0,-6,0"
-                                    CornerRadius="10" Background="{StaticResource ElevatedBrush}"/>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
+                            <!-- Hover wash under the content, faded by HoverIn/HoverOut like
+                                 every other chrome template, never a snapped Background. -->
+                            <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" Margin="-8,0,-6,0"
+                                    CornerRadius="10" Background="{StaticResource ElevatedBrush}"/>
                             <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Left"
                                               TextElement.Foreground="{TemplateBinding Foreground}"/>
                             <Path Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"
