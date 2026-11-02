@@ -219,8 +219,7 @@ public partial class EditorWindow : Window
                     var rebuilt = AnnotationFactory.CreatePolyShape(
                         run, closed, snap.StrokeColor, polyFill, snap.Thickness,
                         AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.CloudIntensity ?? _cloudIntensity,
-                        StrokeStyles.ParseRender(snap.Meta.Sketch), snap.Meta.Seed ?? 0);
+                        snap.Meta.CloudIntensity ?? _cloudIntensity);
                     poly.Data = rebuilt.Data;
                     poly.Stroke = stroke;
                     poly.StrokeThickness = snap.Thickness;
@@ -846,21 +845,18 @@ public partial class EditorWindow : Window
             Point from = new(pts[0][0], pts[0][1]);
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
-            var render = StrokeStyles.ParseRender(meta.Sketch);
-            int seed = meta.Seed ?? 0;
             var whole = AnnotationFactory.ParseArrowStyle(meta.Style);
             if (whole == ArrowStyle.Fancy)
             {
                 // A filled silhouette, so it carries no stroke: a stroked one rounds the tail.
-                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, ArrowStyle.Fancy, render, seed);
+                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, ArrowStyle.Fancy);
                 arrow.StrokeThickness = 0;
             }
             else
             {
                 var (end, start) = AnnotationStyle.HeadsFrom(meta);
                 arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start,
-                    thin: whole == ArrowStyle.Thin, mid: LineCurve.ParseMid(meta.Mid),
-                    render: render, seed: seed);
+                    thin: whole == ArrowStyle.Thin, mid: LineCurve.ParseMid(meta.Mid));
                 arrow.StrokeThickness = thickness;
             }
         }

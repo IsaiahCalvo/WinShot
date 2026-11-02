@@ -29,10 +29,8 @@ internal enum EditorContextControls
     Magnification = 1 << 11,
 
     /// <summary>
-    /// Survey's LINE STYLE dropdown: solid / dashed / dotted / cloud, plus WinShot's
-    /// hand-drawn render toggle. Every mark that owns an outline gets it — the shapes AND
-    /// the arrows, which is the whole point: a sketchy rectangle next to a ruled arrow is
-    /// not a hand-drawn diagram.
+    /// Survey's LINE STYLE dropdown: solid / dashed / dotted / cloud. Every mark that owns
+    /// an outline gets it — the shapes AND the arrows.
     /// </summary>
     LineStyle = 1 << 12,
 

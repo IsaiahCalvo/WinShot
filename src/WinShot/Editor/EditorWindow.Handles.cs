@@ -1364,8 +1364,7 @@ public partial class EditorWindow : Window
         bool closed = meta.Type == AnnotationData.TypePolygon;
         var rebuilt = AnnotationFactory.CreatePolyShape(
             points, closed, StrokeColorOf(poly), Colors.Transparent, poly.StrokeThickness,
-            AnnotationStyle.LineStyleFrom(meta), meta.CloudIntensity ?? _cloudIntensity,
-            StrokeStyles.ParseRender(meta.Sketch), meta.Seed ?? 0);
+            AnnotationStyle.LineStyleFrom(meta), meta.CloudIntensity ?? _cloudIntensity);
         poly.Data = rebuilt.Data;
         meta.Points = points.Select(p => new[] { p.X, p.Y }).ToArray();
         meta.Tx = 0;

@@ -118,6 +118,7 @@ public class ThemedWindowTests
                 EditorFitsTallImageSmoke(settings, history);
                 EditorGrowLandsOnItsTargetSmoke(settings, history);
                 EditorFitsSmallImageSmoke(settings, history);
+                EditorFillsMidImageSmoke(settings, history);
 
                 app.Shutdown();
             }
@@ -2298,16 +2299,12 @@ public class ThemedWindowTests
     private struct RECT { public int Left, Top, Right, Bottom; }
 
     /// <summary>
-    /// A small capture opens zoomed to FILL the canvas (Isaiah, 2026-11-02: at 100% it was
-    /// "too small, massive borders above and below"), but never past MaxFitZoom, so a tiny
-    /// one is not blown up to 900%. History of the rule below.
+    /// A tiny capture opens FITTED: scaled up to fill the view, but never past 200%.
     ///
-    /// <para>This asserted the opposite until 2026-09-17 — "a tiny capture must scale UP so
-    /// the paper is the work" — which is right for a PDF page and wrong for a screenshot:
-    /// upscaling a bitmap adds no detail, it just serves blurry pixels and makes whatever you
-    /// annotate on top land on a soft target. Survey never meets the case because a page is
-    /// always about 612x792pt. Measured before the change: 300x200 opened at 331%, this 80x50
-    /// one at over 900%.</para>
+    /// <para>History: an uncapped fit opened a 300x200 capture at 331% and this 80x50 one at
+    /// over 900% — blurry. On 2026-09-17 fit was capped at 100%, which left small captures as
+    /// a little island in big empty bands (Isaiah, 2026-11-02: "it's too small"). The cap is
+    /// now 200%.</para>
     /// </summary>
     private static void EditorFitsSmallImageSmoke(SettingsService settings, HistoryService history)
     {
@@ -2330,23 +2327,67 @@ public class ThemedWindowTests
         editor.Close();
 
         Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
-        double maxFit = (double)typeof(EditorWindow).GetField("MaxFitZoom",
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetRawConstantValue()!;
-        Assert.True(zoom > 1.0, $"small capture was not zoomed up to fill: zoom={zoom}, viewport={vw}x{vh}");
+        Assert.True(Math.Abs(zoom - 2.0) < 1e-9,
+            $"tiny capture was not opened at the 200% fit cap: zoom={zoom}, viewport={vw}x{vh}");
         Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
             $"tiny capture overflowed the viewport: zoom={zoom}, scaled={zoom * imgW}x{zoom * imgH}, viewport={vw}x{vh}");
         // Survey's fit insets are unchanged — PAD=20 per side horizontally, GAP=16 folded into
         // the height DIVISOR (PdfjsViewerContainer.jsx:51-52, :137-140, :1891-1895) — they are
-        // capped at MaxFitZoom. Check the uncapped arithmetic still matches, so a real
+        // just capped at 2.0 now. Check the uncapped arithmetic still matches, so a real
         // regression in the formula cannot hide behind the cap.
         double surveyFit = Math.Min((vw - 40) / imgW, vh / (imgH + 32));
-        Assert.True(surveyFit > 1.0,
-            $"this capture is meant to be one Survey's formula would magnify: surveyFit={surveyFit}");
-        Assert.Equal(Math.Min(maxFit, surveyFit), zoom, 9);
+        Assert.True(surveyFit > 2.0,
+            $"this capture is meant to be one Survey's formula would magnify past the cap: surveyFit={surveyFit}");
+        Assert.Equal(Math.Min(2.0, surveyFit), zoom, 9);
         // Survey's fit trigger tooltip is `Page fit: ${label}` in every state (AppShell.jsx:3072).
         Assert.Equal("Page fit: Fit page", fitMenuBtn.ToolTip);
         Assert.Equal(Visibility.Visible, zoomBox.Visibility);
         Assert.EndsWith("%", zoomBox.Text);
+    }
+
+    /// <summary>
+    /// A capture somewhat smaller than the view (Isaiah's 2026-11-02 screenshot: a chat
+    /// snippet opened at 100% with big empty bands above and below) opens FILLING the view
+    /// at Survey's fit, magnified, not at 100% — and a hand zoom remembered from an earlier
+    /// capture does not bring the small view back.
+    /// </summary>
+    private static void EditorFillsMidImageSmoke(SettingsService settings, HistoryService history)
+    {
+        const int imgW = 400, imgH = 250;
+        string mode = settings.Current.EditorZoomMode;
+        double manual = settings.Current.EditorManualZoom;
+        settings.Current.EditorZoomMode = "Free";
+        settings.Current.EditorManualZoom = 1.0;
+        try
+        {
+            var bitmap = new SD.Bitmap(imgW, imgH);
+            using (var g = SD.Graphics.FromImage(bitmap)) g.Clear(SD.Color.CornflowerBlue);
+
+            var editor = EditorWindow.CreateForCapture(bitmap, settings, history);
+            editor.Show();
+            for (int i = 0; i < 6; i++) PumpDispatcherOnce();
+
+            var viewport = (System.Windows.FrameworkElement)editor.FindName("Viewport");
+            double vw = viewport.ActualWidth, vh = viewport.ActualHeight;
+            double zoom = (double)typeof(EditorWindow)
+                .GetField("_zoom", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(editor)!;
+
+            editor.Close();
+
+            Assert.True(vw > 1 && vh > 1, $"viewport not laid out (size={vw}x{vh})");
+            double surveyFit = Math.Min((vw - 40) / imgW, vh / (imgH + 32));
+            Assert.True(surveyFit > 1.0,
+                $"this capture is meant to be smaller than the view: surveyFit={surveyFit}, viewport={vw}x{vh}");
+            Assert.Equal(Math.Min(2.0, surveyFit), zoom, 9);
+            Assert.True(zoom * imgW <= vw + 1 && zoom * imgH <= vh + 1,
+                $"fitted capture overflowed the viewport: zoom={zoom}, viewport={vw}x{vh}");
+        }
+        finally
+        {
+            settings.Current.EditorZoomMode = mode;
+            settings.Current.EditorManualZoom = manual;
+        }
     }
 
     /// <summary>

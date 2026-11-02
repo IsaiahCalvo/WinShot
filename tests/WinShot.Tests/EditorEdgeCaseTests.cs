@@ -41,7 +41,6 @@ public class EditorEdgeCaseTests
                 AnnotationData.TypeRectangle, new Rect(0, 0, 10, 10),
                 Colors.Lime, 3, ShapeFillMode.Solid, Colors.Magenta, LineBorderStyle.Solid);
             shape.Dash = StrokeDash.Dotted.ToString();
-            shape.Sketch = StrokeRender.Sketchy.ToString();
             shape.Seed = 99;
             var image = AnnotationData.ForImage(new Rect(2, 2, 8, 8));
             image.Alpha = 0.42;
@@ -69,7 +68,6 @@ public class EditorEdgeCaseTests
 
             var s = loadedDoc.Annotations[3];
             Assert.Equal("Dotted", s.Dash);
-            Assert.Equal("Sketchy", s.Sketch);
             Assert.Equal(99, s.Seed);
             Assert.NotNull(s.FillColor);
             // ProjectSerializer's colour parse helper is private now; the stored form is the
@@ -241,21 +239,6 @@ public class EditorEdgeCaseTests
             SD.Rectangle f = EditorGrowLayout.Lerp(from, t, p);
             Assert.True(f.Width >= 1 && f.Height >= 1);
         }
-    }
-
-    // ------------------------------------------------------------- P9 sketchy
-
-    [Fact]
-    public void P9_SketchGeometryIsFiniteForDegenerateShapes()
-    {
-        foreach (var r in new[] { new Rect(0, 0, 0, 0), new Rect(0, 0, 1, 0), new Rect(5, 5, 0.001, 0.001) })
-        {
-            var poly = StrokeStyles.SketchPolygon(StrokeStyles.RectCorners(r), 7);
-            Assert.All(poly, p => Assert.False(double.IsNaN(p.X) || double.IsNaN(p.Y)));
-            var ell = StrokeStyles.SketchPolygon(StrokeStyles.EllipsePoints(r), 7);
-            Assert.All(ell, p => Assert.False(double.IsNaN(p.X) || double.IsNaN(p.Y)));
-        }
-        Assert.Equal(2, StrokeStyles.SketchSegment(new Point(1, 1), new Point(1, 1), 3).Count);
     }
 
     // ---------------------------------------------------------------- P10 hsv

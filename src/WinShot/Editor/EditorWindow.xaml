@@ -1199,7 +1199,6 @@
                                                     <!-- Eraser mode lives in the tool's own split menu (Draw sub-row),
                                                          exactly as Survey mounts it — there is no top-row combo. -->
 
-
                                                     <StackPanel x:Name="RedactStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
                                                         <!-- Survey's own format controls are all dropdowns of this shape, so the four
                                                              ways a redaction can hide something is one too, rather than the glyph

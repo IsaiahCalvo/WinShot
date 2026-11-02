@@ -431,7 +431,7 @@ public partial class EditorWindow : Window
                         livePath.Data = _tool == EditorTool.Arrow
                             ? AnnotationFactory.ArrowGeometry(tail, head, livePath.StrokeThickness,
                                 _arrowhead, _startArrowhead, thin: _arrowStyle == ArrowStyle.Thin,
-                                mid: null, render: _strokeRender, seed: _sketchSeed)
+                                mid: null)
                             : LineCurve.Stroke(tail, head, null);
                     }
                     var strokeData = AnnotationData.ForStroke(
@@ -440,8 +440,6 @@ public partial class EditorWindow : Window
                         _lineStyle,
                         _tool == EditorTool.Arrow ? _arrowhead : ArrowheadStyle.None,
                         _tool == EditorTool.Arrow ? _startArrowhead : ArrowheadStyle.None);
-                    strokeData.Sketch = _strokeRender == StrokeRender.Clean ? null : _strokeRender.ToString();
-                    strokeData.Seed = _sketchSeed;
                     if (_tool == EditorTool.Arrow) strokeData.Style = _arrowStyle.ToString();
                     shape.Tag = strokeData;
                     PushAddElement(shape);
@@ -520,23 +518,7 @@ public partial class EditorWindow : Window
                         _tool == EditorTool.Rectangle ? AnnotationData.TypeRectangle : AnnotationData.TypeEllipse,
                         bounds, strokeColor, shape.StrokeThickness, _fillMode, fillColor, lineStyle,
                         _cloudIntensity);
-                    // The hand-drawn quality is orthogonal to the line style, so it rides
-                    // alongside it rather than inside it.
-                    shapeData.Sketch = _strokeRender == StrokeRender.Clean ? null : _strokeRender.ToString();
-                    shapeData.Seed = _sketchSeed;
                     shape.Tag = shapeData;
-                    // A sketchy outline is a different ELEMENT (a Path, not a Rectangle), so
-                    // the ruled preview is swapped for the real thing on commit.
-                    if (_strokeRender == StrokeRender.Sketchy)
-                    {
-                        var sketched = (FrameworkElement)ProjectSerializer.CreateElement(
-                            shapeData, Array.Empty<BitmapSource>(), _source);
-                        sketched.Tag = shapeData;
-                        AnnotationCanvas.Children.Remove(shape);
-                        AnnotationCanvas.Children.Add(sketched);
-                        PushAddElement(sketched);
-                        return;
-                    }
                     PushAddElement(shape);
                 }
                 return;
@@ -751,7 +733,6 @@ public partial class EditorWindow : Window
 
         _dragStart = _tool is EditorTool.Redact or EditorTool.Crop or EditorTool.Magnifier or EditorTool.Spotlight
             ? ClampToSurface(pos) : pos;
-        _sketchSeed = ToolRandom.Next();
         _dragging = true;
         Viewport.CaptureMouse();
         _thickness = ActiveSize();
