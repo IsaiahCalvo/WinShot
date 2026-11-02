@@ -51,6 +51,7 @@ public partial class EditorWindow
     /// <summary>Box select (V) or lasso select (Alt+V). Both arm the Select tool.</summary>
     private void SetLassoSelect(bool lasso)
     {
+        LeaveTextSelect();
         _lassoSelect = lasso;
         SyncSelectModeButtons();
         CheckToolButton(EditorTool.Select);
@@ -65,16 +66,21 @@ public partial class EditorWindow
         var itemStyle = (Style)FindResource("DarkMenuItem");
         var box = new MenuItem { Header = "Box select", InputGestureText = "V", Style = itemStyle, IsCheckable = true };
         var lasso = new MenuItem { Header = "Lasso select", InputGestureText = "Alt+V", Style = itemStyle, IsCheckable = true };
+        var text = new MenuItem { Header = "Text select", InputGestureText = "Shift+V", Style = itemStyle, IsCheckable = true };
         box.Click += (_, _) => SetLassoSelect(false);
         lasso.Click += (_, _) => SetLassoSelect(true);
+        text.Click += (_, _) => EnterTextSelect();
         menu.Opened += (_, _) =>
         {
-            box.IsChecked = !_lassoSelect;
-            lasso.IsChecked = _lassoSelect;
+            box.IsChecked = !_lassoSelect && !_textSelectMode;
+            lasso.IsChecked = _lassoSelect && !_textSelectMode;
+            text.IsChecked = _textSelectMode;
         };
         menu.Items.Add(box);
         menu.Items.Add(lasso);
+        menu.Items.Add(text);
         SelectToolBtn.ContextMenu = menu;
+        WireTextSelect();
     }
 
     private void BeginLasso(Point start)

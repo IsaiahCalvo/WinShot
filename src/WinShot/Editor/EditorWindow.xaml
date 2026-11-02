@@ -242,6 +242,13 @@
                                          AutomationProperties.Name="Lasso select"
                                          AutomationProperties.HelpText="Draw a loop round the marks to pick. Shortcut Alt+V."
                                          Content="{StaticResource SurveyIcon.Lasso}"/>
+                            <!-- Survey's third mode (selectModes.js "Text Select", Shift+V). The
+                                 picture's words come from OCR; see EditorWindow.TextSelect.cs. -->
+                            <RadioButton x:Name="SelectTextModeBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="SelectMode"
+                                         Checked="OnSelectModeChecked" Tag="Text" ToolTip="Text select"
+                                         AutomationProperties.Name="Text select"
+                                         AutomationProperties.HelpText="Drag across the words in the picture to select them, then copy. Shortcut Shift+V."
+                                         Content="{StaticResource SurveyIcon.TextSelect}"/>
                         </StackPanel>
                         <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">

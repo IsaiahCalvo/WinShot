@@ -1512,7 +1512,8 @@ public partial class EditorWindow : Window
     private void OnSelectModeChecked(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded || _syncingSelectMode || sender is not RadioButton rb) return;
-        SetLassoSelect(rb.Tag as string == "Lasso");
+        if (rb.Tag as string == "Text") EnterTextSelect();
+        else SetLassoSelect(rb.Tag as string == "Lasso");
     }
 
     private void SyncSelectModeButtons()
@@ -1521,8 +1522,9 @@ public partial class EditorWindow : Window
         _syncingSelectMode = true;
         try
         {
-            SelectBoxModeBtn.IsChecked = !_lassoSelect;
-            SelectLassoModeBtn.IsChecked = _lassoSelect;
+            SelectBoxModeBtn.IsChecked = !_lassoSelect && !_textSelectMode;
+            SelectLassoModeBtn.IsChecked = _lassoSelect && !_textSelectMode;
+            if (SelectTextModeBtn is not null) SelectTextModeBtn.IsChecked = _textSelectMode;
         }
         finally { _syncingSelectMode = false; }
     }

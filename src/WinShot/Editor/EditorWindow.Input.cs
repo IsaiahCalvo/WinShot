@@ -87,6 +87,7 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         if (IsRotationPillSource(e.OriginalSource)) return; // the pill is its own control
         if (IsQuickBarSource(e.OriginalSource)) return; // so is the selection quick bar
+        if (IsTextBarSource(e.OriginalSource)) return;  // and Text select's Copy bar
         // Survey keeps the fit mode across annotation clicks; only an explicit zoom
         // (ZoomAt -> ViewFitMode.Free, Survey's MANUAL) stops the view tracking the viewport.
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
@@ -105,6 +106,13 @@ public partial class EditorWindow : Window
         // GetPosition against the content element inverts the view transform,
         // so every tool works in content (source-pixel) coordinates.
         var pos = e.GetPosition(AnnotationCanvas);
+
+        // Text select picks the picture's own words, never a mark (EditorWindow.TextSelect.cs).
+        if (_textSelectMode && _tool == EditorTool.Select)
+        {
+            TextSelectPointerDown(pos, e);
+            return;
+        }
 
         // A pending curved arrow eats this click: on its handle → start bending,
         // anywhere else → commit it (and fall through, e.g. to start a new curve).
@@ -177,6 +185,11 @@ public partial class EditorWindow : Window
         {
             PolyPointerMove(e.GetPosition(AnnotationCanvas),
                 Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
+            return;
+        }
+        if (_textSelectMode && _tool == EditorTool.Select)
+        {
+            TextSelectPointerMove(e.GetPosition(AnnotationCanvas));
             return;
         }
 
@@ -389,6 +402,12 @@ public partial class EditorWindow : Window
             return;
         }
         if (e.ChangedButton != MouseButton.Left) return;
+        if (_textDragging)
+        {
+            TextSelectPointerUp();
+            e.Handled = true;
+            return;
+        }
         if (_draggingCurveHandle)
         {
             // The handle stays live (and re-draggable) until a click elsewhere commits.

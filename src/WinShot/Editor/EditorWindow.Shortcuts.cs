@@ -242,6 +242,7 @@ public partial class EditorWindow
         KeyTip(CropUtilityBtn, EditorToolKeys.BadgeFor(EditorTool.Crop));
         KeyTip(AddImageBtn, ActionBadge(EditorToolKeys.ActionAddImage));
         KeyTip(AddBackgroundBtn, ActionBadge(EditorToolKeys.ActionBackground));
+        KeyTip(SelectTextModeBtn, ActionBadge(EditorToolKeys.ActionTextSelect));
     }
 
     private readonly Dictionary<FrameworkElement, string> _actionTipLabels = new();

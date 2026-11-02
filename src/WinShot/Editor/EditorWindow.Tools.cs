@@ -1473,6 +1473,8 @@ public partial class EditorWindow : Window
         // is UNDER a pixel-backed mark. One repaint pass at the one place the source is
         // swapped, rather than six call sites each remembering.
         RefreshAllRedactions();
+        // Text select's words were read off the old picture.
+        OnTextSourceChanged();
         Select(null);
         FitToView();
     }
