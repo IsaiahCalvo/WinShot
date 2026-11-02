@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: render-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   render:
     if: contains(github.event.pull_request.labels.*.name, 'render-evidence')
@@ -56,12 +60,19 @@ jobs:
           }
           $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','VisualAuditHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
           $filter = ($classes | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
-          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --logger "console;verbosity=normal"
+          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt"
       - name: Print audit findings
         if: always()
         shell: pwsh
         run: |
           $o = $env:OUT
+          # Least important first: the log tail is what gets read.
+          Write-Host "== files per folder"
+          Get-ChildItem -Recurse -File $o | Group-Object { $_.Directory.FullName.Substring($o.Length) } | ForEach-Object { Write-Host ("DIR " + $_.Name + " " + $_.Count) }
+          foreach ($f in "winforms-audit\noscale.tsv","visual-audit\states.tsv") {
+            $p = Join-Path $o $f
+            if (Test-Path $p) { Write-Host "== $f"; Get-Content $p | ForEach-Object { Write-Host "TSV $_" } }
+          }
           foreach ($f in "visual-audit\audit.tsv","winforms-audit\audit.tsv") {
             $p = Join-Path $o $f
             if (-not (Test-Path $p)) { Write-Host "== $f missing"; continue }
@@ -71,12 +82,11 @@ jobs:
             Write-Host $rows[0]
             $flagged | ForEach-Object { Write-Host "AUDIT $_" }
           }
-          foreach ($f in "winforms-audit\noscale.tsv","visual-audit\states.tsv") {
-            $p = Join-Path $o $f
-            if (Test-Path $p) { Write-Host "== $f"; Get-Content $p | ForEach-Object { Write-Host "TSV $_" } }
+          $t = Join-Path $o "test-output.txt"
+          if (Test-Path $t) {
+            Write-Host "== failed tests"
+            Select-String -Path $t -Pattern '^\s+Failed ' -Context 0,8 | ForEach-Object { Write-Host "FAIL $($_.Line)"; $_.Context.PostContext | ForEach-Object { Write-Host "FAIL   $_" } }
           }
-          Write-Host "== files"
-          Get-ChildItem -Recurse -File $o | ForEach-Object { Write-Host ("FILE " + $_.FullName.Substring($o.Length + 1) + " " + $_.Length) }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
