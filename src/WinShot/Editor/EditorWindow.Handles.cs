@@ -2114,52 +2114,18 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
-    /// <summary>
-    /// Survey's letter chain (PDFViewer.jsx:23322-23437): V, P, H, E, Shift+E, T, Q, L, A, C —
-    /// C is the COUNTER (:23425-23437), matching its shortcuts overlay.
-    /// E is the eraser and leaves its mode alone; Shift+E is the eraser forced to partial.
-    /// Survey has an ellipse tool but no key for it, so E belongs to the eraser here too.
-    /// R (rectangle), X (redact), K (crop) and M (magnify) are WinShot-only extensions on
-    /// keys Survey leaves free; crop moves off C so C can keep Survey's counter meaning.
-    /// B and I are one-shot image actions, not tools.
-    /// </summary>
     private bool TrySelectToolByKey(Key key, bool shift = false)
     {
-        if (shift)
-        {
-            if (key != Key.E) return false;
-            CheckToolButton(EditorTool.Eraser);
-            SetEraserPartial(true);
-            return true;
-        }
-        // B and I are not tools at all: they run the two image ACTIONS. B is where the
-        // background composer has always lived in WinShot, which is what freed it when the
-        // redaction rework took blur off it.
-        if (key == Key.B) { OnAddBackground(this, new RoutedEventArgs()); return true; }
-        if (key == Key.I) { OnAddImage(this, new RoutedEventArgs()); return true; }
-
-        EditorTool? tool = key switch
-        {
-            Key.V => EditorTool.Select,
-            Key.A => EditorTool.Arrow,
-            Key.R => EditorTool.Rectangle,
-            Key.E => EditorTool.Eraser,
-            Key.L => EditorTool.Line,
-            Key.T => EditorTool.Text,
-            Key.P => EditorTool.Freehand, // Pen / Draw
-            Key.H => EditorTool.Highlighter,
-            Key.C => EditorTool.Step,   // Survey's counter key
-            // Survey's B was Blur; blur is a redaction STYLE now, so the letter goes back to
-            // WinShot's background composer (handled with the other one-shot keys) and the
-            // redaction takes X. Crop moves to K, the only free letter next to it.
-            Key.X => EditorTool.Redact,
-            Key.K => EditorTool.Crop,
-            Key.M => EditorTool.Magnifier,
-            Key.Q => EditorTool.Callout,
-            _ => null,
-        };
-        if (tool is not EditorTool t) return false;
+        // The letters live in EditorToolKeys so the tooltips and the shortcut list can't drift
+        // from what the handler answers.
+        if (EditorToolKeys.Resolve(key, shift) is not ToolKey entry) return false;
+        // B and I are not tools at all: they run the two image ACTIONS.
+        if (entry.Action == EditorToolKeys.ActionBackground) { OnAddBackground(this, new RoutedEventArgs()); return true; }
+        if (entry.Action == EditorToolKeys.ActionAddImage) { OnAddImage(this, new RoutedEventArgs()); return true; }
+        if (entry.Tool is not EditorTool t) return false;
         CheckToolButton(t);
+        // E leaves the eraser's mode alone; Shift+E forces partial.
+        if (t == EditorTool.Eraser && shift) SetEraserPartial(true);
         return true;
     }
 

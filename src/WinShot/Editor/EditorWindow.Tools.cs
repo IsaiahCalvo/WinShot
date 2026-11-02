@@ -1821,6 +1821,11 @@ public partial class EditorWindow : Window
         if (marks.Count == 0) return false;
         AnnotationClipboard.Clear();
         AnnotationClipboard.AddRange(marks);
+        // Where the marks were, so a paste can land them under the pointer.
+        Rect union = Rect.Empty;
+        foreach (UIElement el in SelectionList())
+            if (AnnotationCanvas.Children.Contains(el)) union.Union(GetCanvasBounds(el));
+        AnnotationClipboardBounds = union;
         // Ctrl+C over a mark used to be completely silent: nothing on screen, nothing on the
         // Windows clipboard, while the button beside it said the image had been copied. The
         // user pressed it twice with no clue why the first press did nothing. Same checkmark
@@ -1832,15 +1837,38 @@ public partial class EditorWindow : Window
     /// <summary>How far a pasted or duplicated mark lands from the one it came from.</summary>
     private const double PasteOffset = 32;
 
-    private void PasteAnnotations() => PlaceCopies(AnnotationClipboard);
+    /// <summary>Where the copied marks sat, in canvas coordinates (empty when unknown).</summary>
+    private static Rect AnnotationClipboardBounds = Rect.Empty;
 
-    private void DuplicateSelectedAnnotations() => PlaceCopies(SnapshotSelection());
+    /// <summary>
+    /// Survey "Paste at the pointer": with the pointer over the picture, the copies land centred
+    /// under it; otherwise they land one paste-offset away from where they were copied.
+    /// </summary>
+    private void PasteAnnotations()
+    {
+        Vector offset = new(PasteOffset, PasteOffset);
+        if (Viewport.IsMouseOver && !AnnotationClipboardBounds.IsEmpty)
+        {
+            Point pointer = Mouse.GetPosition(AnnotationCanvas);
+            var surface = new Rect(0, 0, AnnotationCanvas.ActualWidth, AnnotationCanvas.ActualHeight);
+            if (surface.Contains(pointer))
+            {
+                Point centre = new(
+                    AnnotationClipboardBounds.X + AnnotationClipboardBounds.Width / 2,
+                    AnnotationClipboardBounds.Y + AnnotationClipboardBounds.Height / 2);
+                offset = pointer - centre;
+            }
+        }
+        PlaceCopies(AnnotationClipboard, offset);
+    }
+
+    private void DuplicateSelectedAnnotations() => PlaceCopies(SnapshotSelection(), new Vector(PasteOffset, PasteOffset));
 
     /// <summary>
     /// Rebuilds a set of copied marks through the same factory a project reload uses, offset
     /// so the copy is visibly a copy, then selects them — one undo step for the whole set.
     /// </summary>
-    private void PlaceCopies(IReadOnlyList<ClipboardMark> marks)
+    private void PlaceCopies(IReadOnlyList<ClipboardMark> marks, Vector offset)
     {
         if (marks.Count == 0) return;
         CommitText();
@@ -1850,8 +1878,8 @@ public partial class EditorWindow : Window
         foreach (ClipboardMark mark in marks)
         {
             var data = mark.Data.Clone();
-            data.Tx += PasteOffset;
-            data.Ty += PasteOffset;
+            data.Tx += offset.X;
+            data.Ty += offset.Y;
             if (data.ImageIndex is not null) data.ImageIndex = 0;
             IReadOnlyList<BitmapSource> images = mark.Image is null
                 ? Array.Empty<BitmapSource>()

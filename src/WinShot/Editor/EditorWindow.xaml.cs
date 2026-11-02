@@ -337,6 +337,7 @@ public partial class EditorWindow : Window
         };
         Loaded += (_, _) => RestorePersistedZoom();
         Loaded += (_, _) => WirePopoverMotion();
+        Loaded += (_, _) => AddKeysToToolTips();
         SetEraserPartial(_settings.Current.EraserPartial);
         // Survey re-runs the CURRENT non-manual zoom mode on every layout change
         // (applyLayoutDrivenZoom, PDFViewer.jsx:7999-8009); only MANUAL opts out.
@@ -2478,7 +2479,7 @@ public partial class EditorWindow : Window
         string label = partial ? "Partial erase" : "Full stroke erase";
         if (EraserToolBtn is not null)
         {
-            EraserToolBtn.ToolTip = label;
+            EraserToolBtn.ToolTip = ToolTipWithKey(label, partial ? "Shift+E" : "E");
             System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, label);
         }
         // The combo's XAML SelectedIndex fires this before the ctor has assigned _settings.

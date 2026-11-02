@@ -106,7 +106,7 @@
                         <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}"
                                 Click="OnCropClick" ToolTip="Crop"
                                 AutomationProperties.Name="Crop and resize"
-                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C.">
+                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut Shift+C.">
                             <ContentControl Content="{StaticResource SurveyIcon.Crop}"/>
                         </Button>
                         <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}"
@@ -1212,7 +1212,7 @@
                                      Content="{StaticResource SurveyIcon.Rect}"/>
                         <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse"
-                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse."
+                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut O."
                                      Content="{StaticResource SurveyIcon.Ellipse}"/>
                         <!-- Survey puts Polygon and Polyline between the closed shapes and the
                              open ones (PDFViewer.jsx:34035-34045) because that is what they
@@ -1221,12 +1221,12 @@
                         <RadioButton x:Name="PolygonToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Polygon" Checked="OnToolChecked" ToolTip="Polygon"
                                      AutomationProperties.Name="Polygon"
-                                     AutomationProperties.HelpText="Click to place each corner. Click the first corner, or press Enter, to close the shape. Escape cancels."
+                                     AutomationProperties.HelpText="Click to place each corner. Click the first corner, or press Enter, to close the shape. Escape cancels. Shortcut G."
                                      Content="{StaticResource SurveyIcon.Polygon}"/>
                         <RadioButton x:Name="PolylineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Polyline" Checked="OnToolChecked" ToolTip="Polyline"
                                      AutomationProperties.Name="Polyline"
-                                     AutomationProperties.HelpText="Click to place each point. Press Enter to finish the run open, or click the first point to close it into a polygon. Escape cancels."
+                                     AutomationProperties.HelpText="Click to place each point. Press Enter to finish the run open, or click the first point to close it into a polygon. Escape cancels. Shortcut K."
                                      Content="{StaticResource SurveyIcon.Polyline}"/>
                         <RadioButton x:Name="LineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Line" Checked="OnToolChecked" ToolTip="Line"
@@ -1239,7 +1239,7 @@
                         <RadioButton x:Name="StepToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
                                      Tag="Step" Checked="OnToolChecked" ToolTip="Counter"
                                      AutomationProperties.Name="Counter"
-                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
+                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut C."
                                      Content="{StaticResource SurveyIcon.Counter}"/>
                     </StackPanel>
                     <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
@@ -1283,7 +1283,7 @@
                                      Tag="Crop" Content="{StaticResource SurveyIcon.Crop}" Checked="OnToolChecked"
                                      ToolTip="Crop &amp; resize (C)"
                                      AutomationProperties.Name="Crop and resize"
-                                     AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut C."/>
+                                     AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut Shift+C."/>
                         <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddImage}"
                                 Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                 AutomationProperties.Name="Add screenshot or image"

@@ -330,8 +330,16 @@ public partial class EditorWindow : Window
                 case EditorShortcutCommand.FitHeight: FitToHeight(); PersistZoomPreference(); break;
                 case EditorShortcutCommand.ZoomIn: ZoomAt(ViewportCentre(), _zoom * ZoomStepFactor); break;
                 case EditorShortcutCommand.ZoomOut: ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor); break;
-                case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
+                // Survey: Ctrl+C copies the picked marks. With nothing picked it copies the
+                // edited picture, which is what WinShot's Ctrl+C has always done.
+                case EditorShortcutCommand.Copy:
+                    if (!CopySelectedAnnotations()) OnCopy(this, new RoutedEventArgs());
+                    break;
+                case EditorShortcutCommand.Cut:
+                    if (CopySelectedAnnotations()) DeleteSelected();
+                    break;
                 case EditorShortcutCommand.Paste: PasteAnnotations(); break;
+                case EditorShortcutCommand.ShowShortcuts: ShowShortcutSheet(); break;
                 case EditorShortcutCommand.Duplicate: DuplicateSelectedAnnotations(); break;
                 case EditorShortcutCommand.ActualSize: ZoomAt(ViewportCentre(), 1); PersistZoomPreference(); break;
                 case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
@@ -363,6 +371,21 @@ public partial class EditorWindow : Window
                 _ => (0.0, step),
             };
             NudgeSelected(dx, dy);
+            e.Handled = true;
+            return;
+        }
+
+        // "?" opens the shortcut list (Survey isShortcutsSheetKey).
+        if (e.Key == Key.OemQuestion && Keyboard.Modifiers == ModifierKeys.Shift)
+        {
+            ShowShortcutSheet();
+            e.Handled = true;
+            return;
+        }
+        // Shift+S turns snapping on or off (Survey keyboardShortcuts.js "View").
+        if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Shift)
+        {
+            ToggleSnapping();
             e.Handled = true;
             return;
         }

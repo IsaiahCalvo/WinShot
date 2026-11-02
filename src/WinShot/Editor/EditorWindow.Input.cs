@@ -254,7 +254,9 @@ public partial class EditorWindow : Window
             var posMove = e.GetPosition(AnnotationCanvas);
             // Survey drags freely and applies constrainToPage on release, so an off-page
             // drag snaps back inside on drop rather than sticking at the edge mid-gesture.
-            var d = posMove - _moveLast;
+            _moveRaw += posMove - _moveLast;
+            _moveLast = posMove;
+            var d = SnappedMove(_moveRaw) - _moveTotal;
             if (d.X != 0 || d.Y != 0)
             {
                 foreach (UIElement el in SelectionList())
@@ -265,7 +267,6 @@ public partial class EditorWindow : Window
                     RefreshRedaction(el);
                 }
                 _moveTotal += d;
-                _moveLast = posMove;
                 UpdateSelectionVisual();
             }
             return;
@@ -679,6 +680,7 @@ public partial class EditorWindow : Window
                 _movingSelection = true;
             _moveLast = pos;
             _moveTotal = new Vector();
+            ResetMoveSnap();
             Viewport.CaptureMouse();
             e.Handled = true;
             return;
@@ -1193,9 +1195,10 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
-        // Alt-drag leaves a copy behind and drags the copy — the original stays where it is.
+        // Ctrl-drag leaves a copy behind and drags the copy — the original stays where it is
+        // (Survey "Drag a copy", mod+drag; Alt+drag there means "move without snapping").
         // It runs before the selection settles so the drag that follows moves the CLONE.
-        if (!additive && (Keyboard.Modifiers & ModifierKeys.Alt) != 0 &&
+        if (!additive && (Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
             CloneForAltDrag(hit) is UIElement clone)
             hit = clone;
         if (additive)
@@ -1213,6 +1216,7 @@ public partial class EditorWindow : Window
             _movingSelection = _selection.Contains(hit);
         _moveLast = pos;
         _moveTotal = new Vector();
+        ResetMoveSnap();
         Viewport.CaptureMouse();
         e.Handled = true;
     }

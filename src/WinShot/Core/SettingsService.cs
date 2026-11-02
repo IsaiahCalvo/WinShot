@@ -56,6 +56,8 @@ public class Settings
 
     /// <summary>Editor eraser mode. Survey persists this ('eraserMode') and defaults to partial.</summary>
     public bool EraserPartial { get; set; } = true;
+    /// <summary>Editor: moving marks snap their edges and centres to other marks (Shift+S toggles).</summary>
+    public bool EditorSnapping { get; set; } = true;
 
     // Editor view: Survey persists the zoom MODE and the manual scale and restores them on
     // load (zoomController.js:9, :18-21, :36-71; PDFViewer.jsx:916-937, :7856-7863).
