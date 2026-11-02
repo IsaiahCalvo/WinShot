@@ -2697,13 +2697,16 @@ public class ThemedWindowTests
             "ResizeImageBtn", "OcrRegionBtn",
         };
         var buttons = new List<ButtonBase>();
+        var popups = new List<Popup>();
         void Walk(object node)
         {
             if (node is ButtonBase b) buttons.Add(b);
+            if (node is Popup p) popups.Add(p);
             if (node is DependencyObject d)
                 foreach (object child in LogicalTreeHelper.GetChildren(d)) Walk(child);
         }
         Walk(editor);
+        var sourcesBefore = PresentationSource.CurrentSources.Cast<PresentationSource>().ToHashSet();
         for (int i = 0; i < 4; i++) PumpDispatcherOnce();
 
         Exception? late = null;
@@ -2741,6 +2744,18 @@ public class ThemedWindowTests
         finally
         {
             editor.Dispatcher.UnhandledException -= OnUnhandled;
+            // Leave nothing behind: a popup or window still open when this STA thread ends
+            // keeps an HWND whose next message lands on a dead dispatcher and kills the
+            // test host at shutdown.
+            foreach (var popup in popups) popup.IsOpen = false;
+            foreach (var source in PresentationSource.CurrentSources.Cast<PresentationSource>().ToList())
+            {
+                if (sourcesBefore.Contains(source) || source.IsDisposed) continue;
+                if (source.RootVisual is Window w && !ReferenceEquals(w, editor)) w.Close();
+                else if (source.RootVisual is FrameworkElement { Parent: Popup open }) open.IsOpen = false;
+            }
+            foreach (Window owned in editor.OwnedWindows.Cast<Window>().ToList()) owned.Close();
+            for (int i = 0; i < 4; i++) PumpDispatcherOnce();
         }
         Assert.True(pressed > 60, $"only {pressed} editor buttons found to press");
     }
