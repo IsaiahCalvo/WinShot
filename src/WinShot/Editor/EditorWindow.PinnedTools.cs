@@ -294,7 +294,7 @@ public partial class EditorWindow
                 menu.Items.Add(DockItem("Move to start", () => MovePinToStart(pin), "SurveyIcon.ChevronUp"));
             menu.Items.Add(DockItem("Unpin", () => RemovePin(pin), "SurveyIcon.Close"));
         };
-        menu.Items.Add(new MenuItem());
+        menu.Items.Add(new MenuItem { Style = (Style)FindResource("DarkMenuItem") }); // placeholder so the menu opens; Opened refills it
         btn.ContextMenu = menu;
         return btn;
     }
