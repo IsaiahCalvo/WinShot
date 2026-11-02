@@ -316,6 +316,7 @@ public partial class EditorWindow : Window
 
         WireSelectionQuickBar();
         WireBrushAdjust();
+        WirePinnedDock();
         Viewport.LostMouseCapture += (_, _) =>
         {
             // A brush drag that loses the mouse changes nothing (Survey: a cancelled pointer).

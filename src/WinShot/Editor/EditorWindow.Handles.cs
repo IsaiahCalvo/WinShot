@@ -2052,7 +2052,7 @@ public partial class EditorWindow : Window
     /// <summary>Right-click an annotation to select it and open the z-order / delete context menu.</summary>
     private void OnViewportRightClick(object sender, MouseButtonEventArgs e)
     {
-        if (_sourceOperationActive || IsQuickBarSource(e.OriginalSource)) return;
+        if (_sourceOperationActive || IsQuickBarSource(e.OriginalSource) || IsPinDockSource(e.OriginalSource)) return;
         var hit = HitTestAnnotation(e.GetPosition(AnnotationCanvas));
         if (hit is null) return;
         // Right-clicking inside a multi-selection keeps it whole, so the menu's z-order

@@ -176,6 +176,8 @@ internal static class SettingsTruthCatalog
             "ShortcutBindings",
             "EraserPartial",
             "EditorSnapping",
+            "EditorPinnedTools",
+            "EditorPinDock",
             // Editor view state, remembered the way Survey remembers its zoom preference.
             "EditorZoomMode",
             "EditorManualZoom",

@@ -86,6 +86,13 @@ public class Settings
     /// state rather than a settings control: it is written by picking a colour, never typed.</summary>
     public List<string> SavedColors { get; set; } = new();
 
+    /// <summary>Editor: the pinned tools dock (Survey pinnedTools.js), each pin a tool with its
+    /// own settings, in dock order. Runtime state, written by pinning, never typed.</summary>
+    public List<PinnedToolSetting> EditorPinnedTools { get; set; } = new();
+
+    /// <summary>Editor: which side of the canvas the pinned tools dock sits on (Left, Right, Bottom).</summary>
+    public string EditorPinDock { get; set; } = "Left";
+
     /// <summary>Hide every pin, or bring them all back.</summary>
     public string HotkeyPinToggleVisibility { get; set; } = "";
 
@@ -374,6 +381,8 @@ public class SettingsService
             // every load path already funnels through.
             loaded.ShortcutBindings ??= new();
             loaded.SavedColors ??= new();
+            loaded.EditorPinnedTools ??= new();
+            loaded.EditorPinDock ??= "Left";
             Current = loaded;
             return true;
         }
@@ -489,4 +498,16 @@ public class SettingsService
         }
         File.Move(tmp, FilePath, overwrite: true);
     }
+}
+
+/// <summary>One pinned editor tool: its kind and the settings it arms with (Survey pinnedTools.js).</summary>
+public sealed class PinnedToolSetting
+{
+    public string Kind { get; set; } = "";
+    public string? StrokeColor { get; set; }
+    public double? StrokeOpacity { get; set; }
+    public double? StrokeWidth { get; set; }
+    public string? FillColor { get; set; }
+    public double? FillOpacity { get; set; }
+    public string? LineStyle { get; set; }
 }
