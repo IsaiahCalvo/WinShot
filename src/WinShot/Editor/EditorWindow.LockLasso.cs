@@ -99,7 +99,15 @@ public partial class EditorWindow
             InteractionCanvas.Children.Add(_lassoPath);
         }
         _lassoPath.StrokeThickness = 1 / _zoom;
-        _lassoPath.StrokeDashArray = new DoubleCollection { 4, 3 };
+        // Survey getLassoModeFromTrail: the first sideways travel of 5 px picks the mode, as
+        // the box does. Right = Window (blue, solid: only what is wholly inside); left =
+        // Crossing (green, dashed 5 5: anything the loop touches).
+        bool crossing = LassoModeFromTrail(_lassoPoints, _zoom) == MarqueeMode.Crossing;
+        _lassoPath.Stroke = new SolidColorBrush(crossing
+            ? Color.FromArgb(0xCC, 0x00, 0xC8, 0x64) : Color.FromArgb(0xCC, 0x00, 0x64, 0xFF));
+        _lassoPath.Fill = new SolidColorBrush(crossing
+            ? Color.FromArgb(0x26, 0x00, 0xC8, 0x64) : Color.FromArgb(0x26, 0x00, 0x64, 0xFF));
+        _lassoPath.StrokeDashArray = crossing ? new DoubleCollection { 5, 5 } : null;
         _lassoPath.Data = LassoGeometry(_lassoPoints);
         _lassoPath.Visibility = Visibility.Visible;
     }
@@ -127,12 +135,33 @@ public partial class EditorWindow
     /// Whether a mark lies wholly inside the loop. Uses the mark's own outline where it has one
     /// (so a diagonal line inside the loop counts even when its box pokes out), else its box.
     /// </summary>
-    internal static bool LassoCatches(Geometry lasso, Rect bounds, Geometry? outline)
+    internal static bool LassoCatches(Geometry lasso, Rect bounds, Geometry? outline, bool crossing = false)
     {
         if (bounds.IsEmpty) return false;
         if (!lasso.Bounds.IntersectsWith(bounds)) return false;
         Geometry probe = outline ?? new RectangleGeometry(bounds);
-        return lasso.FillContainsWithDetail(probe) == IntersectionDetail.FullyContains;
+        IntersectionDetail detail = lasso.FillContainsWithDetail(probe);
+        return crossing
+            ? detail is not (IntersectionDetail.Empty or IntersectionDetail.NotCalculated)
+            : detail == IntersectionDetail.FullyContains;
+    }
+
+    /// <summary>
+    /// Survey getLassoModeFromTrail (lassoSelection.js): the first point that has travelled
+    /// 5 screen px sideways from the start decides. Right is Window, left is Crossing; a
+    /// loop that never moves sideways stays Window.
+    /// </summary>
+    internal static MarqueeMode LassoModeFromTrail(IReadOnlyList<Point> points, double zoom)
+    {
+        if (points.Count < 2) return MarqueeMode.Window;
+        double startX = points[0].X;
+        for (int i = 1; i < points.Count; i++)
+        {
+            double dx = (points[i].X - startX) * zoom;
+            if (Math.Abs(dx) < 5) continue;
+            return dx >= 0 ? MarqueeMode.Window : MarqueeMode.Crossing;
+        }
+        return MarqueeMode.Window;
     }
 
     private List<UIElement> LassoHits(Point release)
@@ -141,11 +170,12 @@ public partial class EditorWindow
         _lassoPoints.Add(release);
         if (_lassoPoints.Count < 3) return hits;
         Geometry lasso = LassoGeometry(_lassoPoints);
+        bool crossing = LassoModeFromTrail(_lassoPoints, _zoom) == MarqueeMode.Crossing;
         foreach (UIElement child in AnnotationCanvas.Children)
         {
             if (child is TextBox) continue;
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
-            if (LassoCatches(lasso, GetCanvasBounds(fe), CanvasGeometryOf(fe)))
+            if (LassoCatches(lasso, GetCanvasBounds(fe), CanvasGeometryOf(fe), crossing))
                 hits.Add(fe);
         }
         _lassoPoints.Clear();

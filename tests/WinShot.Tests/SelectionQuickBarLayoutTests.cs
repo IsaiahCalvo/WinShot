@@ -176,4 +176,24 @@ public class LassoSelectTests
         Assert.True(EditorWindow.LassoCatches(triangle, new Rect(5, 5, 20, 20), null));
         Assert.False(EditorWindow.LassoCatches(triangle, new Rect(70, 70, 20, 20), null));
     }
+
+    [Fact]
+    public void CrossingLoop_CatchesAMarkItTouches()
+    {
+        Assert.True(EditorWindow.LassoCatches(Square(0, 0, 100), new Rect(80, 80, 40, 40), null, crossing: true));
+        Assert.False(EditorWindow.LassoCatches(Square(0, 0, 100), new Rect(200, 200, 10, 10), null, crossing: true));
+    }
+
+    [Theory]
+    [InlineData(10, 1, false)]
+    [InlineData(-10, 1, true)]
+    [InlineData(-3, 1, false)]   // under 5 screen px decides nothing
+    [InlineData(-3, 2, true)]    // 6 screen px at 200%
+    public void LoopModeFollowsTheFirstSidewaysTravel(double dx, double zoom, bool crossing)
+    {
+        var trail = new[] { new Point(50, 50), new Point(50, 70), new Point(50 + dx, 80), new Point(100, 90) };
+        // The last point runs right; only the FIRST sideways travel that counts decides.
+        if (Math.Abs(dx) * zoom < 5) trail = trail[..3];
+        Assert.Equal(crossing, EditorWindow.LassoModeFromTrail(trail, zoom) == MarqueeMode.Crossing);
+    }
 }
