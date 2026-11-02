@@ -651,6 +651,7 @@
                                                                         <!-- Survey's segmented grid/spectrum toggle (CompactColorPicker.jsx:322-365):
                                                                              a #2a3140 pill whose active half fills #5a6473. -->
                                                                         <Style x:Key="PickerModeToggle" TargetType="RadioButton">
+                                                                            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
                                                                             <Setter Property="Cursor" Value="Hand"/>
                                                                             <Setter Property="Template">
                                                                                 <Setter.Value>

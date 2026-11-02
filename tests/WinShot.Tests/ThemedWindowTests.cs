@@ -2726,6 +2726,16 @@ public class ThemedWindowTests
                 foreach (object child in LogicalTreeHelper.GetChildren(d)) Walk(child);
         }
         Walk(editor);
+
+        // A keyboard user tabbing the toolbar must see where they are. WPF's fallback focus
+        // visual is a dotted black box, which on the dark chrome is nothing at all.
+        var systemFocus = editor.TryFindResource(SystemParameters.FocusVisualStyleKey) as Style;
+        var noRing = buttons
+            .Where(b => b.Focusable && (b.FocusVisualStyle is null || ReferenceEquals(b.FocusVisualStyle, systemFocus)))
+            .Select(b => string.IsNullOrEmpty(b.Name) ? $"{b.GetType().Name}[{b.Style?.GetHashCode()}] '{b.ToolTip ?? b.Content}'" : b.Name)
+            .ToList();
+        Assert.True(noRing.Count == 0, "No keyboard focus ring: " + string.Join(", ", noRing));
+
         var sourcesBefore = PresentationSource.CurrentSources.Cast<PresentationSource>().ToHashSet();
         for (int i = 0; i < 4; i++) PumpDispatcherOnce();
 
