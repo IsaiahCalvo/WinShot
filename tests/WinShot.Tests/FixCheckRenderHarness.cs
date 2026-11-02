@@ -378,6 +378,7 @@ public class FixCheckRenderHarness
                 void RenderEl(FrameworkElement el, string name)
                 {
                     el.UpdateLayout();
+                    if (el.ActualWidth < 1 || el.ActualHeight < 1) { log.AppendLine($"{name}: not laid out"); return; }
                     var bmp = new RenderTargetBitmap((int)Math.Ceiling(el.ActualWidth * 2), (int)Math.Ceiling(el.ActualHeight * 2), 192, 192, PixelFormats.Pbgra32);
                     var dv = new DrawingVisual();
                     using (var dc = dv.RenderOpen())
