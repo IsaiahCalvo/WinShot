@@ -402,7 +402,6 @@ public class VisualAuditHarness
             yield return Pop("font-colour", "FontColorPopup", "FontColorBtn");
             yield return Pop("align-grid", "AlignPopup", "AlignMenuBtn");
             yield return Pop("overflow", "FormatOverflowPopup", "FormatOverflowBtn");
-            yield return Pop("eraser-mode", "EraserModePopup", "EraserCaretBtn");
             yield return Pop("fit-menu", "FitMenuPopup", "FitMenuBtn");
             foreach (string combo in new[]
                      {

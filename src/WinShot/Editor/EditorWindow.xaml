@@ -255,47 +255,14 @@
                                          AutomationProperties.Name="Highlighter"
                                          AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
                                          Content="{StaticResource SurveyIcon.Highlighter}"/>
-                            <!-- Survey's eraser carries its mode menu INSIDE the button: a 12px
-                                 #8d96a6 chevron offset +12px from centre opens a 142px popup with
-                                 an "Eraser Type" header and the two modes
-                                 (PDFViewer.jsx:32095-32135, 32150-32274). -->
-                            <Grid Margin="4,0">
+                            <!-- Survey PASS 7 (board 13): the eraser's kind is the Partial / Whole
+                                 toggle in the settings row, so the button carries no menu. -->
+                            <Grid Margin="3,0">
                                 <RadioButton x:Name="EraserToolBtn" Style="{StaticResource StripToolButton}" GroupName="Tool"
                                              Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
                                              AutomationProperties.Name="Eraser"
                                              AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits. Shortcut E; Shift+E forces partial erase."
                                              Content="{StaticResource SurveyIcon.Eraser}"/>
-                                <Button x:Name="EraserCaretBtn" Click="OnEraserCaretClick" Visibility="Collapsed" Padding="2" Width="16" Height="16"
-                                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,0,0,0"
-                                        Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                        Foreground="{StaticResource ChromeTextMutedBrush}"
-                                        ToolTip="Eraser type" AutomationProperties.Name="Eraser type">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border Background="Transparent" Padding="{TemplateBinding Padding}">
-                                                <ContentPresenter/>
-                                            </Border>
-                                        </ControlTemplate>
-                                    </Button.Template>
-                                    <Viewbox Width="12" Height="12"><ContentControl Content="{StaticResource SurveyIcon.ChevronDown}"/></Viewbox>
-                                </Button>
-                                <Popup x:Name="EraserModePopup" PlacementTarget="{Binding ElementName=EraserToolBtn}"
-                                       Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True">
-                                    <Border Style="{StaticResource PopoverCard}" MinWidth="142" Padding="4" Margin="0,0,36,36">
-                                        <StackPanel>
-                                            <TextBlock Text="ERASER TYPE" Padding="8,4" Margin="0,0,0,4"
-                                                       FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"
-                                                       Foreground="{StaticResource ChromeTextMutedBrush}"/>
-                                            <Border Height="1" Background="{StaticResource ChromeHairlineBrush}" Margin="0,0,0,4"/>
-                                            <Button x:Name="EraserPartialItem" Style="{StaticResource ChromeMenuItem}" Tag="Partial"
-                                                    Content="Partial erase" Click="OnEraserModeRowClick"
-                                                    AutomationProperties.Name="Partial erase"/>
-                                            <Button x:Name="EraserFullItem" Style="{StaticResource ChromeMenuItem}" Tag="Full"
-                                                    Content="Full stroke erase" Click="OnEraserModeRowClick"
-                                                    AutomationProperties.Name="Full stroke erase"/>
-                                        </StackPanel>
-                                    </Border>
-                                </Popup>
                             </Grid>
                         </StackPanel>
                         <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
@@ -382,25 +349,25 @@
                              user already looks for a tool, and it keeps the top row from
                              growing a second overflow. -->
                         <StackPanel x:Name="ImageGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                            <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddImage}"
+                            <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.AddImage}"
                                     Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
                                     AutomationProperties.Name="Add screenshot or image"
                                     AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
-                            <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddCapture}"
+                            <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.AddCapture}"
                                     Click="OnAddCapture" ToolTip="Add capture…"
                                     AutomationProperties.Name="Add capture"
                                     AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
-                            <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Background}"
+                            <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.Background}"
                                     Click="OnAddBackground" ToolTip="Add background (B)"
                                     AutomationProperties.Name="Add background"
                                     AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>
-                            <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.ExtractText}"
+                            <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.ExtractText}"
                                     Click="OnExtractText" ToolTip="Extract text"
                                     AutomationProperties.Name="Extract text"
                                     AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
                             <!-- Appears only once there is an added image to flip between. A
                                  before/after GIF of one frame is a PNG. -->
-                            <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Gif}"
+                            <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.Gif}"
                                     Click="OnExportGif" ToolTip="Export before/after GIF…"
                                     Visibility="Collapsed"
                                     AutomationProperties.Name="Export before and after GIF"

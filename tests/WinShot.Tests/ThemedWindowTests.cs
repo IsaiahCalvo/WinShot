@@ -1454,7 +1454,8 @@ public class ThemedWindowTests
         // Survey PASS 7 (board 13): the eraser's kind is a Partial / Whole toggle in row 2,
         // not a combo and not a chevron menu inside the eraser button.
         Assert.Null(editor.FindName("EraserModeBox"));
-        Assert.Equal(Visibility.Collapsed, ((FrameworkElement)editor.FindName("EraserCaretBtn")!).Visibility);
+        Assert.Null(editor.FindName("EraserCaretBtn"));
+        Assert.Null(editor.FindName("EraserModePopup"));
         typeof(EditorWindow).GetMethod("FitEditorCombos",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, null);

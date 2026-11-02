@@ -2596,23 +2596,6 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// The caret both arms the eraser and toggles its mode popup, exactly as Survey's
-    /// in-button split trigger does (PDFViewer.jsx:32107-32120).
-    /// </summary>
-    private void OnEraserCaretClick(object sender, RoutedEventArgs e)
-    {
-        if (EraserToolBtn is not null) EraserToolBtn.IsChecked = true;
-        if (EraserModePopup is not null) EraserModePopup.IsOpen = !EraserModePopup.IsOpen;
-    }
-
-    private void OnEraserModeRowClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button b || b.Tag is not string tag) return;
-        if (EraserModePopup is not null) EraserModePopup.IsOpen = false;
-        SetEraserPartial(tag != "Full");
-    }
-
-    /// <summary>
     /// Survey's eraser mode is persisted ('eraserMode' in localStorage, default 'partial')
     /// and the eraser TOOL's tooltip / accessible name is the CURRENT MODE rather than a
     /// static "Eraser" (PDFViewer.jsx:4274-4281, :32080-32097).
@@ -2621,12 +2604,6 @@ public partial class EditorWindow : Window
     {
         _eraserPartial = partial;
         SyncSurveyRow();
-        // The selected row keeps Survey's #1f2430 wash (PDFViewer.jsx:32170).
-        var selectedRow = new SolidColorBrush(Color.FromRgb(0x1F, 0x24, 0x30));
-        if (EraserPartialItem is not null)
-            EraserPartialItem.Background = partial ? selectedRow : Brushes.Transparent;
-        if (EraserFullItem is not null)
-            EraserFullItem.Background = partial ? Brushes.Transparent : selectedRow;
 
         // Survey never shows a static "Eraser": the chip IS the mode (PDFViewer.jsx:32080-32082).
         // Survey PASS 7 (2026-09-22 review): the tool is called "Eraser" whatever kind is live —
@@ -2830,7 +2807,6 @@ public partial class EditorWindow : Window
     {
         (ColorPickerPopup, ColorWellBtn),
         (SizePresetsPopup, SizePresetsBtn),
-        (EraserModePopup, EraserToolBtn),
         (AlignPopup, AlignMenuBtn),
         (FontColorPopup, FontColorBtn),
         (FitMenuPopup, FitMenuBtn),

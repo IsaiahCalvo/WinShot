@@ -2831,15 +2831,7 @@ public class AnnotationEditorRenderHarness
                 RenderElementToPng(arrowBox, Path.Combine(outDir, "chrome-dropdown-trigger.png"), onTransparentGround: true);
                 arrowBox.IsDropDownOpen = false; Pump(3);
 
-                // Eraser split menu, and the counter colour-swatch variant.
-                Check("FreehandToolBtn"); Pump(3);
-                ((RadioButton)editor.FindName("EraserToolBtn")!).IsChecked = true; Pump(4);
-                ((System.Windows.Controls.Primitives.Popup)editor.FindName("EraserModePopup")!).IsOpen = true;
-                Pump(6);
-                RenderElementToPng(((System.Windows.Controls.Primitives.Popup)editor.FindName("EraserModePopup")!).Child,
-                    Path.Combine(outDir, "chrome-eraser-split-menu.png"));
-                ((System.Windows.Controls.Primitives.Popup)editor.FindName("EraserModePopup")!).IsOpen = false;
-                Pump(3);
+                // The counter colour-swatch variant.
                 counterBtn2.IsChecked = true; Pump(4);
                 Shot("pointer-chrome-counter-row.png");
                 RenderElementToPng(editor.FindName("ColorWellBtn") as UIElement,
