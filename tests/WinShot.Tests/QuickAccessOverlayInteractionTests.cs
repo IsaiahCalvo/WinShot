@@ -283,6 +283,12 @@ public class QuickAccessOverlayInteractionTests
             var scaleMenu = typeof(FastQuickActionsWindow)
                 .GetMethod("ScaleOverflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
+            // The type is sized in pixels from the start. A point font follows the system DPI
+            // instead of the menu's scale, which CI at 96 DPI cannot see but a 150% PC did:
+            // the "100%" menu came out with 150% text.
+            Assert.Equal(SD.GraphicsUnit.Pixel, menu.Font.Unit);
+            Assert.Equal(ThemePalette.PxForPt(ThemePalette.PinnedMenuRowPt, 1d), (int)menu.Font.Size);
+
             var previous = WinShot.Recording.RecordingMonitorDpi.ScaleSource;
             try
             {
@@ -296,6 +302,7 @@ public class QuickAccessOverlayInteractionTests
                 WinShot.Recording.RecordingMonitorDpi.ScaleSource = _ => 2d;
                 scaleMenu.Invoke(overlay, null);
                 Assert.Equal(2d, menu.UiScale);
+                Assert.Equal(ThemePalette.PxForPt(ThemePalette.PinnedMenuRowPt, 2d), (int)menu.Font.Size);
                 int height2 = row.OwnSize().Height;
                 Assert.InRange(height2, (height1 * 2) - 2, (height1 * 2) + 2);
                 Assert.Equal(left1 * 2, row.TextLeft);

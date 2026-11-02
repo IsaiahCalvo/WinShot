@@ -221,7 +221,10 @@ internal sealed class QuickActionsContextMenu : WF.ContextMenuStrip
         // The rows own their left inset; the drop-down must not add one of its own.
         ShowImageMargin = false;
         Renderer = new RoundedMenuRenderer();
-        Font = ThemePalette.UiFont(ThemePalette.PinnedMenuRowPt);
+        // Pixels, not points: a point font resolves against the system DPI, so on a 150%
+        // primary display a "100%" menu came out with 150% text in 100% rows.
+        _scaledFont = ThemePalette.ScaledUiFont(ThemePalette.PinnedMenuRowPt, 1d);
+        Font = _scaledFont;
     }
 
     /// <summary>
