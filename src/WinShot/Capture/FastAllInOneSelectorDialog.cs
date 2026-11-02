@@ -1608,16 +1608,16 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             // Mode buttons — icon (or "Aa" for OCR) over a small caption, in reference order.
             // Fullscreen confirms immediately; the rest select a mode that drives SelectedAction.
-            _buttons.Add(new BarButton("Region", "", 0, AllInOneAction.Capture, isMode: true));
-            _buttons.Add(new BarButton("Fullscreen", "", -1, AllInOneAction.Capture, isMode: false));
-            _buttons.Add(new BarButton("Window", "", 1, AllInOneAction.Capture, isMode: true));
-            _buttons.Add(new BarButton("Scrolling", "", 2, AllInOneAction.Scroll, isMode: true));
-            _buttons.Add(new BarButton("Timer", "", 3, AllInOneAction.Timer, isMode: true));
+            _buttons.Add(new BarButton("Region", "\uEF20", 0, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Fullscreen", "\uE7F4", -1, AllInOneAction.Capture, isMode: false));
+            _buttons.Add(new BarButton("Window", "\uE7C4", 1, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Scrolling", "\uE74B", 2, AllInOneAction.Scroll, isMode: true));
+            _buttons.Add(new BarButton("Timer", "\uE916", 3, AllInOneAction.Timer, isMode: true));
             _buttons.Add(new BarButton("OCR", "Aa", 4, AllInOneAction.Ocr, isMode: true) { IsTextGlyph = true });
-            _buttons.Add(new BarButton("Recording", "", 5, AllInOneAction.Record, isMode: true));
+            _buttons.Add(new BarButton("Recording", "\uE714", 5, AllInOneAction.Record, isMode: true));
             // Not a mode: measuring is not something you do to a rectangle, so this one
             // leaves All-In-One the way Fullscreen does, and the measure overlay takes over.
-            _buttons.Add(new BarButton("Measure", "", -1, AllInOneAction.Measure, isMode: false));
+            _buttons.Add(new BarButton("Measure", "\uED5E", -1, AllInOneAction.Measure, isMode: false));
 
             _widthBox = SizeBox();
             _heightBox = SizeBox();
@@ -2071,7 +2071,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
             // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
             // showing two identical accent-filled crop icons a few cells apart.
-            SelectorChrome.DrawCenteredText(g, "", _glyphFont, ratioGlyphRect,
+            SelectorChrome.DrawCenteredText(g, "\uE7A8", _glyphFont, ratioGlyphRect,
                 ratioChosen
                     ? WinShot.Core.ThemePalette.Over(
                         SD.Color.FromArgb((int)Math.Round(255 * badgeFade), SD.Color.White), GlyphColor)
@@ -2096,7 +2096,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
             // Same text path as the two cells beside it, so the three glyphs sit on one
             // baseline: GDI and GDI+ centre a glyph a pixel apart.
-            SelectorChrome.DrawCenteredText(g, "", _glyphFont, _expandRect, GlyphColor);
+            SelectorChrome.DrawCenteredText(g, "\uE740", _glyphFont, _expandRect, GlyphColor);
 
             // Confirm button: commits the pending region, dimmed while there is nothing to
             // commit. No caret — there is no menu behind this button.
@@ -2117,7 +2117,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // alpha byte away -- so this fade, the one thing that says whether there is
             // anything to commit, painted the glyph at full strength in both states and the
             // unavailable look never reached the screen.
-            SelectorChrome.DrawCenteredText(g, "", _glyphFont, cropGlyphRect,
+            SelectorChrome.DrawCenteredText(g, "\uE73E", _glyphFont, cropGlyphRect,
                 SD.Color.FromArgb(cropAlpha, GlyphColor));
         }
 

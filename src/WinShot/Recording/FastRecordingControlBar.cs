@@ -20,11 +20,11 @@ public sealed class FastRecordingControlBar : WF.Form
     private static readonly SD.Color PausedAmber = ThemePalette.Warn;
 
     // Segoe Fluent / MDL2 codepoints, one family and one size across the pill.
-    private const string GlyphPause = "";
-    private const string GlyphResume = "";
-    private const string GlyphRestart = "";
-    private const string GlyphStop = "";
-    private const string GlyphDiscard = "";
+    private const string GlyphPause = "\uE769";
+    private const string GlyphResume = "\uE768";
+    private const string GlyphRestart = "\uE72C";
+    private const string GlyphStop = "\uE71A";
+    private const string GlyphDiscard = "\uE74D";
 
     // ThemePalette publishes the type scale in points; every face on this owner-drawn pill is
     // sized in device pixels (each coordinate here is already multiplied by _scale, so a

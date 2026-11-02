@@ -3889,7 +3889,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                         var tickRect = new SD.Rectangle(
                             local.Left, local.Bottom - (int)Math.Round(16 * s), local.Width, (int)Math.Round(12 * s));
                         WF.TextRenderer.DrawText(
-                            g, "", checkFont, tickRect,
+                            g, "\uE73E", checkFont, tickRect,
                             DarkControlPalette.Mix(ThemePalette.WindowBg, SD.Color.White, on), Centre);
                     }
                     break;
