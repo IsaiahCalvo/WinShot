@@ -292,17 +292,18 @@ internal static class EditorShellContract
             EditorContextControls.CloudBump,
         EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
-        // The curved arrow wears the straight arrow's controls, style menu included: Curved
-        // is a ROW of that menu, so hiding the menu while a curved arrow is armed would take
-        // away the only control that can turn it back into a straight one.
+        // A curved arrow (older projects only; the tool is no longer offered) wears the
+        // straight arrow's controls.
         EditorTool.Arrow or EditorTool.CurvedArrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
             EditorContextControls.LineStyle,
+        // Survey's 'style' slot includes the text box (AppShell.jsx: contextTool === 'text'):
+        // it styles the box border.
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.TextStyle | EditorContextControls.Opacity |
-            EditorContextControls.FillStrokeTabs,
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle,
         EditorTool.Callout =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |

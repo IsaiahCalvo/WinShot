@@ -94,9 +94,7 @@ public class EditorShellContractTests
     {
         Assert.Equal(EditorContextControls.None,
             EditorShellContract.ContextFor(EditorTool.Select, filledRectangle: false));
-        // An outlined shape owns a stroke, so it owns the stroke's two choices too: the
-        // dash pattern and the hand-drawn quality. A filled one has no stroke to dash,
-        // but it keeps Style because "sketchy" is a property of the whole mark.
+        // An outlined shape owns a stroke, so it owns the stroke's dash pattern too.
         Assert.Equal(EditorContextControls.Color | EditorContextControls.Thickness |
                      EditorContextControls.Fill | EditorContextControls.Opacity |
                      EditorContextControls.LineStyle | EditorContextControls.FillStrokeTabs |
@@ -120,7 +118,8 @@ public class EditorShellContractTests
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.TextStyle));
-        Assert.False(EditorShellContract.ContextFor(EditorTool.Text, false)
+        // Survey's Style pill includes the text box: it styles the box border.
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.LineStyle));
         // Redaction shows its style dropdown and a continuous strength, and nothing else:
         // colour and thickness mean nothing to a mark whose job is to hide pixels.

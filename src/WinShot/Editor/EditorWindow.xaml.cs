@@ -1350,6 +1350,10 @@ public partial class EditorWindow : Window
                 chrome is EditorTool.Text or EditorTool.Callout || _activeText is not null);
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        // Survey's 'start' slot renders only with a counter PICKED (selectedCounterSeriesId).
+        if (StepStartPanel is not null)
+            StepStartPanel.Visibility = Show(Has(EditorContextControls.StepMode) &&
+                _selected is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeStep } });
         // The series rows are derived from the pins on the canvas, so they are rebuilt whenever
         // the counter row comes into view — that covers a freshly loaded project, whose pins
         // arrive with their series ids already stamped, without a load-path hook of its own.
@@ -2038,7 +2042,6 @@ public partial class EditorWindow : Window
         FitComboToLongestItem(AlignBox);
         FitComboToLongestItem(VerticalAlignBox);
         FitComboToLongestItem(CropRatioBox);
-        FitComboToLongestItem(StepModeBox);
 
     }
 

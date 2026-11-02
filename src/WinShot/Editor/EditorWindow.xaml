@@ -1147,16 +1147,16 @@
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="StepModePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <!-- Survey's counter row is `Counter colors[24x24] Counter series[136x24] Size presets`
-                                                             (measured on the running app 2026-09-17), so the series picker is the FIRST thing
-                                                             after the colour well. 136 is its trigger width there. The rows are built in code
+                                                        <!-- Survey's counter row: pin swatch | series pill (chrome-field-w-series, 80) | Size,
+                                                             and Start only while a counter is picked (AppShell.jsx 'series' / 'start' slots).
+                                                             Survey has no Numbers/Letters mode and no Reset; "New" in the series menu starts over. The rows are built in code
                                                              from the pins actually on the canvas — see EditorWindow.Counters.cs. -->
                                                         <ComboBox x:Name="CounterSeriesBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER SERIES"
-                                                                  Width="136" Margin="0,0,6,0"
+                                                                  Width="80" Margin="0,0,6,0"
                                                                   SelectionChanged="OnCounterSeriesChanged"
                                                                   AutomationProperties.Name="Counter series"
                                                                   AutomationProperties.HelpText="Start a new count, or continue an existing one. Each count is numbered on its own. Right-click a count to continue or delete it."/>
-                                                        <ComboBox x:Name="StepModeBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER" SelectedIndex="0" Margin="0,0,6,0"
+                                                        <ComboBox x:Name="StepModeBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER" SelectedIndex="0" Margin="0,0,6,0" Visibility="Collapsed"
                                                                   SelectionChanged="OnStepModeChanged"
                                                                   AutomationProperties.Name="Counter mode"
                                                                   AutomationProperties.HelpText="Number badges or letter badges.">
@@ -1165,6 +1165,7 @@
                                                         </ComboBox>
                                                         <!-- Survey's Start field (AppShell.jsx:2510-2566): 11px #8d96a6 label,
                                                              42x20 input on #3a4252, radius 5, 12px, centred, >= 1. -->
+                                                        <StackPanel x:Name="StepStartPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock Text="Start" Margin="0,0,4,0" VerticalAlignment="Center"
                                                                    FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextCaption}"
                                                                    Foreground="{StaticResource ChromeTextMutedBrush}"/>
@@ -1177,8 +1178,7 @@
                                                                      LostKeyboardFocus="OnStepStartBlur"
                                                                      AutomationProperties.Name="Start number"/>
                                                         </Border>
-                                                        <Button Style="{StaticResource PillButtonSecondary}" Content="Reset" ToolTip="Reset counter"
-                                                                Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
+                                                        </StackPanel>
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="FillPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">

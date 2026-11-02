@@ -700,7 +700,8 @@ public partial class EditorWindow : Window
             boxH = contentHeight + 2 * pad;
             fillColor = Colors.Transparent; // Survey pins backgroundColor '' for new text
             strokeWidth = NewTextStrokeWidth;
-            lineStyle = LineBorderStyle.Solid;
+            // Survey's Style pill sits on the text tool and styles the box border.
+            lineStyle = _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle;
         }
 
         // Survey keeps a Textbox's border colour (`stroke`) and its glyph colour (`fill`)
