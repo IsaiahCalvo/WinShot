@@ -84,13 +84,12 @@ internal static class AnnotationStyle
     /// (annotationCreationCommit.js:292) and in the live preview.
     /// </summary>
     /// <summary>
-    /// The ring every selection affordance is drawn in — handles, the rotate grip, the
-    /// hover halo, a callout's glow. Survey strokes these in its own #4a90e2; WinShot has
-    /// one selection blue already, the colour Theme.xaml calls InfoColor and ThemePalette
-    /// calls AccentRing, and the editor uses that so a handle matches every other focus
-    /// ring in the app.
+    /// The ring every selection affordance is drawn in — the frame, handles, the rotate grip,
+    /// the hover halo, a callout's glow, snap guides. Survey's HANDLE_RING #4a90e2
+    /// (utils/handleStyle.js). The app's lighter #6BB1FF focus blue left white grabbers
+    /// with almost no edge on a light picture, so the canvas uses Survey's exact blue.
     /// </summary>
-    public static readonly Color SelectionRingColor = FromDrawing(WinShot.Core.ThemePalette.AccentRing);
+    public static readonly Color SelectionRingColor = Color.FromRgb(0x4A, 0x90, 0xE2);
 
     /// <summary>The text caret, in the one accent. Survey's is its own #007AFF.</summary>
     public static readonly Color CaretColor = FromDrawing(WinShot.Core.ThemePalette.Accent);

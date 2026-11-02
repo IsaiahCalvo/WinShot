@@ -418,9 +418,9 @@ public partial class EditorWindow : Window
             _rotateStem = new Line { Stroke = new SolidColorBrush(Color.FromRgb(0xD1, 0xD1, 0xD1)) };
             _rotateIcon = new ContentControl
             {
-                // Survey's rotate-icon.svg is stroked #000000, not the Fabric fallback grey.
-                Content = FindResource("SurveyIcon.Rotate"),
-                Foreground = new SolidColorBrush(Colors.Black),
+                // Survey's own grabber glyph, assets/rotate-icon.svg (two arcs, each ending in
+                // an open chevron, stroked #000 at 2 in a 24 box) - not the toolbar's Rotate.
+                Content = RotateGrabberGlyph(),
                 IsHitTestVisible = false,
             };
             HandleLayer.Children.Add(_rotateStem);
@@ -469,6 +469,32 @@ public partial class EditorWindow : Window
         _gripAnchorContent = anchor;
         if (_activeHandle == RotateHandleIndex || RotationPill?.Visibility == Visibility.Visible)
             PlaceRotationPill();
+    }
+
+    private static Viewbox RotateGrabberGlyph()
+    {
+        var canvas = new Canvas { Width = 24, Height = 24 };
+        foreach (string d in new[]
+        {
+            "M22 12l-3 3-3-3",
+            "M2 12l3-3 3 3",
+            "M19.016 14v-1.95A7.05 7.05 0 0 0 8 6.22",
+            "M16.016 17.845A7.05 7.05 0 0 1 5 12.015V10",
+            "M5 10V9",
+            "M19 15v-1",
+        })
+        {
+            canvas.Children.Add(new Path
+            {
+                Data = Geometry.Parse(d),
+                Stroke = Brushes.Black,
+                StrokeThickness = 2,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+            });
+        }
+        return new Viewbox { Child = canvas, Stretch = Stretch.Uniform };
     }
 
     private void OpenRotationBoxFromClick()

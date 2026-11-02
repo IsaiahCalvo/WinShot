@@ -486,7 +486,7 @@
                         <!-- Survey SVGSelectionOverlay.jsx:129-147: #4a90e2, strokeWidth 2,
                              strokeDasharray '4,4' in absolute px. WPF dash units are multiples
                              of StrokeThickness, so "2 2" at a 2px stroke is the same 4/4 rhythm. -->
-                        <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
+                        <Rectangle x:Name="SelectionRect" Stroke="#4A90E2" StrokeThickness="2"
                                    StrokeDashArray="2 2" Visibility="Collapsed"/>
                         <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
                                  Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
