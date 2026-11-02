@@ -1,0 +1,65 @@
+name: render-evidence
+
+# Renders every non-editor surface (selector, corner card, pin, history, settings, recording
+# HUD, scrolling chrome, video editor, the WPF and WinForms visual audits) to PNGs on a real
+# Windows desktop and uploads them, so a polish pass can look at hover, focus and disabled
+# states, spacing and DPI without a PC at hand. Runs only on PRs labelled `render-evidence`.
+
+on:
+  pull_request:
+    branches: ['main']
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: contains(github.event.pull_request.labels.*.name, 'render-evidence')
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      OUT: ${{ github.workspace }}\render-out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install Windows 10 SDK 10.0.19041 (UAP Platform.xml for CsWinRT)
+        shell: pwsh
+        run: choco install windows-sdk-10-version-2004-all -y --no-progress
+      - name: Render
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $o = $env:OUT
+          New-Item -ItemType Directory -Force $o | Out-Null
+          $env:WINSHOT_RENDER_QUICK_ACCESS = '1'
+          $env:WINSHOT_RENDER_SELECTOR = '1'
+          $env:WINSHOT_RENDER_PIN = '1'
+          $env:WINSHOT_RENDER_PIN_CORNERS = '1'
+          $env:WINSHOT_RENDER_OUT = "$o\out"
+          $env:WINSHOT_HISTORY_RENDER = '1'
+          $env:WINSHOT_HISTORY_RENDER_DIR = "$o\history"
+          $env:WINSHOT_RENDER = '1'
+          $env:WINSHOT_RENDER_DIR = "$o\settings"
+          $env:WINSHOT_VISUAL_AUDIT = '1'
+          $env:WINSHOT_VISUAL_AUDIT_OUT = "$o\visual-audit"
+          $env:WINSHOT_WINFORMS_AUDIT = '1'
+          $env:WINSHOT_WINFORMS_AUDIT_OUT = "$o\winforms-audit"
+          $env:WINSHOT_RECORDING_RENDER_DIR = "$o\recording"
+          $env:WINSHOT_SCROLL_RENDER_DIR = "$o\scroll"
+          $env:WINSHOT_VIDEO_EDITOR_RENDER_DIR = "$o\video-editor"
+          $env:WINSHOT_MINIMAL_UI_OUT = "$o\minimal-ui"
+          foreach ($d in 'out','history','settings','visual-audit','winforms-audit','recording','scroll','video-editor','minimal-ui') {
+            New-Item -ItemType Directory -Force "$o\$d" | Out-Null
+          }
+          $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','VisualAuditHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
+          $filter = ($classes | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
+          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --logger "console;verbosity=normal"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-evidence
+          path: render-out
+          if-no-files-found: warn
