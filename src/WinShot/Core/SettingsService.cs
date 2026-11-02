@@ -90,6 +90,10 @@ public class Settings
     /// own settings, in dock order. Runtime state, written by pinning, never typed.</summary>
     public List<PinnedToolSetting> EditorPinnedTools { get; set; } = new();
 
+    /// <summary>Editor: the tool keys the user changed in the shortcut list, by row label
+    /// ("Polyline" -> "Shift+K"). Shipped keys are absent.</summary>
+    public Dictionary<string, string> EditorToolKeyBindings { get; set; } = new();
+
     /// <summary>Editor: which side of the canvas the pinned tools dock sits on (Left, Right, Bottom).</summary>
     public string EditorPinDock { get; set; } = "Left";
 
@@ -383,6 +387,7 @@ public class SettingsService
             loaded.SavedColors ??= new();
             loaded.EditorPinnedTools ??= new();
             loaded.EditorPinDock ??= "Left";
+            loaded.EditorToolKeyBindings ??= new();
             Current = loaded;
             return true;
         }

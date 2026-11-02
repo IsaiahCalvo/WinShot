@@ -28,7 +28,8 @@ internal static class EditorToolKeys
     public const string ActionBackground = "background";
     public const string ActionAddImage = "addImage";
 
-    public static readonly IReadOnlyList<ToolKey> All = new ToolKey[]
+    /// <summary>The keys as shipped, before any the user has changed.</summary>
+    public static readonly IReadOnlyList<ToolKey> Defaults = new ToolKey[]
     {
         new(EditorTool.Select, null, Key.V, false, "Select"),
         new(EditorTool.Freehand, null, Key.P, false, "Pen"),
@@ -50,6 +51,70 @@ internal static class EditorToolKeys
         new(null, ActionBackground, Key.B, false, "Background"),
         new(null, ActionAddImage, Key.I, false, "Add image"),
     };
+
+    /// <summary>
+    /// The user's own keys (Survey customKeyboardShortcuts.js), by row label, as "K" or
+    /// "Shift+K". Set from settings when the editor opens; unknown or broken entries are ignored.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string>? Overrides { get; set; }
+
+    /// <summary>Every row with the user's key in place of the shipped one where there is one.</summary>
+    public static IReadOnlyList<ToolKey> All => Effective(Overrides);
+
+    public static IReadOnlyList<ToolKey> Effective(IReadOnlyDictionary<string, string>? overrides)
+    {
+        if (overrides is null || overrides.Count == 0) return Defaults;
+        return Defaults.Select(k =>
+            overrides.TryGetValue(k.Label, out string? text) && ParseChord(text) is (Key key, bool shift)
+                ? k with { Key = key, Shift = shift }
+                : k).ToArray();
+    }
+
+    /// <summary>Whether a key can be given to a tool: a letter, alone or with Shift. Shift+S
+    /// (snapping) is kept, as Survey keeps its own fixed keys.</summary>
+    public static bool CanUse(Key key, bool shift) =>
+        key is >= Key.A and <= Key.Z && !(shift && key == Key.S);
+
+    public static string ChordText(Key key, bool shift) => shift ? $"Shift+{key}" : key.ToString();
+
+    public static (Key Key, bool Shift)? ParseChord(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        bool shift = text.StartsWith("Shift+", StringComparison.OrdinalIgnoreCase);
+        string name = shift ? text[6..] : text;
+        if (!Enum.TryParse(name, ignoreCase: true, out Key key) || !CanUse(key, shift)) return null;
+        return (key, shift);
+    }
+
+    /// <summary>
+    /// Gives the row <paramref name="label"/> a new key in <paramref name="overrides"/>, or says
+    /// why not (Survey assignShortcut): only letters, and never a key another row already has.
+    /// Picking the shipped key again drops the override.
+    /// </summary>
+    public static string? Assign(IDictionary<string, string> overrides, string label, Key key, bool shift)
+    {
+        ToolKey? row = Defaults.FirstOrDefault(k => k.Label == label);
+        if (row is null) return "This shortcut can't be changed.";
+        if (!CanUse(key, shift)) return "Press a letter, alone or with Shift.";
+        var now = Effective(new Dictionary<string, string>(overrides));
+        ToolKey? clash = now.FirstOrDefault(k => k.Label != label && k.Key == key && k.Shift == shift);
+        if (clash is not null) return $"{ChordText(key, shift)} is already used by {clash.Label}.";
+        if (row.Key == key && row.Shift == shift) overrides.Remove(label);
+        else overrides[label] = ChordText(key, shift);
+        return null;
+    }
+
+    /// <summary>Puts a row back on its shipped key, unless another row has taken that key.</summary>
+    public static string? Reset(IDictionary<string, string> overrides, string label)
+    {
+        ToolKey? row = Defaults.FirstOrDefault(k => k.Label == label);
+        if (row is null || !overrides.ContainsKey(label)) return null;
+        var now = Effective(new Dictionary<string, string>(overrides));
+        ToolKey? clash = now.FirstOrDefault(k => k.Label != label && k.Key == row.Key && k.Shift == row.Shift);
+        if (clash is not null) return $"{row.Badge} is now used by {clash.Label}. Change that one first.";
+        overrides.Remove(label);
+        return null;
+    }
 
     /// <summary>The entry a bare letter (or Shift+letter) stands for, or null.</summary>
     public static ToolKey? Resolve(Key key, bool shift) =>

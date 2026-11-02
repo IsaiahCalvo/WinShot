@@ -382,7 +382,8 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
-        if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.None && _lassoSelect)
+        if (Keyboard.Modifiers == ModifierKeys.None && _lassoSelect
+            && EditorToolKeys.Resolve(e.Key, false)?.Tool == EditorTool.Select)
         {
             SetLassoSelect(false);
             e.Handled = true;

@@ -340,7 +340,11 @@ public partial class EditorWindow : Window
         };
         Loaded += (_, _) => RestorePersistedZoom();
         Loaded += (_, _) => WirePopoverMotion();
-        Loaded += (_, _) => AddKeysToToolTips();
+        Loaded += (_, _) =>
+        {
+            EditorToolKeys.Overrides = _settings?.Current.EditorToolKeyBindings;
+            AddKeysToToolTips();
+        };
         Loaded += (_, _) => WireSelectModeMenu();
         SetEraserPartial(_settings.Current.EraserPartial);
         // Survey re-runs the CURRENT non-manual zoom mode on every layout change

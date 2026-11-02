@@ -1,7 +1,8 @@
 namespace WinShot.Editor;
 
 /// <summary>One row of the shortcut list: the key(s) and what they do.</summary>
-internal sealed record ShortcutRow(string Keys, string Label);
+/// <summary><paramref name="Assignable"/>: a tool row whose key the user can change.</summary>
+internal sealed record ShortcutRow(string Keys, string Label, bool Assignable = false);
 
 /// <summary>One titled group of rows.</summary>
 internal sealed record ShortcutSection(string Title, IReadOnlyList<ShortcutRow> Rows);
@@ -15,7 +16,7 @@ internal static class EditorShortcutSheet
 {
     public static IReadOnlyList<ShortcutSection> Sections()
     {
-        var tools = EditorToolKeys.All.Select(k => new ShortcutRow(k.Badge, k.Label)).ToList();
+        var tools = EditorToolKeys.All.Select(k => new ShortcutRow(k.Badge, k.Label, Assignable: true)).ToList();
         tools.Insert(1, new ShortcutRow("Alt+V", "Lasso select"));
         tools.Insert(2, new ShortcutRow("Space (hold)", "Pan"));
         return new[]
