@@ -232,14 +232,53 @@ public partial class EditorWindow : Window
             PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle), kind, angle);
         }
 
-        double boxCentreX = b.Left + b.Width / 2;
-        var top = new Point(boxCentreX, b.Top - padding);
-        var grip = new Point(boxCentreX, b.Top - padding - spec.RotationOffset);
-        PlaceRotateThumb(
-            AnnotationRotation.RotatePoint(grip, centre, angle),
-            AnnotationRotation.RotatePoint(top, centre, angle));
+        var (grip, gripAnchor) = ResolveRotateGrip(b, padding, spec.RotationOffset, centre, angle);
+        PlaceRotateThumb(grip, gripAnchor);
 
         HandleLayer.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Page-edge rule 1b: true while the rotate button sits BELOW the frame.</summary>
+    private bool _rotateGripBelow;
+
+    /// <summary>
+    /// Where the rotate button goes: <paramref name="offset"/> above the frame's top edge, as
+    /// always, unless the clamped view can never show it there (a mark at the top of the
+    /// image), in which case it moves the same distance below the bottom edge
+    /// (RotateGripPlacement, docs/PAGE-EDGE-RULES.md rule 1b). Returns the button's centre
+    /// and the frame point it hangs from, both turned with the mark. The side is held still
+    /// while the button itself is being dragged, so it never jumps out from under the cursor.
+    /// </summary>
+    private (Point Grip, Point Anchor) ResolveRotateGrip(Rect b, double padding, double offset, Point centre, double angle)
+    {
+        double cx = b.Left + b.Width / 2;
+        Point above = AnnotationRotation.RotatePoint(new Point(cx, b.Top - padding - offset), centre, angle);
+        Point below = AnnotationRotation.RotatePoint(new Point(cx, b.Bottom + padding + offset), centre, angle);
+        if (_activeHandle != RotateHandleIndex)
+        {
+            double radius = RotateHandleScreenPx / 2 * HandleScale;
+            _rotateGripBelow = RotateGripPlacement.ShouldPlaceBelow(above, below, radius, ReachableContent());
+        }
+        return _rotateGripBelow
+            ? (below, AnnotationRotation.RotatePoint(new Point(cx, b.Bottom + padding), centre, angle))
+            : (above, AnnotationRotation.RotatePoint(new Point(cx, b.Top - padding), centre, angle));
+    }
+
+    /// <summary>
+    /// Every image point the clamped view (ClampView) can ever show, less the settings row
+    /// that lies over the top of the canvas while it is on screen.
+    /// </summary>
+    private Rect ReachableContent()
+    {
+        double topInset = 0;
+        if (EditorGroupBar is { IsVisible: true } bar && bar.ActualHeight > 0)
+        {
+            try { topInset = Math.Max(0, bar.TranslatePoint(new Point(0, bar.ActualHeight), Viewport).Y); }
+            catch (InvalidOperationException) { topInset = 0; }
+        }
+        return RotateGripPlacement.ReachableContent(
+            Viewport.ActualWidth, Viewport.ActualHeight, _sourceWidth, _sourceHeight,
+            _zoom, ViewMargin, topInset);
     }
 
     /// <summary>
@@ -309,11 +348,8 @@ public partial class EditorWindow : Window
         if (b.Width < 0.5 && b.Height < 0.5) { HideRotateThumb(); return; }
         double angle = AnnotationTransform.AngleOf(fe);
         var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
-        var top = new Point(centre.X, b.Top);
-        var grip = new Point(centre.X, b.Top - AdaptiveHandleSpec(b.Width, b.Height).RotationOffset);
-        PlaceRotateThumb(
-            AnnotationRotation.RotatePoint(grip, centre, angle),
-            AnnotationRotation.RotatePoint(top, centre, angle));
+        var (grip, gripAnchor) = ResolveRotateGrip(b, 0, AdaptiveHandleSpec(b.Width, b.Height).RotationOffset, centre, angle);
+        PlaceRotateThumb(grip, gripAnchor);
     }
 
     /// <summary>
@@ -919,6 +955,8 @@ public partial class EditorWindow : Window
     /// </summary>
     private Point _rotatePressAt;
     private bool _rotateTravelled;
+    /// <summary>Degrees between the pointer's bearing and the mark's angle at the press (rule 1b).</summary>
+    private double _rotateGrabOffset;
     private const double RotateDragThresholdPx = 6;
 
     private void BeginResize(int handle, Point pos)
@@ -945,6 +983,14 @@ public partial class EditorWindow : Window
             _resizeAngle = AnnotationTransform.AngleOf(fe);
             _resizeFrame = null;
             _resizePivot = null;
+            // Page-edge rule 1b: a rotate button below the frame is grabbed about 180 degrees
+            // from the mark's own angle. Keep that offset so the turn starts from where the
+            // mark is instead of flipping it over on the first move.
+            _rotateGrabOffset = handle == RotateHandleIndex && _rotateGripBelow
+                && meta.Type != AnnotationData.TypeStep
+                ? AnnotationRotation.Normalize(
+                    AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos) - _resizeAngle)
+                : 0;
             // A counter never carries a RotateTransform (its "rotation" aims the nub), so
             // AngleOf is always 0 for one. Survey resizes it in its OWN rendered frame
             // instead: the canonical nub-up rect at pointerAngle+90 about the bubble centre.
@@ -1136,7 +1182,8 @@ public partial class EditorWindow : Window
             return;
         }
 
-        double bearing = AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos);
+        double bearing = AnnotationRotation.Normalize(
+            AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos) - _rotateGrabOffset);
         double angle = AnnotationRotation.ResolveDrag(bearing, ShapeConstraint.ShiftHeld,
             free: (Keyboard.Modifiers & ModifierKeys.Alt) != 0);
         AnnotationTransform.SetAngle(fe, angle);
@@ -2237,17 +2284,14 @@ public partial class EditorWindow : Window
     {
         if (_selected is null || _movingSelection || _draggingCurveHandle || SelectionLocked()) return;
         var moved = SelectionList().ToArray();
-        foreach (UIElement el in moved)
-            MoveElement(el, dx, dy);
-        // Same page constraint the pointer move commit applies, so a held arrow key cannot
-        // walk an annotation off the screenshot.
-        Vector fix = ClampSelectionToSurface(moved);
-        if (fix.X != 0 || fix.Y != 0)
-        {
-            foreach (UIElement el in moved) MoveElement(el, fix.X, fix.Y);
-            dx += fix.X;
-            dy += fix.Y;
-        }
+        // Same page clamp as the pointer move (rule 3), so a held arrow key stops at the
+        // image edge and never walks a mark off the screenshot.
+        Vector step = ClampMoveToSurface(moved, default, new Vector(dx, dy));
+        dx = step.X;
+        dy = step.Y;
+        if (dx != 0 || dy != 0)
+            foreach (UIElement el in moved)
+                MoveElement(el, dx, dy);
         if (dx == 0 && dy == 0) { UpdateSelectionVisual(); return; }
         UpdateSelectionVisual();
         Push(new EditorAction(

@@ -478,13 +478,6 @@
                         <Path x:Name="CropDim" Fill="{StaticResource GuideStrokeShadowBrush}" Visibility="Collapsed"/>
                         <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
                                    StrokeDashArray="4 3" Fill="{StaticResource AccentWashBrush}" Visibility="Collapsed"/>
-                        <!-- Survey SVGSelectionOverlay.jsx:129-147: #4a90e2, strokeWidth 2,
-                             strokeDasharray '4,4' in absolute px. WPF dash units are multiples
-                             of StrokeThickness, so "2 2" at a 2px stroke is the same 4/4 rhythm. -->
-                        <Rectangle x:Name="SelectionRect" Stroke="#4A90E2" StrokeThickness="2"
-                                   StrokeDashArray="2 2" Visibility="Collapsed"/>
-                        <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
-                                 Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
                         <!-- Survey's hover halo (SVGAnnotationLayer.jsx:4415-4421 etc.): the mark's
                              OWN geometry restroked in #4a90e2 at 0.4 opacity, so a pre-click
                              preview traces the shape instead of boxing it. -->
@@ -497,18 +490,6 @@
                         <!-- Rubber band. Stroke/fill are set per drag: blue solid dragging
                              right (window), green dashed dragging left (crossing). -->
                         <Rectangle x:Name="MarqueeRect" StrokeThickness="1" Visibility="Collapsed"/>
-                        <!-- Union frame around a marquee group; softer than a single selection. -->
-                        <Rectangle x:Name="GroupRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 3" Opacity="0.6" Visibility="Collapsed"/>
-                        <!-- What a selected magnifier callout is looking at. Hollow, so the
-                             pixels it is pointing at stay visible under it, and joined to
-                             the bubble by a leader so the pair reads as one mark. -->
-                        <Line x:Name="MagnifierLeader" Stroke="{StaticResource InfoBrush}" StrokeThickness="1"
-                              StrokeDashArray="3 3" Opacity="0.8" Visibility="Collapsed"/>
-                        <Ellipse x:Name="MagnifierFocusHandle" Width="12" Height="12"
-                                 Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
-                                 Fill="Transparent" Visibility="Collapsed"/>
-                        <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
                         <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
                                 CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
                             <StackPanel Orientation="Horizontal">
@@ -534,6 +515,33 @@
                             <Line x:Name="ThirdH1" Stroke="{StaticResource GuideStrokeBrush}"/>
                             <Line x:Name="ThirdH2" Stroke="{StaticResource GuideStrokeBrush}"/>
                         </Canvas>
+                    </Canvas>
+                    <!-- Selection chrome: the frame, the eight grabbers, the rotate button,
+                         the lock badge and the magnifier's focus ring. NOT clipped to the image,
+                         unlike InteractionCanvas and AnnotationCanvas: a grabber on a mark at the
+                         image edge draws whole over the desk and is grabbed there (handle hits
+                         are geometric, HitTestHandle), as in Drawboard PDF and Survey.
+                         Page-edge rules, docs/PAGE-EDGE-RULES.md, rule 1. -->
+                    <Canvas x:Name="ChromeCanvas" IsHitTestVisible="False" ClipToBounds="False">
+                        <!-- Survey SVGSelectionOverlay.jsx:129-147: #4a90e2, strokeWidth 2,
+                             strokeDasharray '4,4' in absolute px. WPF dash units are multiples
+                             of StrokeThickness, so "2 2" at a 2px stroke is the same 4/4 rhythm. -->
+                        <Rectangle x:Name="SelectionRect" Stroke="#4A90E2" StrokeThickness="2"
+                                   StrokeDashArray="2 2" Visibility="Collapsed"/>
+                        <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
+                                 Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
+                        <!-- Union frame around a marquee group; softer than a single selection. -->
+                        <Rectangle x:Name="GroupRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
+                                   StrokeDashArray="4 3" Opacity="0.6" Visibility="Collapsed"/>
+                        <!-- What a selected magnifier callout is looking at. Hollow, so the
+                             pixels it is pointing at stay visible under it, and joined to
+                             the bubble by a leader so the pair reads as one mark. -->
+                        <Line x:Name="MagnifierLeader" Stroke="{StaticResource InfoBrush}" StrokeThickness="1"
+                              StrokeDashArray="3 3" Opacity="0.8" Visibility="Collapsed"/>
+                        <Ellipse x:Name="MagnifierFocusHandle" Width="12" Height="12"
+                                 Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
+                                 Fill="Transparent" Visibility="Collapsed"/>
+                        <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
                     </Canvas>
                 </Grid>
             </Canvas>
