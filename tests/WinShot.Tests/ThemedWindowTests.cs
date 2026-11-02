@@ -2759,6 +2759,11 @@ public class ThemedWindowTests
                     throw new Xunit.Sdk.XunitException($"pressing {label} threw later: {late}");
                 pressed++;
             }
+            // The fit items persist the chosen fit mode in settings, and Fit height was the
+            // last one pressed. Put Fit page back so the editors opened after this one start
+            // the way a user's would.
+            onClick.Invoke((ButtonBase)editor.FindName("FitPageItem")!, null);
+            PumpDispatcherOnce();
         }
         finally
         {
