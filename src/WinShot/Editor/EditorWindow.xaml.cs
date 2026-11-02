@@ -307,12 +307,13 @@ public partial class EditorWindow : Window
         ContentRendered += OnInitialContentRendered;
         ContentRendered += OnChromeContentRendered;
 
-        // The viewport zooms/pans instead of the window sizing itself to the
-        // image, so a sensible default footprint is enough; the image is
-        // fitted and centered once layout is known.
+        // The window wraps the capture (CleanShot): a small shot opens in a small window
+        // and a big one is capped at 90 % of the work area and fitted by shrinking.
+        // WPF's MinWidth/MinHeight floor the small case.
         var wa = SystemParameters.WorkArea;
-        Width = Math.Min(1167, wa.Width * 0.9);
-        Height = Math.Min(590, wa.Height * 0.9);
+        Size want = DesiredWindowDip();
+        Width = Math.Min(want.Width, wa.Width * EditorGrowLayout.MaxWorkAreaFraction);
+        Height = Math.Min(want.Height, wa.Height * EditorGrowLayout.MaxWorkAreaFraction);
 
         WireSelectionQuickBar();
         WireBrushAdjust();
@@ -2692,6 +2693,29 @@ public partial class EditorWindow : Window
     private const double DefaultWidthDip = 1167;
     private const double DefaultHeightDip = 590;
 
+    /// <summary>
+    /// Everything around the viewport at the default size, in DIP: the 48 DIP rail plus the
+    /// frame across, and the title bar, both toolbar rows and the bottom bar down. Read off
+    /// the installed build at 125 %: a 1167x590 window holds a 1105x422 viewport.
+    /// </summary>
+    private const double ChromeWidthDip = DefaultWidthDip - 1105;
+    private const double ChromeHeightDip = DefaultHeightDip - 422;
+
+    /// <summary>
+    /// The landing size: the capture's own footprint (see
+    /// <see cref="EditorGrowLayout.DesiredForCapture"/>), but never narrower than the default,
+    /// because the one-row toolbar needs that width (EditorShellContract). The height has no
+    /// such need, so a short capture gets a short window down to MinHeight and fills it.
+    /// </summary>
+    private Size DesiredWindowDip()
+    {
+        Size want = EditorGrowLayout.DesiredForCapture(
+            _sourceWidth, _sourceHeight,
+            new Size(FitPadX * 2, FitGap * 2),
+            new Size(ChromeWidthDip, ChromeHeightDip));
+        return new Size(Math.Max(DefaultWidthDip, want.Width), want.Height);
+    }
+
     private SD.Rectangle? _origin;
     private IDisposable? _growMotion;
 
@@ -2750,7 +2774,7 @@ public partial class EditorWindow : Window
         // the restored minimum then yanks the window up to the larger one on the next
         // layout pass, which is exactly the size snap the motion rule forbids.
         SD.Rectangle to = EditorGrowLayout.Target(
-            work, new Size(DefaultWidthDip, DefaultHeightDip), scale, new Size(minWidth, minHeight));
+            work, DesiredWindowDip(), scale, new Size(minWidth, minHeight));
         SD.Rectangle from = EditorGrowLayout.Origin(origin);
 
         // Restored to at most where the window actually landed, so a work area smaller than
