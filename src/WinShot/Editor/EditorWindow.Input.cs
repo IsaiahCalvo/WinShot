@@ -1416,10 +1416,27 @@ public partial class EditorWindow : Window
         UIElement? hit = hovered;
         if (hovered is not null && _selection.Contains(hovered))
             hovered = null;
-        if (hovered is not FrameworkElement fe || !PaintHalo(HoverHalo, fe))
+        if (hovered is not FrameworkElement fe)
+        {
             HoverHalo.Visibility = Visibility.Collapsed;
+            _haloKey = null;
+            return hit;
+        }
+        // Moving the pointer across the same mark repaints nothing: the halo is rebuilt only
+        // when the mark, its place, its shape or the zoom changed since the last frame.
+        var key = HaloKey(fe);
+        if (HoverHalo.Visibility == Visibility.Visible && Equals(key, _haloKey)) return hit;
+        _haloKey = PaintHalo(HoverHalo, fe) ? key : null;
+        if (_haloKey is null) HoverHalo.Visibility = Visibility.Collapsed;
         return hit;
     }
+
+    private object? _haloKey;
+
+    private object HaloKey(FrameworkElement fe) => (
+        fe, _zoom, Canvas.GetLeft(fe), Canvas.GetTop(fe), fe.ActualWidth, fe.ActualHeight,
+        fe.RenderTransform?.Value ?? Matrix.Identity, (fe as Shape)?.RenderedGeometry,
+        (fe.Tag as AnnotationData)?.Thickness);
 
     /// <summary>
     /// Traces <paramref name="fe"/>'s own geometry (and rotation) into <paramref name="halo"/>

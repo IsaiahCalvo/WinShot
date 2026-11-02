@@ -284,6 +284,7 @@ public partial class EditorWindow : Window
         HistoryService history,
         Func<Task>? afterInitialPreview)
     {
+        _openClock.Start();
         ThemeResources.EnsureLoaded();
         InitializeComponent();
         _source = source;
@@ -386,9 +387,16 @@ public partial class EditorWindow : Window
         DarkTitleBar.Apply(this);
     }
 
+    /// <summary>
+    /// Open-time perf, from the constructor: first frame on screen, then the picture in it.
+    /// Logged so a slow open on a real machine shows up as a number in the log, not a feeling.
+    /// </summary>
+    private readonly System.Diagnostics.Stopwatch _openClock = new();
+
     private void OnInitialContentRendered(object? sender, EventArgs e)
     {
         ContentRendered -= OnInitialContentRendered;
+        Log.Info($"Perf editor first frame: {_openClock.ElapsedMilliseconds} ms");
         Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(() =>
@@ -448,6 +456,7 @@ public partial class EditorWindow : Window
         try
         {
             await RefreshImageAsync();
+            Log.Info($"Perf editor image shown: {_openClock.ElapsedMilliseconds} ms ({_source.Width}x{_source.Height})");
         }
         catch (Exception ex)
         {

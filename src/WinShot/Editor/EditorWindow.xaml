@@ -885,7 +885,7 @@
                                                         </Border>
                                                         <Popup x:Name="SizePresetsPopup" PlacementTarget="{Binding ElementName=SizeField}"
                                                                Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True"
-                                                               Opened="OnSizePresetsPopupOpened"
+                                                               PopupAnimation="Fade" Opened="OnSizePresetsPopupOpened"
                                                                IsOpen="{Binding IsChecked, ElementName=SizePresetsBtn, Mode=TwoWay}">
                                                             <Border Style="{StaticResource PopoverCard}" Width="232" Padding="8" Margin="0,0,36,36">
                                                                 <StackPanel>

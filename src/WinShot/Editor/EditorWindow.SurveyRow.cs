@@ -24,6 +24,21 @@ namespace WinShot.Editor;
 /// </summary>
 public partial class EditorWindow
 {
+    /// <summary>
+    /// Parsed templates, kept per UI thread. Every editor used to re-parse the same dozen
+    /// XAML strings (dot buttons, eraser segments, line and arrow samples) as it opened;
+    /// a template is shareable once sealed, so one parse per thread is enough.
+    /// </summary>
+    [ThreadStatic] private static Dictionary<string, object>? s_templateCache;
+
+    private static T ParseCached<T>(string xaml) where T : class
+    {
+        s_templateCache ??= new Dictionary<string, object>();
+        if (!s_templateCache.TryGetValue(xaml, out object? parsed))
+            s_templateCache[xaml] = parsed = System.Windows.Markup.XamlReader.Parse(xaml);
+        return (T)parsed;
+    }
+
     /// <summary>Survey utils/quickStylePresets.js QUICK_COLOURS.</summary>
     private static readonly (Color Colour, string Name)[] QuickColourDots =
     {
@@ -80,7 +95,7 @@ public partial class EditorWindow
         // StrokeSample, 28 x 14), not as a word alone.
         if (LineStyleBox is not null)
         {
-            var sample = (DataTemplate)System.Windows.Markup.XamlReader.Parse(LineSampleTemplate);
+            var sample = ParseCached<DataTemplate>(LineSampleTemplate);
             foreach (ComboBoxItem item in LineStyleBox.Items.OfType<ComboBoxItem>())
                 item.ContentTemplate = sample;
         }
@@ -116,7 +131,7 @@ public partial class EditorWindow
         ArrowBothEndsBtn.Focusable = false;
         ArrowBothEndsBtn.Cursor = Cursors.Hand;
         ArrowBothEndsBtn.ToolTip = null;
-        ArrowBothEndsBtn.Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(BothEndsRowTemplate);
+        ArrowBothEndsBtn.Template = ParseCached<ControlTemplate>(BothEndsRowTemplate);
 
         var rule = new Border { Height = 1, Margin = new Thickness(0, 4, 0, 4) };
         rule.SetResourceReference(Border.BackgroundProperty, "BorderBrush");
@@ -200,7 +215,7 @@ public partial class EditorWindow
         if (h.filled is not null)
             xaml.Append($"<Path Data='{h.filled}' StrokeThickness='1.5' StrokeLineJoin='Round' Stroke='{ink}' Fill='{ink}'/>");
         xaml.Append("</Canvas><TextBlock Text='{Binding}' Margin='6,0,0,0' VerticalAlignment='Center'/></StackPanel></DataTemplate>");
-        return (DataTemplate)System.Windows.Markup.XamlReader.Parse(xaml.ToString());
+        return ParseCached<DataTemplate>(xaml.ToString());
     }
 
     /// <summary>A 28 x 14 stroke sample, then the style's name. Keyed on the item's own word.</summary>
@@ -237,7 +252,7 @@ public partial class EditorWindow
             Focusable = false,
             ToolTip = name,
             Content = face,
-            Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
+            Template = ParseCached<ControlTemplate>(
                 "<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'>" +
                 "<Border Background='Transparent'><ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/></Border>" +
                 "</ControlTemplate>"),
@@ -261,7 +276,7 @@ public partial class EditorWindow
             Padding = new Thickness(6, 0, 6, 0),
             FontSize = 11,
             FontWeight = FontWeights.SemiBold,
-            Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
+            Template = ParseCached<ControlTemplate>(
                 "<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='RadioButton'>" +
                 "<Border x:Name='Bd' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' CornerRadius='6' Background='Transparent' Padding='{TemplateBinding Padding}'>" +
                 "<ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/></Border>" +
