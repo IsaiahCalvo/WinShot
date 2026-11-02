@@ -1007,8 +1007,15 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnSizePresetsPopupOpened(object sender, EventArgs e)
     {
-        if (SizeField is not null)
-            SizePresetsPopup.HorizontalOffset = (SizeField.ActualWidth - 126) / 2;
+        // Survey's pill card is Radix align="start": its left edge under the pill's.
+        SizePresetsPopup.HorizontalOffset = 0;
+        // The card opens with its number ready to type over (AnnotationSizeControl SizeCard).
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!SizePresetsPopup.IsOpen || SizeInput is null) return;
+            SizeInput.Focus();
+            SizeInput.SelectAll();
+        }, System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void SetSurfaceCursor(Cursor cursor)
@@ -1814,6 +1821,8 @@ public partial class EditorWindow : Window
         try
         {
             SizeInput.Text = current.ToString(CultureInfo.InvariantCulture);
+            if (SizePillLabel is not null)
+                SizePillLabel.Text = current.ToString(CultureInfo.InvariantCulture) + " pt";
             // label is 'Size' for the counter and the eraser, 'Width' otherwise
             // (AppShell.jsx:2476).
             bool sizeLabel = _tool == EditorTool.Eraser || ChromeTool() is EditorTool.Step;
@@ -1828,8 +1837,9 @@ public partial class EditorWindow : Window
             }
             if (SizePresetsBtn is not null)
             {
-                SizePresetsBtn.ToolTip = $"{label} presets";
-                System.Windows.Automation.AutomationProperties.SetName(SizePresetsBtn, $"{label} presets");
+                SizePresetsBtn.ToolTip = label;
+                System.Windows.Automation.AutomationProperties.SetName(SizePresetsBtn,
+                    $"{label}: {current.ToString(CultureInfo.InvariantCulture)} pt");
             }
             BuildSizePresetRows(current);
         }
@@ -1839,59 +1849,80 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>
+    /// Survey SizeCard chips (AnnotationSizeControl.jsx): six to a row, each 40 tall with a
+    /// mark over its number. Marks grow by RANK, not value: a line width shows a 22px line of
+    /// weight round((1 + rank * 7) * 2) / 2; a round size (counter, eraser) a dot of
+    /// round(2 + rank * 18). The current pick is accent text; hover is a surface step.
+    /// </summary>
     private void BuildSizePresetRows(int current)
     {
         if (SizePresetList is null) return;
         SizePresetList.Children.Clear();
         int[] presets = ActiveSizePresets();
-        int scaleMin = presets[0], scaleMax = presets[^1];
-        foreach (int preset in presets)
+        bool dot = _tool == EditorTool.Eraser || ChromeTool() is EditorTool.Step;
+        for (int index = 0; index < presets.Length; index++)
         {
-            double thickness = SizePreviewThickness(preset, scaleMin, scaleMax);
-            var bar = new Rectangle
+            int preset = presets[index];
+            double rank = presets.Length > 1 ? index / (double)(presets.Length - 1) : 0;
+            FrameworkElement mark;
+            if (dot)
             {
-                Width = 64,
-                Height = thickness,
-                // CSS border-radius:999px clamps to half the short side — a stadium,
-                // not the ellipse WPF would draw from a literal 999 radius.
-                RadiusX = thickness / 2,
-                RadiusY = thickness / 2,
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(68) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var preview = new Grid { Height = 22 };
-            preview.Children.Add(bar);
-            row.Children.Add(preview);
+                double size = Math.Round(2 + rank * 18);
+                mark = new Ellipse { Width = size, Height = size };
+            }
+            else
+            {
+                double weight = Math.Round((1 + rank * 7) * 2) / 2;
+                mark = new Rectangle { Width = 22, Height = weight, RadiusX = weight / 2, RadiusY = weight / 2 };
+            }
+            mark.HorizontalAlignment = HorizontalAlignment.Center;
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            var face = new Grid { Height = 40 };
+            face.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
+            face.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            face.Margin = new Thickness(0, 3, 0, 4);
+            face.Children.Add(mark);
             var numeral = new TextBlock
             {
                 Text = preset.ToString(CultureInfo.InvariantCulture),
-                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 10.5,
+                FontWeight = FontWeights.Medium,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Bottom,
             };
-            Grid.SetColumn(numeral, 1);
-            row.Children.Add(numeral);
-
-            // Survey builds these rows as plain buttons and paints the active one with two
-            // literal greys. WinShot already has a row style for exactly this menu, and it
-            // carries the accent chip and its cross-fade, so the row is the RadioButton that
-            // style was written for and "active" is IsChecked rather than two hardcoded colours.
-            var button = new RadioButton
+            Grid.SetRow(numeral, 1);
+            face.Children.Add(numeral);
+            var chip = new Button
             {
-                Style = (Style)FindResource("SizePresetRow"),
-                GroupName = "SizePreset",
-                Content = row,
+                Content = face,
                 Tag = (double)preset,
-                IsChecked = preset == current,
+                Margin = new Thickness(1),
+                Cursor = Cursors.Hand,
+                Focusable = true,
+                Template = SizeChipTemplate,
+                Foreground = preset == current
+                    ? (Brush)FindResource("ChromeAccentBrush")
+                    : (Brush)FindResource("TextSecondaryBrush"),
             };
-            // The bar is `background: currentColor`, so it tracks the row foreground.
-            bar.SetBinding(Shape.FillProperty,
-                new Binding(nameof(Control.Foreground)) { Source = button });
-            button.Click += OnSizePresetClick;
-            SizePresetList.Children.Add(button);
+            System.Windows.Automation.AutomationProperties.SetName(chip, $"{preset} pt");
+            ((Shape)mark).SetBinding(Shape.FillProperty, new Binding(nameof(Control.Foreground)) { Source = chip });
+            numeral.SetBinding(TextBlock.ForegroundProperty, new Binding(nameof(Control.Foreground)) { Source = chip });
+            chip.Click += OnSizePresetClick;
+            SizePresetList.Children.Add(chip);
         }
     }
+
+    private static readonly ControlTemplate SizeChipTemplate = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
+        "<ControlTemplate TargetType='Button' xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+        "<Border x:Name='Bg' Background='Transparent' CornerRadius='6' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>" +
+        "<ContentPresenter/></Border>" +
+        "<ControlTemplate.Triggers>" +
+        "<Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Bg' Property='Background' Value='#1FFFFFFF'/></Trigger>" +
+        "<Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Bg' Property='Background' Value='#1FFFFFFF'/></Trigger>" +
+        "<Trigger Property='IsPressed' Value='True'><Setter TargetName='Bg' Property='RenderTransformOrigin' Value='0.5,0.5'/>" +
+        "<Setter TargetName='Bg' Property='RenderTransform'><Setter.Value><ScaleTransform ScaleX='0.94' ScaleY='0.94'/></Setter.Value></Setter></Trigger>" +
+        "</ControlTemplate.Triggers></ControlTemplate>");
 
     /// <summary>
     /// utils/annotationSize.js getAnnotationSizePreviewThickness: square-root scaling
@@ -1921,8 +1952,24 @@ public partial class EditorWindow : Window
 
     private void OnSizeInputKey(object sender, KeyEventArgs e)
     {
-        // Enter blurs, which commits (AnnotationSizeControl.jsx:118).
-        if (e.Key == Key.Enter) { CommitSizeInput(); Viewport.Focus(); e.Handled = true; }
+        // Enter commits and closes the card (AnnotationSizeControl.jsx:118).
+        if (e.Key == Key.Enter)
+        {
+            CommitSizeInput();
+            if (SizePresetsBtn is not null) SizePresetsBtn.IsChecked = false;
+            Viewport.Focus();
+            e.Handled = true;
+            return;
+        }
+        // SizeCard: Up / Down step the number by 1 and apply it at once.
+        if (e.Key is Key.Up or Key.Down && SizeInput is not null)
+        {
+            double typed = double.TryParse(SizeInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out double v)
+                ? v : ActiveSize();
+            ApplySize(typed + (e.Key == Key.Up ? 1 : -1));
+            SizeInput.SelectAll();
+            e.Handled = true;
+        }
     }
 
     private void OnSizeInputBlur(object sender, KeyboardFocusChangedEventArgs e) => CommitSizeInput();
@@ -1962,7 +2009,7 @@ public partial class EditorWindow : Window
         double dip = 1;
         try { dip = VisualTreeHelper.GetDpi(box).PixelsPerDip; }
         catch (InvalidOperationException) { /* not in a visual tree yet */ }
-        // SurveyDropdown renders its trigger in Arial SemiBold 12; measuring in the UI
+        // SurveyDropdown renders its trigger in Arial SemiBold 11 (Survey .chrome-pill); measuring in the UI
         // font would under-size the combo and clip the label.
         var typeface = new Typeface(new FontFamily("Arial"), FontStyles.Normal,
             FontWeights.SemiBold, FontStretches.Normal);
@@ -1972,14 +2019,14 @@ public partial class EditorWindow : Window
             if (string.IsNullOrEmpty(text)) return;
             var ft = new FormattedText(
                 text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                typeface, 12, Brushes.White, dip);
+                typeface, 11, Brushes.White, dip);
             if (ft.Width > max) max = ft.Width;
         }
         foreach (string s in extra) Consider(s);
         foreach (object item in box.Items)
             Consider(item is ComboBoxItem cbi ? cbi.Content?.ToString() : item?.ToString());
-        // SurveyDropdown ContentSite margin is 9 left + 29 for the chevron column.
-        double width = Math.Ceiling(max) + 38;
+        // Survey .chrome-pill: 8 px inset, then the label, then 6 + 9 + 6 for the chevron.
+        double width = Math.Ceiling(max) + 29;
         // AnnotationDropdown.css:9 min-width: 72px.
         if (width < 72) width = 72;
         box.MinWidth = width;
@@ -1991,11 +2038,11 @@ public partial class EditorWindow : Window
         // SizeField is a fixed-width composite (43px input + 24px chevron), so it
         // never needs measuring.
         FitComboToLongestItem(ArrowStyleBox);
-        // Room for the 28px arrow sample and its 8px gap in front of each head's name.
-        if (ArrowStyleBox is not null) ArrowStyleBox.Width += 36;
+        // Room for the 28px arrow sample and its 6px gap in front of each head's name.
+        if (ArrowStyleBox is not null) ArrowStyleBox.Width += 34;
         FitComboToLongestItem(LineStyleBox);
-        // Room for the 28px stroke sample and its 8px gap in front of each style name.
-        if (LineStyleBox is not null) LineStyleBox.Width += 36;
+        // Room for the 28px stroke sample and its 6px gap in front of each style name.
+        if (LineStyleBox is not null) LineStyleBox.Width += 34;
         FitComboToLongestItem(FontFamilyBox);
         FitComboToLongestItem(FontSizeBox);
         FitComboToLongestItem(AlignBox);

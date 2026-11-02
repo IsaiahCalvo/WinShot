@@ -199,7 +199,7 @@ public partial class EditorWindow
             xaml.Append($"<Path Data='{h.stroked}' StrokeThickness='1.5' StrokeLineJoin='Round' StrokeStartLineCap='Round' StrokeEndLineCap='Round' Stroke='{ink}'/>");
         if (h.filled is not null)
             xaml.Append($"<Path Data='{h.filled}' StrokeThickness='1.5' StrokeLineJoin='Round' Stroke='{ink}' Fill='{ink}'/>");
-        xaml.Append("</Canvas><TextBlock Text='{Binding}' Margin='8,0,0,0' VerticalAlignment='Center'/></StackPanel></DataTemplate>");
+        xaml.Append("</Canvas><TextBlock Text='{Binding}' Margin='6,0,0,0' VerticalAlignment='Center'/></StackPanel></DataTemplate>");
         return (DataTemplate)System.Windows.Markup.XamlReader.Parse(xaml.ToString());
     }
 
@@ -214,7 +214,7 @@ public partial class EditorWindow
         " Data='M1,9 A3.25,3.25 0 0 1 7.5,9 A3.25,3.25 0 0 1 14,9 A3.25,3.25 0 0 1 20.5,9 A3.25,3.25 0 0 1 27,9'" +
         " Stroke='{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}'/>" +
         "</Grid>" +
-        "<TextBlock Text='{Binding}' Margin='8,0,0,0' VerticalAlignment='Center'/>" +
+        "<TextBlock Text='{Binding}' Margin='6,0,0,0' VerticalAlignment='Center'/>" +
         "</StackPanel>" +
         "<DataTemplate.Triggers>" +
         "<DataTrigger Binding='{Binding}' Value='Dashed'><Setter TargetName='L' Property='StrokeDashArray' Value='2.4 1.6'/><Setter TargetName='L' Property='StrokeDashCap' Value='Flat'/></DataTrigger>" +

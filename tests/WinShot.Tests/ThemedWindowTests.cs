@@ -1310,7 +1310,7 @@ public class ThemedWindowTests
         var sizeInput = (TextBox)editor.FindName("SizeInput")!;
         var sizeField = (Border)editor.FindName("SizeField")!;
         var sizeHeading = (TextBlock)editor.FindName("SizePresetsHeading")!;
-        var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
+        var sizePresets = (Panel)editor.FindName("SizePresetList")!;
         var viewport = (Grid)editor.FindName("Viewport")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;

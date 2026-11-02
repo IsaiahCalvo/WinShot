@@ -2594,7 +2594,7 @@
          ==================================================================== -->
     <ControlTemplate x:Key="SurveyDropdownToggleTemplate" TargetType="ToggleButton">
         <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
-                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="5">
+                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -2603,16 +2603,16 @@
                 <!-- Wave 0: hover and open both raise the cell to Elevated, so each gets
                      its own layer inside Bg's 1px border — where Bg's own fill already
                      stops — and cross-fades in. Chip under Hover, per the house order. -->
-                <Border x:Name="Chip" Grid.ColumnSpan="2" Opacity="0" CornerRadius="4"
+                <Border x:Name="Chip" Grid.ColumnSpan="2" Opacity="0" CornerRadius="9"
                         Background="{StaticResource ElevatedBrush}" IsHitTestVisible="False"/>
-                <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" CornerRadius="4"
+                <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" CornerRadius="9"
                         Background="{StaticResource ElevatedBrush}" IsHitTestVisible="False"/>
                 <!-- The chevron pins its own colour in Survey, so it does NOT brighten
                      with the label on hover. -->
-                <Path x:Name="Caret" Grid.Column="1" Margin="8,0,7,0"
+                <Path x:Name="Caret" Grid.Column="1" Margin="6,0,6,0"
                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Data="M0,0 L4,4 L8,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
-                      StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M0,0 L3.5,3.5 L7,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
+                      StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       StrokeLineJoin="Round" Fill="Transparent"/>
             </Grid>
         </Border>
@@ -2628,32 +2628,29 @@
         </ControlTemplate.Triggers>
     </ControlTemplate>
 
+    <!-- Survey AnnotationDropdown.css: one 26px row, 0 6px padding, 6px radius, 600 11px.
+         The current row is accent text and nothing else; hover is a surface step. -->
     <Style x:Key="SurveyDropdownItem" TargetType="ComboBoxItem">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="MinHeight" Value="34"/>
-        <Setter Property="Padding" Value="9,4"/>
-        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="Bg" Background="Transparent" CornerRadius="4"
+                    <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
                             Padding="{TemplateBinding Padding}" MinHeight="{TemplateBinding MinHeight}">
                         <ContentPresenter VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <!-- The selected row persists under the hover wash, so IsSelected
-                             comes first and IsHighlighted overrides it. AccentDeep on the
-                             highlight, matching DarkComboBoxItem: white on plain Accent is
-                             only 3.65:1. -->
-                        <Trigger Property="IsSelected" Value="True">
+                        <Trigger Property="IsHighlighted" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
-                        <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentDeepBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource ChromeAccentBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -2661,8 +2658,11 @@
         </Setter>
     </Style>
 
+    <!-- Survey .chrome-pill (styles.css): a 20px pill with a 10px radius, the value left-aligned
+         after an 8px inset, a 9px chevron 6px from the right, 600 11px. Its menu is the plain
+         list every chrome menu is: no heading, 5px padding, at least as wide as the pill. -->
     <Style x:Key="SurveyDropdown" TargetType="ComboBox">
-        <Setter Property="Height" Value="24"/>
+        <Setter Property="Height" Value="20"/>
         <Setter Property="MinWidth" Value="72"/>
         <!-- Three levels, and they have to stay three: the chevron below the resting label,
              the resting label below the open one. Survey's are #9da6b4 / #e8e2d4 / #fff;
@@ -2670,7 +2670,7 @@
              palette's own steps. A label that started at the top would have nothing to
              brighten to. -->
         <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
-        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
@@ -2685,14 +2685,14 @@
                         <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
                                           Content="{TemplateBinding SelectionBoxItem}"
                                           ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                          Margin="9,0,29,0"
+                                          Margin="8,0,21,0"
                                           VerticalAlignment="Center" HorizontalAlignment="Left"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                         <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="6"
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True" Focusable="False">
                             <Border x:Name="Pop" Style="{StaticResource PopoverCard}"
-                                    MinWidth="126" Padding="5" Margin="0,0,36,36">
+                                    MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Padding="5" Margin="0,0,36,36">
                                 <Border.RenderTransform>
                                     <TransformGroup>
                                         <ScaleTransform x:Name="PopScale" ScaleX="0.98" ScaleY="0.98"/>
@@ -2700,12 +2700,12 @@
                                     </TransformGroup>
                                 </Border.RenderTransform>
                                 <StackPanel>
-                                    <TextBlock x:Name="Heading" Padding="7,7,9,8"
+                                    <TextBlock x:Name="Heading" Padding="7,7,9,8" Visibility="Collapsed"
                                                FontSize="{StaticResource TextCaption}" FontWeight="Bold"
                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
-                                    <Border x:Name="HeadingRule" Height="1" Background="{StaticResource BorderBrush}"/>
-                                    <ScrollViewer MaxHeight="280" Margin="0,4,0,0">
+                                    <Border x:Name="HeadingRule" Height="1" Background="{StaticResource BorderBrush}" Visibility="Collapsed"/>
+                                    <ScrollViewer MaxHeight="520">
                                         <ItemsPresenter/>
                                     </ScrollViewer>
                                 </StackPanel>
@@ -2749,6 +2749,51 @@
                         </Trigger>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
                             <Setter TargetName="Toggle" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey .chrome-pill as a ToggleButton (the Width / Size pill): 20 tall, 10px radius,
+         control fill, the value left-aligned after an 8px inset, a 9px chevron 6px from the right,
+         600 11px tabular. Hover is a surface step; open keeps the label lit. -->
+    <Style x:Key="ChromePillToggle" TargetType="ToggleButton">
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
+        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10"
+                            Padding="8,0,6,0" SnapsToDevicePixels="True">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Left"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            <Path Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"
+                                  Data="M0,0 L3.5,3.5 L7,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
+                                  StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource ElevatedBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>

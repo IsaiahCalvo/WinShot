@@ -876,54 +876,50 @@
                             <Grid x:Name="SizeEffectHost" MinWidth="52" VerticalAlignment="Center" Margin="0,0,8,0">
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="0,0,6,0" Visibility="Collapsed"/>
-                                                        <!-- AnnotationSizeControl: a 43px editable number input welded to a
-                                                             24x22 chevron cell, opening a 126px preset popover whose rows
-                                                             preview the stroke thickness (AnnotationSizeControl.css:1-136). -->
-                                                        <Border x:Name="SizeField" Height="24" CornerRadius="5" BorderThickness="1"
-                                                                Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent"
+                                                        <!-- Survey AnnotationSizeControl variant="pill" (PASS 7, owner 2026-10-26/28):
+                                                             a 72x20 setting pill that reads "2 pt" with a 9px chevron. It opens
+                                                             a 232px card: the typed number with its unit, then the quick picks
+                                                             as a six-column grid, each a short line of its weight (a dot for the
+                                                             counter and eraser sizes) over its number. The current pick is accent. -->
+                                                        <Border x:Name="SizeField" Height="20" Width="72" CornerRadius="10"
                                                                 SnapsToDevicePixels="True">
-                                                            <Border.Style>
-                                                                <Style TargetType="Border">
-                                                                    <Style.Triggers>
-                                                                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                                                                            <Setter Property="BorderBrush" Value="{StaticResource ChromeAccentBrush}"/>
-                                                                        </Trigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </Border.Style>
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <TextBox x:Name="SizeInput" Style="{StaticResource SizeFieldInput}"
-                                                                         PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnSizeInputKey"
-                                                                         LostKeyboardFocus="OnSizeInputBlur"
-                                                                         AutomationProperties.Name="Annotation size"
-                                                                         AutomationProperties.HelpText="Type a whole number, or pick a preset from the chevron."/>
-                                                                <ToggleButton x:Name="SizePresetsBtn" Style="{StaticResource SizeFieldTrigger}"
-                                                                              ToolTip="Width presets" AutomationProperties.Name="Width presets"/>
-                                                            </StackPanel>
+                                                            <ToggleButton x:Name="SizePresetsBtn" Style="{StaticResource ChromePillToggle}"
+                                                                          ToolTip="Width" AutomationProperties.Name="Width">
+                                                                <TextBlock x:Name="SizePillLabel" Text="2 pt" TextTrimming="CharacterEllipsis"/>
+                                                            </ToggleButton>
                                                         </Border>
                                                         <Popup x:Name="SizePresetsPopup" PlacementTarget="{Binding ElementName=SizeField}"
                                                                Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True"
                                                                Opened="OnSizePresetsPopupOpened"
                                                                IsOpen="{Binding IsChecked, ElementName=SizePresetsBtn, Mode=TwoWay}">
-                                                            <StackPanel>
-                                                            <!-- Survey draws a Popover.Arrow filled #3a4252 pointing at the trigger
-                                                                 (AnnotationSizeControl.jsx:184, .css:142-144). The 36px right margin
-                                                                 below is shadow room, so match it here to centre on the 126px body. -->
-                                                            <Path HorizontalAlignment="Center" Margin="0,0,36,0" Data="M0,5 L5,0 L10,5 Z"
-                                                                  Fill="{StaticResource ChromeControlBrush}"/>
-                                                            <Border Style="{StaticResource PopoverCard}" Width="126" Padding="5" Margin="0,0,36,36">
+                                                            <Border Style="{StaticResource PopoverCard}" Width="232" Padding="8" Margin="0,0,36,36">
                                                                 <StackPanel>
-                                                                    <TextBlock x:Name="SizePresetsHeading" Text="WIDTH" Padding="7,7,9,8"
-                                                                               FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextCaption}" FontWeight="Bold"
-                                                                               Foreground="{StaticResource ChromeTextMutedBrush}"/>
-                                                                    <Border Height="1" Background="{StaticResource ChromeHairlineBrush}"/>
-                                                                    <ScrollViewer MaxHeight="420" Margin="0,4,0,0"
-                                                                                  HorizontalScrollBarVisibility="Disabled">
-                                                                        <StackPanel x:Name="SizePresetList"/>
-                                                                    </ScrollViewer>
+                                                                    <TextBlock x:Name="SizePresetsHeading" Visibility="Collapsed"/>
+                                                                    <Border Height="24" CornerRadius="5" BorderThickness="1" Padding="8,0"
+                                                                            Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent">
+                                                                        <Border.Style>
+                                                                            <Style TargetType="Border">
+                                                                                <Style.Triggers>
+                                                                                    <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                                                        <Setter Property="BorderBrush" Value="{StaticResource ChromeTextMutedBrush}"/>
+                                                                                    </Trigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </Border.Style>
+                                                                        <DockPanel LastChildFill="True">
+                                                                            <TextBlock x:Name="SizeUnitLabel" DockPanel.Dock="Right" Text="pt" VerticalAlignment="Center"
+                                                                                       FontSize="{StaticResource TextCaption}" Foreground="{StaticResource ChromeTextMutedBrush}"/>
+                                                                            <TextBox x:Name="SizeInput" Style="{StaticResource SizeFieldInput}"
+                                                                                     Width="Auto" Padding="0" TextAlignment="Left"
+                                                                                     PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnSizeInputKey"
+                                                                                     LostKeyboardFocus="OnSizeInputBlur"
+                                                                                     AutomationProperties.Name="Annotation size"
+                                                                                     AutomationProperties.HelpText="Type a number, or pick one below. Up and Down step it."/>
+                                                                        </DockPanel>
+                                                                    </Border>
+                                                                    <UniformGrid x:Name="SizePresetList" Columns="6" Margin="0,6,0,0"/>
                                                                 </StackPanel>
                                                             </Border>
-                                                            </StackPanel>
                                                         </Popup>
                                                     </StackPanel>
                                                     <!-- Survey's LIGHT / MEDIUM / STRONG combo is gone with its two tools: the
