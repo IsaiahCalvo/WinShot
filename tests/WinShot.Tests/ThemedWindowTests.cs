@@ -2737,6 +2737,8 @@ public class ThemedWindowTests
         var systemFocus = editor.TryFindResource(SystemParameters.FocusVisualStyleKey) as Style;
         var noRing = buttons
             .Where(b => b.Focusable && (b.FocusVisualStyle is null || ReferenceEquals(b.FocusVisualStyle, systemFocus)))
+            // A template with its own FocusRing part draws the ring itself.
+            .Where(b => !(b.FocusVisualStyle is null && b.ApplyTemplate() is var _ && b.Template?.FindName("FocusRing", b) is not null))
             .Select(b => string.IsNullOrEmpty(b.Name) ? $"{b.GetType().Name}[{b.Style?.GetHashCode()}] '{b.ToolTip ?? b.Content}'" : b.Name)
             .ToList();
         Assert.True(noRing.Count == 0, "No keyboard focus ring: " + string.Join(", ", noRing));

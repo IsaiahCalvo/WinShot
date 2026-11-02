@@ -641,7 +641,8 @@
     <!-- A plain (non-toggle) round icon button variant for one-shot actions
          that live in the toolbar (e.g. undo/redo/rotate). Same look at rest. -->
     <Style x:Key="ToolIconButton" TargetType="Button">
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Width"  Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Height" Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Margin" Value="3,0"/>
@@ -1951,7 +1952,8 @@
 
     <!-- `.btn.btn-default.btn-sm`: min-height 26, inline padding 8x4. Undo/redo. -->
     <Style x:Key="SurveyDefaultButton" TargetType="Button">
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Height" Value="26"/>
         <Setter Property="MinWidth" Value="30"/>
         <Setter Property="Padding" Value="8,4"/>
@@ -1968,7 +1970,8 @@
 
     <!-- `.btn.btn-icon`: a 28x28 square with no padding. Crop / rotate / more. -->
     <Style x:Key="CompactToolIconButton" TargetType="Button" BasedOn="{StaticResource SurveyDefaultButton}">
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="MinWidth" Value="0"/>
@@ -1983,7 +1986,8 @@
          (28 tall, 6px radius, 12x6 padding) instead of the 30px pill.
          ==================================================================== -->
     <Style x:Key="SurveyPrimaryButton" TargetType="Button">
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <!-- Vertical padding is zero: the presenter centres the label, and 6+6 inside a
              28 px button left 14 px for 13 px type, which clipped the descender and read
              as a tiny word in a big pill. Height is the pill token every other primary uses. -->
@@ -2063,7 +2067,8 @@
          ContentPresenter, so a text glyph and a vector glyph now agree on what
          "how big" means instead of disagreeing silently. -->
     <Style x:Key="SurveyIconToggle" TargetType="ToggleButton">
-        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="3,0"/>
