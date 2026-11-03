@@ -128,6 +128,8 @@ public class CaptureFreshnessTests
     {
         RunSta(() =>
         {
+            Assert.Equal(0, Motion.Holders);
+            Motion.TrackHolders = true;
             using var release = new ManualResetEventSlim(false);
             using var seams = new GrabSeams(release);
             using var menu = MenuStandIn();
@@ -158,8 +160,12 @@ public class CaptureFreshnessTests
                 selector.Dispose();
             }
 
-            // Every ramp the session started gives the shared clock back with it.
-            Assert.Equal(0, Motion.Holders);
+            // Every ramp the session started gives the shared clock back with it. A ramp
+            // still finishing gets its own few frames first: this thread is about to end, and
+            // a tween left on it would never tick again.
+            Pump(() => Motion.Holders == 0, 1500);
+            Assert.True(Motion.Holders == 0,
+                $"{Motion.Holders} motion holder(s) left behind, created at:\n{Motion.DescribeLiveHolders()}");
         });
     }
 
@@ -172,6 +178,8 @@ public class CaptureFreshnessTests
     {
         RunSta(() =>
         {
+            Assert.Equal(0, Motion.Holders);
+            Motion.TrackHolders = true;
             using var release = new ManualResetEventSlim(false);
             using var seams = new GrabSeams(release);
             using var menu = MenuStandIn();
@@ -199,8 +207,12 @@ public class CaptureFreshnessTests
                 selector.Dispose();
             }
 
-            // Every ramp the session started gives the shared clock back with it.
-            Assert.Equal(0, Motion.Holders);
+            // Every ramp the session started gives the shared clock back with it. A ramp
+            // still finishing gets its own few frames first: this thread is about to end, and
+            // a tween left on it would never tick again.
+            Pump(() => Motion.Holders == 0, 1500);
+            Assert.True(Motion.Holders == 0,
+                $"{Motion.Holders} motion holder(s) left behind, created at:\n{Motion.DescribeLiveHolders()}");
         });
     }
 
@@ -226,6 +238,7 @@ public class CaptureFreshnessTests
 
         public void Dispose()
         {
+            Motion.TrackHolders = false;
             SelectorFreeze.WarmGrab = _warm;
             SelectorFreeze.DeferredGrab = _deferred;
         }

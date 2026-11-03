@@ -287,6 +287,19 @@ internal static class Motion
         get { lock (Gate) return _holders; }
     }
 
+    /// <summary>For tests: record where each live holder was created, so a leak names its
+    /// source instead of failing as a bare count in whichever test runs next.</summary>
+    internal static bool TrackHolders { get; set; }
+
+    private static readonly Dictionary<Hold, string> HolderOrigins = new();
+
+    /// <summary>The creation stacks of the holders still alive while tracking was on.</summary>
+    internal static string DescribeLiveHolders()
+    {
+        lock (Gate)
+            return string.Join("\n----\n", HolderOrigins.Values);
+    }
+
     private sealed class Hold : IDisposable
     {
         private bool _released;
@@ -298,6 +311,8 @@ internal static class Motion
                 if (_holders == 0)
                     TimeBeginPeriod(1);
                 _holders++;
+                if (TrackHolders)
+                    HolderOrigins[this] = Environment.StackTrace;
             }
         }
 
@@ -312,6 +327,7 @@ internal static class Motion
                 if (_released) return;
                 _released = true;
                 _holders--;
+                HolderOrigins.Remove(this);
                 if (_holders == 0)
                     TimeEndPeriod(1);
             }
