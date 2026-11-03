@@ -3,7 +3,7 @@
   "name": "WinShot Capture",
   "short_name": "WinShot",
   "description": "Capture entire pages, selections, and elements, then mark them up and save as PNG, JPEG, WebP, or searchable PDF. Local-first.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minimum_chrome_version": "109",
   "offline_enabled": true,
   "incognito": "spanning",

@@ -21,6 +21,8 @@ function walk(directory, prefix = "") {
   const entries = [];
   for (const name of fs.readdirSync(directory).sort()) {
     if (!prefix && SKIP.has(name)) continue;
+    // The build stamp only drives developer auto-reload and would make every zip differ.
+    if (prefix === "src" && name === "build-stamp.json") continue;
     const full = path.join(directory, name);
     const relative = prefix ? `${prefix}/${name}` : name;
     if (fs.statSync(full).isDirectory()) entries.push(...walk(full, relative));

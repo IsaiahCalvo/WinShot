@@ -7,6 +7,7 @@ import {
   restrictedPageReason,
   validateCoverage
 } from "./contract.js";
+import { DEV_RELOAD_ALARM, handleDevReloadAlarm, startDevReload } from "./dev-reload.js";
 import { deleteCapture, getTiles, listRecords, pruneOlderThan, putRecord, putTile, updateRecord } from "./store.js";
 import { captureLimits, loadSettings, normalizeSettings, renderFileName, reserveFileNameCounter, saveSettings } from "./settings.js";
 
@@ -1009,9 +1010,13 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create("winshot-prune-history", { periodInMinutes: 60 * 24, delayInMinutes: 5 });
   refreshContextMenu().catch(() => {});
 });
+const busyCapturing = () => activeCaptures.size > 0 || Boolean(activeBatch);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "winshot-prune-history") pruneHistory().catch(() => {});
+  if (alarm.name === DEV_RELOAD_ALARM) handleDevReloadAlarm(busyCapturing).catch(() => {});
 });
+// Unpacked (developer) installs pick up new builds by themselves; store installs skip this.
+startDevReload(busyCapturing).catch(() => {});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes["winshot:capture-settings"]) refreshContextMenu().catch(() => {});
 });
@@ -1032,6 +1037,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // Playwright evaluates inside the private service-worker context because current branded
 // Chrome/Edge builds no longer accept side-load flags. This hook is not visible to webpages.
-globalThis.__winshotTest = Object.freeze({ runCapture, runBatch, startPicker, cancelActiveCapture, handleCommand });
+globalThis.__winshotTest = Object.freeze({ runCapture, runBatch, startPicker, cancelActiveCapture, handleCommand, devReloadCheck: () => handleDevReloadAlarm(busyCapturing), devReloadStart: () => startDevReload(busyCapturing) });
 
 recoverInterruptedRecords().catch(() => {});
