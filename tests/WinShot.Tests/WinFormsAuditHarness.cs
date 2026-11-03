@@ -459,48 +459,30 @@ public class WinFormsAuditHarness
     }
 
     /// <summary>
-    /// The one dark menu every WinForms drop-down in the app shares
-    /// (<see cref="DarkDropDown.DarkMenuRenderer"/>), built in the tray menu's shape: a disabled
-    /// version header, separators between groups, a left gutter of glyphs on the capture verbs
-    /// and none on the housekeeping rows, shortcut columns, and a submenu row. The tray menu
-    /// itself is built inside App's instance constructor and cannot be reached without starting
-    /// the application, so this is the same renderer and the same row vocabulary standing in for
-    /// it — a defect in row geometry, hover inset, separator colour or arrow lands in both.
+    /// The real tray menu, from the same builder App uses, with do-nothing actions. The submenu
+    /// frame opens "More ways to capture", the first row with rows of its own.
     /// </summary>
     private static Shot? Menu(int hoverRow, bool submenu)
     {
-        var menu = new WF.ContextMenuStrip
-        {
-            Renderer = new DarkDropDown.DarkMenuRenderer(),
-            ShowImageMargin = true,
-        };
+        WinShot.App.TrayMenuParts parts = WinShot.App.BuildTrayMenu(new Settings(), _ => () => { });
+        var menu = parts.Menu;
         try
         {
-            menu.Items.Add(new WF.ToolStripMenuItem("WinShot 1.0.0") { Enabled = false });
-            menu.Items.Add(new WF.ToolStripSeparator());
-            menu.Items.Add(Row("Capture region", "Ctrl+Shift+1", ""));
-            menu.Items.Add(Row("Capture window", "Ctrl+Shift+2", ""));
-            menu.Items.Add(Row("Capture fullscreen", null, ""));
-            menu.Items.Add(new WF.ToolStripSeparator());
-            menu.Items.Add(Row("Record screen", "Ctrl+Shift+3", ""));
-            menu.Items.Add(Row("Capture text (OCR)", "Ctrl+Shift+4", ""));
-            menu.Items.Add(Row("Scrolling capture", "Ctrl+Shift+5", ""));
-            var recents = new WF.ToolStripMenuItem("Recent captures");
-            recents.DropDownItems.Add(new WF.ToolStripMenuItem("shot-2026-09-17-141203.png"));
-            recents.DropDownItems.Add(new WF.ToolStripMenuItem("shot-2026-09-17-140914.png"));
-            menu.Items.Add(recents);
-            menu.Items.Add(new WF.ToolStripSeparator());
-            menu.Items.Add(Row("History…", "Ctrl+Shift+0", null));
-            menu.Items.Add(Row("Settings…", null, null));
-            menu.Items.Add(Row("Exit", null, null));
             ScaleGlyphs(menu);
 
             menu.Show(new SD.Point(0, 0));
             WF.Control target = menu;
+            WF.ToolStripDropDown? opened = null;
             if (submenu)
             {
-                recents.DropDown.Show(new SD.Point(0, 0));
-                target = recents.DropDown;
+                foreach (WF.ToolStripItem item in menu.Items)
+                {
+                    if (item is not WF.ToolStripMenuItem { HasDropDownItems: true } parent) continue;
+                    parent.DropDown.Show(new SD.Point(0, 0));
+                    opened = parent.DropDown;
+                    target = opened;
+                    break;
+                }
             }
             else if (hoverRow >= 0 && menu.Items[hoverRow] is WF.ToolStripMenuItem hot)
             {
@@ -509,7 +491,7 @@ public class WinFormsAuditHarness
             }
 
             Shot? shot = FromStrip(target);
-            if (submenu) recents.DropDown.Close();
+            opened?.Close();
             menu.Close();
             return shot;
         }
@@ -517,23 +499,13 @@ public class WinFormsAuditHarness
         {
             menu.Dispose();
         }
-
-        static WF.ToolStripMenuItem Row(string text, string? shortcut, string? glyph) =>
-            new(text) { ShortcutKeyDisplayString = shortcut, Tag = glyph };
     }
 
-    /// <summary>The tray menu's own glyph rasteriser, through the same private method App uses,
-    /// so this stands in for the tray gutter rather than inventing one.</summary>
+    /// <summary>The tray menu's own glyph rasteriser, the same method App runs on every open.</summary>
     private static void ScaleGlyphs(WF.ContextMenuStrip menu)
     {
         int dpi = menu.DeviceDpi <= 0 ? 96 : menu.DeviceDpi;
-        int size = WinShot.App.MenuGlyphPixels(dpi);
-        menu.ImageScalingSize = new SD.Size(size, size);
-        MethodInfo render = typeof(WinShot.App)
-            .GetMethod("RenderMenuGlyph", BindingFlags.Static | BindingFlags.NonPublic)!;
-        foreach (WF.ToolStripItem item in menu.Items)
-            if (item.Tag is string glyph && glyph.Length > 0)
-                item.Image = render.Invoke(null, new object[] { glyph, dpi }) as SD.Image;
+        WinShot.App.ScaleMenuGlyphs(menu, dpi);
     }
 
     private static Shot? CardMenu(bool hover, bool submenu)

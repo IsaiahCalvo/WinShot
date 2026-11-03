@@ -432,60 +432,14 @@ public partial class App : Application
             Text = "WinShot",
         };
 
-        var s = _settings.Current;
-        var menu = new WF.ContextMenuStrip
-        {
-            Renderer = new DarkDropDown.DarkMenuRenderer(),
-            // A fixed left gutter for the capture verbs. The housekeeping group at the
-            // bottom deliberately gets no glyphs, which demotes it without another separator.
-            ShowImageMargin = true,
-        };
-        // Non-clickable header showing the running version — always visible at a glance.
-        var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
-        menu.Items.Add(versionHeader);
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"), "\uE7C5"));
-        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"), "\uE737"));
-        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background"), "\uE790"));
-        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"), "\uE740"));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"), "\uE916"));
-        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region"), "\uE916"));
-        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display"), "\uE7F4"));
-        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow, "\uE77F"));
-        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"), "\uE72C"));
-        menu.Items.Add(MenuItem("All-in-one…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"), "\uE71D"));
-        menu.Items.Add(MenuItem("Measure on screen", s.HotkeyMeasure, () => QueueCaptureCommand("measure"), "\uED5E"));
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow, "\uE714"));
-        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow, "\uE7F4"));
-        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr"), "\uE8D2"));
-        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"), "\uE8CB"));
-        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal"), "\uE8AB"));
-        menu.Items.Add(MenuItem("Scrolling capture (upward)", null, () => QueueCaptureCommand("scroll-up"), "\uE70E"));
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Open image…", null, OpenImageFileFlow, "\uE8E5"));
-        menu.Items.Add(MenuItem("Pin to the screen…", null, PinFromFileFlow, "\uE718"));
-        menu.Items.Add(MenuItem("Restore recently closed", null, RestoreLastFlow, "\uE7A7"));
-        _desktopIconsMenuItem = MenuItem("Hide desktop icons", null, ToggleDesktopIcons, "\uE8B7");
-        menu.Items.Add(_desktopIconsMenuItem);
-        _recentsMenuItem = new WF.ToolStripMenuItem("Recent captures");
-        _recentsMenuItem.DropDownOpening += (_, _) => PopulateRecentCaptures();
-        menu.Items.Add(_recentsMenuItem);
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("History…", s.HotkeyHistory, OpenHistory));
-        menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
-        menu.Items.Add(MenuItem("Pin last screenshot", s.HotkeyPinLast, PinLastFlow));
-        menu.Items.Add(MenuItem("Toggle pins visibility", s.HotkeyPinToggleVisibility, TogglePinsFlow));
-        menu.Items.Add(MenuItem("Close all pins", s.HotkeyPinCloseAll, ClosePinsFlow));
-        menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
-        menu.Items.Add(new WF.ToolStripSeparator());
-        // Dynamic "Update available" item — hidden until a check finds a newer release.
-        _updateMenuItem = MenuItem("Install update", null, () => _ = InstallPendingUpdateAsync());
-        _updateMenuItem.Visible = false;
-        menu.Items.Add(_updateMenuItem);
-        menu.Items.Add(MenuItem("Check for updates…", null, () => _ = CheckForUpdatesFlowAsync()));
-        menu.Items.Add(MenuItem("About WinShot…", null, OpenAbout));
-        menu.Items.Add(MenuItem("Exit", null, Shutdown));
+        TrayMenuParts parts = BuildTrayMenu(_settings.Current, TrayAction);
+        var menu = parts.Menu;
+        _desktopIconsMenuItem = parts.DesktopIcons;
+        _recentsMenuItem = parts.Recents;
+        // Filled when the tray menu opens, not when the submenu does: a row with no items has
+        // no arrow and never opens, so waiting for DropDownOpening left it empty for good.
+        menu.Opening += (_, _) => PopulateRecentCaptures();
+        _updateMenuItem = parts.Update;
         // The desktop-icon row's checked state is only true while WinShot is holding them
         // hidden, and a capture guard can change that behind the menu's back.
         menu.Opening += (_, _) => RefreshDesktopIconsMenuItem();
@@ -829,6 +783,107 @@ public partial class App : Application
 
     /// <param name="glyph">A Segoe Fluent codepoint for the capture verbs. Housekeeping rows
     /// pass none on purpose: an empty gutter is what visually demotes them.</param>
+    /// <summary>The tray menu rows that change after the menu is built.</summary>
+    internal sealed record TrayMenuParts(
+        WF.ContextMenuStrip Menu,
+        WF.ToolStripMenuItem DesktopIcons,
+        WF.ToolStripMenuItem Recents,
+        WF.ToolStripMenuItem Update);
+
+    /// <summary>
+    /// The tray menu, laid out the way CleanShot X lays out its menu-bar menu: the everyday
+    /// verbs at the top level, the rarer variants one level down. It used to be 32 flat rows,
+    /// which at 150 % on a 1080p screen is taller than the work area, so WinForms put scroll
+    /// arrows on it and the bottom of the list (History, Settings, Exit) was off screen.
+    /// Static, with each row's action looked up by name, so the render audit can draw this
+    /// menu rather than a stand-in.
+    /// </summary>
+    internal static TrayMenuParts BuildTrayMenu(Settings s, Func<string, Action> act)
+    {
+        var menu = new WF.ContextMenuStrip
+        {
+            Renderer = new DarkDropDown.DarkMenuRenderer(),
+            // A fixed left gutter for the capture verbs. The housekeeping group at the
+            // bottom deliberately gets no glyphs, which demotes it without another separator.
+            ShowImageMargin = true,
+        };
+        WF.ToolStripMenuItem Row(string text, string? shortcut, string id, string? glyph = null) =>
+            MenuItem(text, shortcut, act(id), glyph);
+
+        // Non-clickable header showing the running version — always visible at a glance.
+        menu.Items.Add(new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false });
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("Capture region", s.HotkeyCaptureRegion, "capture-area", "\uE7C5"));
+        menu.Items.Add(Row("Capture window", s.HotkeyCaptureWindow, "capture-window", "\uE737"));
+        menu.Items.Add(Row("Capture fullscreen", s.HotkeyCaptureFullscreen, "capture-fullscreen", "\uE740"));
+        menu.Items.Add(Row("Capture previous region", s.HotkeyCapturePrevious, "capture-previous", "\uE72C"));
+        menu.Items.Add(Row("Capture fullscreen (self-timer)", s.HotkeySelfTimer, "self-timer", "\uE916"));
+        menu.Items.Add(Row("All-in-one…", s.HotkeyAllInOne, "all-in-one", "\uE71D"));
+        menu.Items.Add(Row("Measure on screen", s.HotkeyMeasure, "measure", "\uED5E"));
+        var more = new WF.ToolStripMenuItem("More ways to capture") { Tag = "\uE712" };
+        more.DropDownItems.Add(Row("Capture window with background", null, "capture-window-background", "\uE790"));
+        more.DropDownItems.Add(Row("Capture display…", null, "capture-display", "\uE7F4"));
+        more.DropDownItems.Add(Row("Capture region (self-timer)", null, "self-timer-region", "\uE916"));
+        more.DropDownItems.Add(Row("Horizontal scrolling capture", null, "scroll-horizontal", "\uE8AB"));
+        more.DropDownItems.Add(Row("Scrolling capture (upward)", null, "scroll-up", "\uE70E"));
+        more.DropDownItems.Add(Row("Open clipboard image", s.HotkeyLoadClipboard, "clipboard", "\uE77F"));
+        menu.Items.Add(more);
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("Record screen", s.HotkeyRecord, "record", "\uE714"));
+        menu.Items.Add(Row("Record display…", null, "record-display", "\uE7F4"));
+        menu.Items.Add(Row("Capture text (OCR)", s.HotkeyOcr, "ocr", "\uE8D2"));
+        menu.Items.Add(Row("Scrolling capture", s.HotkeyScrolling, "scrolling", "\uE8CB"));
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("Open image…", null, "open-image", "\uE8E5"));
+        menu.Items.Add(Row("Restore recently closed", null, "restore", "\uE7A7"));
+        var desktopIcons = Row("Hide desktop icons", null, "desktop-icons", "\uE8B7");
+        menu.Items.Add(desktopIcons);
+        var pins = new WF.ToolStripMenuItem("Pins") { Tag = "\uE718" };
+        pins.DropDownItems.Add(Row("Pin an image…", null, "pin-file"));
+        pins.DropDownItems.Add(Row("Pin last screenshot", s.HotkeyPinLast, "pin-last"));
+        pins.DropDownItems.Add(Row("Toggle pins visibility", s.HotkeyPinToggleVisibility, "pins-toggle"));
+        pins.DropDownItems.Add(Row("Close all pins", s.HotkeyPinCloseAll, "pins-close"));
+        pins.DropDownItems.Add(Row("Unlock pinned windows", null, "pins-unlock"));
+        menu.Items.Add(pins);
+        var recents = new WF.ToolStripMenuItem("Recent captures") { Tag = "\uE81C" };
+        menu.Items.Add(recents);
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("History…", s.HotkeyHistory, "history"));
+        menu.Items.Add(Row("Settings…", null, "settings"));
+        menu.Items.Add(new WF.ToolStripSeparator());
+        // Dynamic "Update available" item — hidden until a check finds a newer release.
+        var update = Row("Install update", null, "install-update");
+        update.Visible = false;
+        menu.Items.Add(update);
+        menu.Items.Add(Row("Check for updates…", null, "check-updates"));
+        menu.Items.Add(Row("About WinShot…", null, "about"));
+        menu.Items.Add(Row("Exit", null, "exit"));
+        return new TrayMenuParts(menu, desktopIcons, recents, update);
+    }
+
+    /// <summary>What each tray row does; any name not listed is a capture command.</summary>
+    private Action TrayAction(string id) => id switch
+    {
+        "record" => () => RecordFlow(),
+        "record-display" => () => RecordDisplayFlow(),
+        "clipboard" => () => LoadClipboardImageFlow(),
+        "open-image" => () => OpenImageFileFlow(),
+        "pin-file" => () => PinFromFileFlow(),
+        "restore" => () => RestoreLastFlow(),
+        "desktop-icons" => () => ToggleDesktopIcons(),
+        "history" => () => OpenHistory(),
+        "settings" => () => OpenSettings(),
+        "pin-last" => () => PinLastFlow(),
+        "pins-toggle" => () => TogglePinsFlow(),
+        "pins-close" => () => ClosePinsFlow(),
+        "pins-unlock" => () => FastPinWindow.UnlockAllPins(),
+        "install-update" => () => _ = InstallPendingUpdateAsync(),
+        "check-updates" => () => _ = CheckForUpdatesFlowAsync(),
+        "about" => () => OpenAbout(),
+        "exit" => () => Shutdown(),
+        _ => () => QueueCaptureCommand(id),
+    };
+
     private static WF.ToolStripMenuItem MenuItem(
         string text, string? shortcut, Action onClick, string? glyph = null)
     {
@@ -854,12 +909,21 @@ public partial class App : Application
     private static void ScaleMenuGlyphs(WF.ContextMenuStrip menu)
     {
         int dpi = menu.DeviceDpi <= 0 ? 96 : menu.DeviceDpi;
+        ScaleMenuGlyphs(menu, dpi);
+    }
+
+    /// <summary>Submenus open on the same monitor as the menu they hang off, so they take its
+    /// DPI rather than their own, which is not known until they are shown.</summary>
+    internal static void ScaleMenuGlyphs(WF.ToolStrip strip, int dpi)
+    {
         int size = MenuGlyphPixels(dpi);
-        menu.ImageScalingSize = new SD.Size(size, size);
-        foreach (WF.ToolStripItem item in menu.Items)
+        strip.ImageScalingSize = new SD.Size(size, size);
+        foreach (WF.ToolStripItem item in strip.Items)
         {
             if (item.Tag is string glyph && glyph.Length > 0)
                 item.Image = RenderMenuGlyph(glyph, dpi);
+            if (item is WF.ToolStripMenuItem { HasDropDownItems: true } parent)
+                ScaleMenuGlyphs(parent.DropDown, dpi);
         }
     }
 
@@ -1077,7 +1141,7 @@ public partial class App : Application
         }
     }
 
-    private static bool IsCaptureCommand(string cmd) => cmd is
+    internal static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
         "all-in-one" or "ocr" or "measure" or "scrolling" or "scroll-horizontal" or "scroll-up" or

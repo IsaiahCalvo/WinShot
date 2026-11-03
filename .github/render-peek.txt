@@ -1,6 +1,4 @@
 # Frames to print into the render-evidence log (paths under render-out).
 # "path" prints the whole frame; "path x y w h [cols]" crops that box first.
-history\history-search.png
-settings\normal-general.png
-settings\screenshots.png
-out\selector-pending-96.png
+winforms-audit\menu-dark-96.png
+winforms-audit\menu-dark-submenu-96.png
