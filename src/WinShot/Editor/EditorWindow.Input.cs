@@ -87,7 +87,6 @@ public partial class EditorWindow : Window
         if (_sourceOperationActive) return;
         if (IsRotationPillSource(e.OriginalSource)) return; // the pill is its own control
         if (IsQuickBarSource(e.OriginalSource)) return; // so is the selection quick bar
-        if (IsPinDockSource(e.OriginalSource)) return;  // and the pinned tools dock
         // Survey keeps the fit mode across annotation clicks; only an explicit zoom
         // (ZoomAt -> ViewFitMode.Free, Survey's MANUAL) stops the view tracking the viewport.
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
