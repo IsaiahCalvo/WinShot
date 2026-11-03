@@ -57,6 +57,39 @@ public class QuickAccessOverlayThemeTests
         }
     }
 
+    /// <summary>
+    /// Isaiah, 2026-11-03: the hovered corner card read as "all too dark". The wash over the
+    /// frosted capture was 55 % near-black; it is now about a quarter, and the buttons carry
+    /// their own dark face so a light wash does not cost them their contrast.
+    /// </summary>
+    [Fact]
+    public void TheHoverWashStaysLight()
+    {
+        var dark = QuickAccessOverlayThemePalette.For(QuickAccessOverlayTheme.Dark);
+        Assert.InRange(dark.HoverTint.A, 1, 80);
+        Assert.True(dark.StatusTint.A > dark.HoverTint.A, "a bare status line needs more wash than the buttons do");
+    }
+
+    [Fact]
+    public void ButtonGlyphsReadOverAHoveredCardOfAnyCapture()
+    {
+        foreach (QuickAccessOverlayTheme theme in new[] { QuickAccessOverlayTheme.Light, QuickAccessOverlayTheme.Dark })
+        {
+            var visuals = QuickAccessOverlayThemePalette.For(theme);
+            foreach (SD.Color capture in new[] { SD.Color.White, SD.Color.Black, SD.Color.FromArgb(128, 128, 128) })
+            foreach ((string state, SD.Color face) in new[]
+                     {
+                         ("rest", visuals.ControlFace), ("hot", visuals.ControlHover), ("pressed", visuals.ControlPressed),
+                     })
+            {
+                SD.Color behind = Over(face, Over(visuals.HoverTint, capture));
+                Assert.True(
+                    Contrast(visuals.Glyph, behind) >= 4.5,
+                    $"{theme} {state} button glyph reads at {Contrast(visuals.Glyph, behind):0.00}:1 over a hovered {capture.Name} card");
+            }
+        }
+    }
+
     private static SD.Color Over(SD.Color top, SD.Color under)
     {
         double a = top.A / 255d;

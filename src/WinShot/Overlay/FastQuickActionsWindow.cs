@@ -1021,7 +1021,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (_flashMessage is null)
             return;
 
-        using (var scrim = new SD.SolidBrush(_visuals.HoverTint))
+        using (var scrim = new SD.SolidBrush(_visuals.StatusTint))
         using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
             g.FillPath(scrim, cardPath);
 
