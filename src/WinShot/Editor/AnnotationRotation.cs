@@ -92,18 +92,27 @@ internal static class AnnotationRotation
             centre.Y + dx * sin + dy * cos);
     }
 
+    /// <summary>Survey snapGuides.js ROTATE_MAGNET_DEG: a free drag is pulled onto a right angle within this.</summary>
+    public const double RightAngleMagnetDegrees = 4;
+
     /// <summary>
-    /// Full drag resolution. Survey rotates to the ABSOLUTE bearing from the shape centre to
-    /// the pointer with no grab offset (useSVGInteraction.js:2350-2352), so the mark's top
-    /// faces the cursor from the first pointermove. Survey applies
-    /// <c>snapAngleToNearest45(newAngle, 3)</c> ONLY while Shift is held (:2357-2360) and
-    /// leaves an unmodified drag completely free — so a deliberate 14° tilt stays reachable.
-    /// WinShot keeps its 15° increment rather than Survey's 45°.
+    /// Full drag resolution, Survey snapRotationDegrees (snapGuides.js:354-361, Drawboard
+    /// canvas audit chunk 3). The mark turns to the absolute bearing from its centre to the
+    /// pointer, then:
+    /// <list type="bullet">
+    /// <item>no modifier: whole degrees, pulled onto 0 / 90 / 180 / 270 within 4 degrees;</item>
+    /// <item>Shift: hard steps of the snap angle (15 degrees);</item>
+    /// <item>Alt: completely free.</item>
+    /// </list>
     /// </summary>
-    public static double ResolveDrag(double pointerAngle, bool shift)
+    public static double ResolveDrag(double pointerAngle, bool shift, bool free = false)
     {
-        double raw = Normalize(pointerAngle);
-        return shift ? SnapToNearest(raw) : raw;
+        double a = Normalize(pointerAngle);
+        if (free) return a;
+        if (shift) return Normalize(Math.Round(a / SnapIncrementDegrees) * SnapIncrementDegrees);
+        double right = Math.Round(a / 90) * 90;
+        if (Math.Abs(a - right) <= RightAngleMagnetDegrees) return Normalize(right);
+        return Normalize(Math.Round(a));
     }
 }
 

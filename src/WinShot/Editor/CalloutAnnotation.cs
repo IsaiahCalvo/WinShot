@@ -90,6 +90,18 @@ internal sealed class CalloutAnnotation : Canvas
         SnapsToDevicePixels = true,
     };
 
+    // Survey w43: a Cloud line style clouds the BOX only; the leader and head stay straight
+    // (textCloudBorder.js). The Rectangle keeps the fill and the hit area, this draws the edge.
+    private readonly Path _boxCloud = new()
+    {
+        Fill = null,
+        StrokeLineJoin = PenLineJoin.Round,
+        StrokeStartLineCap = PenLineCap.Round,
+        StrokeEndLineCap = PenLineCap.Round,
+        IsHitTestVisible = false,
+        Visibility = Visibility.Collapsed,
+    };
+
     private readonly Border _textHost = new()
     {
         // Survey insets the text horizontally only (TEXT_PADDING = 6); the full buffered
@@ -120,6 +132,7 @@ internal sealed class CalloutAnnotation : Canvas
         Children.Add(_leader);
         Children.Add(_head);
         Children.Add(_box);
+        Children.Add(_boxCloud);
         Children.Add(_textHost);
     }
 
@@ -146,7 +159,7 @@ internal sealed class CalloutAnnotation : Canvas
     public void Apply(
         CalloutLayout layout, string text, Color stroke, Color fill, double thickness,
         ArrowheadStyle head, LineBorderStyle lineStyle, double fontSize, string? fontFamily = null,
-        Color? fontColor = null)
+        Color? fontColor = null, double cloudIntensity = AnnotationFactory.DefaultTextCloudIntensity)
     {
         double descender = fontSize * CalloutLayout.DescenderRatio;
         if (Math.Abs(layout.Descender - descender) > 0.001)
@@ -227,6 +240,22 @@ internal sealed class CalloutAnnotation : Canvas
         _box.Height = rect.Height;
         SetLeft(_box, rect.X);
         SetTop(_box, rect.Y);
+        if (lineStyle == LineBorderStyle.Cloud)
+        {
+            _boxCloud.Stroke = strokeBrush;
+            _boxCloud.StrokeThickness = _box.StrokeThickness;
+            _boxCloud.Data = CloudPath.ForRectangle(
+                new Rect(0, 0, Math.Max(1, rect.Width), Math.Max(1, rect.Height)),
+                CloudPath.ClampIntensity(cloudIntensity), _box.StrokeThickness);
+            SetLeft(_boxCloud, rect.X);
+            SetTop(_boxCloud, rect.Y);
+            _boxCloud.Visibility = Visibility.Visible;
+            _box.Stroke = Brushes.Transparent;
+        }
+        else
+        {
+            _boxCloud.Visibility = Visibility.Collapsed;
+        }
 
         _boxGlow.Stroke = glowBrush;
         _boxGlow.Width = rect.Width + 4;

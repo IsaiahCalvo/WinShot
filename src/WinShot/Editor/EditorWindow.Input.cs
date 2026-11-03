@@ -86,6 +86,7 @@ public partial class EditorWindow : Window
     {
         if (_sourceOperationActive) return;
         if (IsRotationPillSource(e.OriginalSource)) return; // the pill is its own control
+        if (IsQuickBarSource(e.OriginalSource)) return; // so is the selection quick bar
         // Survey keeps the fit mode across annotation clicks; only an explicit zoom
         // (ZoomAt -> ViewFitMode.Free, Survey's MANUAL) stops the view tracking the viewport.
         bool panGesture = e.ChangedButton == MouseButton.Middle ||
@@ -222,6 +223,7 @@ public partial class EditorWindow : Window
             // Survey latches `active` once the drag clears MIN_DRAG_PX and never clears it
             // (useSVGInteraction.js:1159), and draws no band below the threshold.
             _marqueeArmed |= MarqueeSelection.IsDrag(_marqueeStart, marqueePos);
+            if (_lassoSelect) { AddLassoPoint(marqueePos); return; }
             if (_marqueeArmed) ShowMarquee(marqueePos);
             return;
         }
@@ -247,13 +249,18 @@ public partial class EditorWindow : Window
                 && stepBadge.Tag is AnnotationData { Type: AnnotationData.TypeStep } stepMeta)
             {
                 _movingSelection = false;
+                HideSnapGuides();
                 BeginCounterOrbit(stepBadge, stepMeta, e.GetPosition(AnnotationCanvas), shift: true);
                 return;
             }
             var posMove = e.GetPosition(AnnotationCanvas);
-            // Survey drags freely and applies constrainToPage on release, so an off-page
-            // drag snaps back inside on drop rather than sticking at the edge mid-gesture.
-            var d = posMove - _moveLast;
+            // Page-edge rule 3 (docs/PAGE-EDGE-RULES.md): the move stops at the image edge
+            // on every frame, the whole selection as one piece (Survey w59 clampMoveDelta),
+            // so nothing sails off the image and snaps back on release, and a mark already
+            // hanging over an edge is never pulled back in.
+            _moveRaw += posMove - _moveLast;
+            _moveLast = posMove;
+            var d = ClampMoveToSurface(SelectionList().ToArray(), _moveTotal, SnappedMove(_moveRaw)) - _moveTotal;
             if (d.X != 0 || d.Y != 0)
             {
                 foreach (UIElement el in SelectionList())
@@ -264,9 +271,9 @@ public partial class EditorWindow : Window
                     RefreshRedaction(el);
                 }
                 _moveTotal += d;
-                _moveLast = posMove;
                 UpdateSelectionVisual();
             }
+            ShowSnapGuides();
             return;
         }
         if (_tool == EditorTool.Eyedropper && !_dragging)
@@ -282,10 +289,17 @@ public partial class EditorWindow : Window
         switch (_tool)
         {
             case EditorTool.Arrow when _activeShape is Path arrow:
-                // Survey's in-progress guide is shaft-only: no arrowhead until commit
-                // (SVGAnnotationLayer.jsx:4992-5005).
-                arrow.Data = LineCurve.Stroke(_dragStart, pos, null);
+            {
+                // Survey (SVGAnnotationLayer.jsx:8058-8085, owner 2026-10-02): "the preview IS
+                // the mark", built by the commit builder, so its dash and heads are what lands
+                // on release. A short drag is still just a dot until it has a direction.
+                var (tail, head) = ArrowEnds(_dragStart, pos);
+                arrow.Data = (head - tail).Length < 0.5
+                    ? LineCurve.Stroke(tail, head, null)
+                    : AnnotationFactory.ArrowGeometry(tail, head, arrow.StrokeThickness,
+                        _arrowhead, _startArrowhead, thin: _arrowStyle == ArrowStyle.Thin, mid: null);
                 break;
+            }
             case EditorTool.Callout:
                 UpdateCalloutPreview(_dragStart, CalloutLayout.PushBoxOffTip(_dragStart, pos));
                 break;
@@ -650,6 +664,13 @@ public partial class EditorWindow : Window
                     e.Handled = true;
                     return;
                 }
+                // Survey's double-click edit mode does not depend on the armed tool
+                // (handleAnnotationDoubleClick): a counter, line or arrow opens its frame here too.
+                if (TryEnterBboxEdit(fe, tm))
+                {
+                    e.Handled = true;
+                    return;
+                }
             }
             if (existing is CalloutAnnotation existingCallout && CalloutBoxContains(existingCallout, pos))
             {
@@ -657,13 +678,20 @@ public partial class EditorWindow : Window
                 _calloutBoxBefore = existingCallout.Layout;
             }
             else
-                _movingSelection = true;
+                _movingSelection = !SelectionLocked();
             _moveLast = pos;
             _moveTotal = new Vector();
+            ResetMoveSnap();
             Viewport.CaptureMouse();
             e.Handled = true;
             return;
         }
+
+        // Survey handleSvgPointerDown: with any tool but Select, a press on empty canvas
+        // deselects at once ("Not select tool - existing deselect behavior"). Without this a
+        // freshly drawn or turned mark kept its frame and grabbers after a click off it.
+        if (_selected is not null || _selection.Count > 0)
+            Select(null);
 
         if (_tool == EditorTool.Text)
         {
@@ -1099,6 +1127,23 @@ public partial class EditorWindow : Window
     private const long DoubleClickGuardMs = 400;
     private const long EditModeCooldownMs = 300;
 
+    /// <summary>
+    /// Survey's bbox edit mode: a double-click on a counter, line or arrow (or WinShot's curved
+    /// arrow) swaps its point grabbers for the full frame with resize pills and the rotate
+    /// grabber. Rect, ellipse and ink are no-ops there: their single-click chrome is the frame.
+    /// </summary>
+    private bool TryEnterBboxEdit(FrameworkElement fe, AnnotationData tm)
+    {
+        if (tm.Locked == true) return false;
+        if (tm.Type is not (AnnotationData.TypeStep or AnnotationData.TypeLine
+                or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow)) return false;
+        if (Environment.TickCount64 - _editModeLeftAt < EditModeCooldownMs) return false;
+        Select(fe);
+        _bboxEditTarget = fe;
+        UpdateSelectionVisual();
+        return true;
+    }
+
     private void SelectMouseDown(Point pos, PointerArgs e)
     {
         CommitText();
@@ -1113,6 +1158,7 @@ public partial class EditorWindow : Window
             // PointerArgs carries no modifier state, so read the keyboard here.
             _marqueeShift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
             _marqueeAlt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+            if (_lassoSelect) BeginLasso(pos);
             Viewport.CaptureMouse();
             e.Handled = true;
             return;
@@ -1120,7 +1166,7 @@ public partial class EditorWindow : Window
         // Double-click any text annotation (Plain/Bold/Huge TextBlock, Outline Path, or
         // Pill Border) to reopen it for editing; the owning element carries its style.
         if (e.ClickCount == 2 && Environment.TickCount64 - _justDraggedAt >= DoubleClickGuardMs
-            && hit is FrameworkElement fe && fe.Tag is AnnotationData tm)
+            && hit is FrameworkElement fe && fe.Tag is AnnotationData tm && tm.Locked != true)
         {
             if (tm.Type == AnnotationData.TypeText)
             {
@@ -1147,13 +1193,8 @@ public partial class EditorWindow : Window
             }
             // Survey's bbox edit mode covers counter, line and arrow (and WinShot's curved
             // arrow, which rides on Survey's 'line'); rect/ellipse/ink are explicit no-ops.
-            if (tm.Type is AnnotationData.TypeStep or AnnotationData.TypeLine
-                    or AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow
-                && Environment.TickCount64 - _editModeLeftAt >= EditModeCooldownMs)
+            if (TryEnterBboxEdit(fe, tm))
             {
-                Select(hit);
-                _bboxEditTarget = fe;
-                UpdateSelectionVisual();
                 e.Handled = true;
                 return;
             }
@@ -1173,9 +1214,10 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
-        // Alt-drag leaves a copy behind and drags the copy — the original stays where it is.
+        // Ctrl-drag leaves a copy behind and drags the copy — the original stays where it is
+        // (Survey "Drag a copy", mod+drag; Alt+drag there means "move without snapping").
         // It runs before the selection settles so the drag that follows moves the CLONE.
-        if (!additive && (Keyboard.Modifiers & ModifierKeys.Alt) != 0 &&
+        if (!additive && (Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
             CloneForAltDrag(hit) is UIElement clone)
             hit = clone;
         if (additive)
@@ -1190,9 +1232,10 @@ public partial class EditorWindow : Window
             _calloutBoxBefore = calloutHit.Layout;
         }
         else
-            _movingSelection = _selection.Contains(hit);
+            _movingSelection = _selection.Contains(hit) && !SelectionLocked();
         _moveLast = pos;
         _moveTotal = new Vector();
+        ResetMoveSnap();
         Viewport.CaptureMouse();
         e.Handled = true;
     }
@@ -1220,18 +1263,16 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Survey's line/arrow draw-time guide (SVGAnnotationLayer.jsx:4992-5005): translucent,
-    /// dashed 5/5, round caps, no fill and no arrowhead. The solid stroke, the user's own line
-    /// style and the head all appear only on commit.
+    /// Survey's line/arrow draw-time preview (SVGAnnotationLayer.jsx:8058-8085): since owner
+    /// ruling 2026-10-02 "the preview IS the mark" — the user's colour, width, line style and
+    /// heads, exactly what lands on release. WinShot still drew the old translucent dashed
+    /// guide, so a Solid arrow looked dashed the whole time it was being drawn.
     /// </summary>
-    private static void ApplyLinePreviewStyle(Shape shape, double strokeWidth)
+    private void ApplyLinePreviewStyle(Shape shape, double strokeWidth)
     {
-        shape.Fill = null;
-        shape.Opacity = 0.6;
-        // WPF dash units are multiples of StrokeThickness, so divide to land on 5 px.
-        double t = strokeWidth > 0 ? strokeWidth : 1;
-        shape.StrokeDashArray = new DoubleCollection { 5 / t, 5 / t };
-        shape.StrokeDashCap = PenLineCap.Round;
+        _ = strokeWidth;
+        shape.Opacity = 1;
+        AnnotationFactory.ApplyDash(shape, _lineStyle);
     }
 
     /// <summary>Swaps a line/arrow preview back to its committed look.</summary>
@@ -1278,6 +1319,7 @@ public partial class EditorWindow : Window
         _marqueeArmed = false;
         HideDragRect();
         ResetDragRectStyle();
+        HideLasso();
         Viewport.ReleaseMouseCapture();
         // Survey's release reads only the frozen snapshot, never the live keyboard
         // (useSVGInteraction.js:2717, :2782, :2804).
@@ -1295,7 +1337,8 @@ public partial class EditorWindow : Window
         var box = MarqueeSelection.RectFor(_marqueeStart, pos);
         MarqueeMode mode = MarqueeSelection.ModeFor(_marqueeStart, pos);
         var hits = new List<UIElement>();
-        foreach (UIElement child in AnnotationCanvas.Children)
+        if (_lassoSelect) hits = LassoHits(pos);
+        else foreach (UIElement child in AnnotationCanvas.Children)
         {
             if (child is TextBox) continue;
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData) continue;
@@ -1379,10 +1422,27 @@ public partial class EditorWindow : Window
         UIElement? hit = hovered;
         if (hovered is not null && _selection.Contains(hovered))
             hovered = null;
-        if (hovered is not FrameworkElement fe || !PaintHalo(HoverHalo, fe))
+        if (hovered is not FrameworkElement fe)
+        {
             HoverHalo.Visibility = Visibility.Collapsed;
+            _haloKey = null;
+            return hit;
+        }
+        // Moving the pointer across the same mark repaints nothing: the halo is rebuilt only
+        // when the mark, its place, its shape or the zoom changed since the last frame.
+        var key = HaloKey(fe);
+        if (HoverHalo.Visibility == Visibility.Visible && Equals(key, _haloKey)) return hit;
+        _haloKey = PaintHalo(HoverHalo, fe) ? key : null;
+        if (_haloKey is null) HoverHalo.Visibility = Visibility.Collapsed;
         return hit;
     }
+
+    private object? _haloKey;
+
+    private object HaloKey(FrameworkElement fe) => (
+        fe, _zoom, Canvas.GetLeft(fe), Canvas.GetTop(fe), fe.ActualWidth, fe.ActualHeight,
+        fe.RenderTransform?.Value ?? Matrix.Identity, (fe as Shape)?.RenderedGeometry,
+        (fe.Tag as AnnotationData)?.Thickness);
 
     /// <summary>
     /// Traces <paramref name="fe"/>'s own geometry (and rotation) into <paramref name="halo"/>
@@ -1400,6 +1460,22 @@ public partial class EditorWindow : Window
 
         double sw = meta.Thickness ?? (fe is Shape sh ? sh.StrokeThickness : 1);
         double inv = 1 / _zoom;
+
+        // Lines and arrows: Survey's halo (SVGAnnotationLayer.jsx:6547-6585) is the shaft at
+        // max(6, sw + 4) PLUS every head's outline at max(3, sw + 2), painted as ONE shape so
+        // the two never stack into a darker seam. WinShot stroked the Path's geometry, and
+        // the heads are fill-only figures, so the glow ran down the shaft and stopped short
+        // of the head (Isaiah: "only the line part gets highlighted, not the circle").
+        if (meta.Type is AnnotationData.TypeArrow or AnnotationData.TypeLine
+            && fe is Path { Data: PathGeometry body } && body.Figures.Count > 0
+            && LineHaloGeometry(body, sw) is { } lineHalo)
+        {
+            halo.Data = ToCanvasSpace(fe, lineHalo);
+            halo.StrokeThickness = 0;
+            halo.Fill = halo.Stroke;
+            halo.Visibility = Visibility.Visible;
+            return true;
+        }
         bool ink = meta.Type is AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
         halo.Data = geo;
         if (ink)
@@ -1455,6 +1531,45 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>
+    /// The line / arrow hover halo in the mark's own space: figure 0 of the body is the shaft
+    /// (AnnotationFactory.ArrowGeometry), every later figure a head. A solid triangle is its
+    /// own three-point figure and grows by (sw + 2) / 2; the other heads are already their
+    /// max(2, sw) outline, so one more pixel each side lands on the same band.
+    /// </summary>
+    private static Geometry? LineHaloGeometry(PathGeometry body, double sw)
+    {
+        static Pen Round(double w) => new(Brushes.Black, w)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round,
+        };
+        PathFigure Stroked(PathFigure f)
+        {
+            var c = f.Clone();
+            foreach (var seg in c.Segments) seg.IsStroked = true;
+            return c;
+        }
+
+        var shaft = new PathGeometry();
+        shaft.Figures.Add(Stroked(body.Figures[0]));
+        Geometry halo = shaft.GetWidenedPathGeometry(Round(Math.Max(6, sw + 4)));
+        for (int i = 1; i < body.Figures.Count; i++)
+        {
+            PathFigure fig = body.Figures[i];
+            bool solidTriangle = fig.Segments.Count == 2 && fig.Segments.All(seg => seg is LineSegment);
+            var head = new PathGeometry { FillRule = body.FillRule };
+            var closedHead = Stroked(fig);
+            closedHead.IsClosed = true;   // heads are stored open so their base is not stroked
+            head.Figures.Add(closedHead);
+            var grown = head.GetWidenedPathGeometry(Round(solidTriangle ? Math.Max(3, sw + 2) : 2));
+            halo = Geometry.Combine(halo, grown, GeometryCombineMode.Union, null);
+            halo = Geometry.Combine(halo, head, GeometryCombineMode.Union, null);
+        }
+        return halo;
+    }
+
     /// <summary>The counter's pin outline in canvas space (its badge Grid holds the Path).</summary>
     private static Geometry? StepPinGeometry(FrameworkElement fe) =>
         fe is Grid badge && badge.Children.OfType<Path>().FirstOrDefault()?.Data is { } pin
@@ -1489,6 +1604,7 @@ public partial class EditorWindow : Window
         }
         if (!_movingSelection) return;
         _movingSelection = false;
+        HideSnapGuides();
         Viewport.ReleaseMouseCapture();
         if (_selected is not null)
         {
@@ -1502,15 +1618,12 @@ public partial class EditorWindow : Window
             }
             else
             {
-                // Survey constrainToPage (svgTransformMath.js:51-56): pull the selection's
-                // absolute bbox back inside the page before the commit is recorded.
-                Vector fix = ClampSelectionToSurface(moved);
-                if (fix.X != 0 || fix.Y != 0)
-                {
-                    foreach (UIElement el in moved) MoveElement(el, fix.X, fix.Y);
-                    _moveTotal += fix;
-                    UpdateSelectionVisual();
-                }
+                // The page clamp already ran on every frame of the drag (rule 3), so what
+                // was shown is what is saved: no snap on release.
+                // Only a REAL move arms the double-click guard. Stamping it on every release
+                // made the first click of a double-click block the second, so a counter, line
+                // or arrow never reached its edit frame and text never reopened.
+                _justDraggedAt = Environment.TickCount64;
                 double dx = _moveTotal.X, dy = _moveTotal.Y;
                 // The move was applied live during the drag, so record it without re-applying.
                 Push(new EditorAction(
@@ -1519,7 +1632,6 @@ public partial class EditorWindow : Window
             }
         }
         _moveTotal = new Vector();
-        _justDraggedAt = Environment.TickCount64;
         foreach (UIElement el in SelectionList())
             RefreshHighlighterFill(el);
     }
@@ -1591,6 +1703,7 @@ public partial class EditorWindow : Window
         }
         if (!_movingSelection) return;
         _movingSelection = false;
+        HideSnapGuides();
         if (_selected is not null && (_moveTotal.X != 0 || _moveTotal.Y != 0))
         {
             foreach (UIElement el in SelectionList())
@@ -1753,6 +1866,7 @@ public partial class EditorWindow : Window
 
     private void UpdateSelectionVisual()
     {
+        QueueQuickBarUpdate();
         // Survey's halo is hovered-AND-unselected, so any selection change clears it; the next
         // pointer move re-derives it.
         if (HoverHalo is not null) HoverHalo.Visibility = Visibility.Collapsed;
@@ -1795,14 +1909,21 @@ public partial class EditorWindow : Window
                 return;
             }
             // Survey's overlay padding is 2 page units, so it scales with zoom like the mark.
-            const double padMany = 2;
-            union.Inflate(padMany, padMany);
-            Canvas.SetLeft(SelectionRect, union.X);
-            Canvas.SetTop(SelectionRect, union.Y);
-            SelectionRect.Width = union.Width;
-            SelectionRect.Height = union.Height;
+            // While the group turns, its frame turns rigidly with it (Survey groupRotate).
+            Rect frame = _groupRotating ? _groupRotateBox : union;
+            frame.Inflate(GroupFramePadding, GroupFramePadding);
+            Canvas.SetLeft(SelectionRect, frame.X);
+            Canvas.SetTop(SelectionRect, frame.Y);
+            SelectionRect.Width = frame.Width;
+            SelectionRect.Height = frame.Height;
+            SelectionRect.RenderTransform = _groupRotating && _groupDelta != 0
+                ? new RotateTransform(_groupDelta, frame.Width / 2, frame.Height / 2)
+                : Transform.Identity;
             SelectionRect.Visibility = Visibility.Visible;
-            HideHandles();
+            // Survey (2026-10-22): the group frame carries its eight resize grabbers when
+            // every member can take a resize; otherwise it stays move-only.
+            if (GroupCanResize()) LayoutGroupHandles(union);
+            else HideHandles();
             return;
         }
         if (_selected is null || !AnnotationCanvas.Children.Contains(_selected))
@@ -1855,13 +1976,18 @@ public partial class EditorWindow : Window
         SelectionRect.Visibility = lineLike || borderFlush ? Visibility.Collapsed : Visibility.Visible;
 
         UpdateSelectionHandles();
+        bool locked = _selection.Count <= 1
+            && (_selected as FrameworkElement)?.Tag is AnnotationData { Locked: true };
+        PlaceLockBadge(locked ? b : null, selAngle);
     }
 
     /// <summary>
-    /// Survey constrainToPage (svgTransformMath.js:51-56): the correction that brings the
-    /// union of <paramref name="elements"/> back inside the screenshot, or zero.
+    /// Page-edge rule 3 (PageEdgeMove): the total move to apply to <paramref name="elements"/>
+    /// when <paramref name="wanted"/> is asked for and <paramref name="applied"/> is already
+    /// on them - stopped at the image edge, the selection as one rigid piece, and never
+    /// pulling a mark that already hangs over an edge back in.
     /// </summary>
-    private Vector ClampSelectionToSurface(IReadOnlyList<UIElement> elements)
+    private Vector ClampMoveToSurface(IReadOnlyList<UIElement> elements, Vector applied, Vector wanted)
     {
         Rect union = Rect.Empty;
         foreach (UIElement el in elements)
@@ -1871,11 +1997,9 @@ public partial class EditorWindow : Window
             if (b.IsEmpty) continue;
             union = union.IsEmpty ? b : Rect.Union(union, b);
         }
-        if (union.IsEmpty) return default;
-        double w = _source.Width, h = _source.Height;
-        double dx = union.Left < 0 ? -union.Left : (union.Right > w ? w - union.Right : 0);
-        double dy = union.Top < 0 ? -union.Top : (union.Bottom > h ? h - union.Bottom : 0);
-        return new Vector(dx, dy);
+        if (union.IsEmpty) return wanted;
+        union.Offset(-applied.X, -applied.Y); // back to where the move started
+        return PageEdgeMove.ClampDelta(union, wanted, _source.Width, _source.Height);
     }
 
     /// <summary>Bounds of an annotation in canvas coordinates, including its own render transform.</summary>

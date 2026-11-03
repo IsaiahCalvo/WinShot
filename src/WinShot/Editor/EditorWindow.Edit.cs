@@ -275,6 +275,8 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
+        // A live brush drag owns Escape: nothing changes (Survey brushAdjustGesture.js).
+        if (_brushAdjust is not null && e.Key == Key.Escape) { EndBrushAdjust(commit: false); e.Handled = true; return; }
         // Survey listens for the counter drag's Shift / Escape on the WINDOW in the capture
         // phase, ahead of every in-page handler, and only while a drag is live
         // (PDFViewer.jsx:26202-26257). Escape cancels the placement outright; Shift freezes
@@ -283,6 +285,16 @@ public partial class EditorWindow : Window
         {
             if (e.Key == Key.Escape) { CancelCounterDrag(); e.Handled = true; return; }
             if (e.Key is Key.LeftShift or Key.RightShift) { FreezeCounterTip(); e.Handled = true; return; }
+        }
+        // Survey isGroupLineWidthKey: K held during a group resize also scales line widths.
+        // It is the Polyline key, so while a group resize runs it is taken here and never
+        // switches the tool.
+        if (e.Key == Key.K && _groupResize is not null && !_groupRotating
+            && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0)
+        {
+            _groupLineKey = true;
+            e.Handled = true;
+            return;
         }
         // Let an open text annotation keep its own keyboard behavior.
         if (Keyboard.FocusedElement is TextBox) return;
@@ -328,8 +340,16 @@ public partial class EditorWindow : Window
                 case EditorShortcutCommand.FitHeight: FitToHeight(); PersistZoomPreference(); break;
                 case EditorShortcutCommand.ZoomIn: ZoomAt(ViewportCentre(), _zoom * ZoomStepFactor); break;
                 case EditorShortcutCommand.ZoomOut: ZoomAt(ViewportCentre(), _zoom / ZoomStepFactor); break;
-                case EditorShortcutCommand.Copy: OnCopy(this, new RoutedEventArgs()); break;
+                // Survey: Ctrl+C copies the picked marks. With nothing picked it copies the
+                // edited picture, which is what WinShot's Ctrl+C has always done.
+                case EditorShortcutCommand.Copy:
+                    if (!CopySelectedAnnotations()) OnCopy(this, new RoutedEventArgs());
+                    break;
+                case EditorShortcutCommand.Cut:
+                    if (CopySelectedAnnotations()) DeleteSelected();
+                    break;
                 case EditorShortcutCommand.Paste: PasteAnnotations(); break;
+                case EditorShortcutCommand.ShowShortcuts: ShowShortcutSheet(); break;
                 case EditorShortcutCommand.Duplicate: DuplicateSelectedAnnotations(); break;
                 case EditorShortcutCommand.ActualSize: ZoomAt(ViewportCentre(), 1); PersistZoomPreference(); break;
                 case EditorShortcutCommand.SaveAs: OnSave(this, new RoutedEventArgs()); break;
@@ -361,6 +381,36 @@ public partial class EditorWindow : Window
                 _ => (0.0, step),
             };
             NudgeSelected(dx, dy);
+            e.Handled = true;
+            return;
+        }
+
+        // Alt+V is lasso select (Survey toolShortcuts.js); V alone goes back to the box.
+        if (e.Key == Key.System && e.SystemKey == Key.V && Keyboard.Modifiers == ModifierKeys.Alt)
+        {
+            SetLassoSelect(true);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.None && _lassoSelect
+            && EditorToolKeys.Resolve(e.Key, false)?.Tool == EditorTool.Select)
+        {
+            SetLassoSelect(false);
+            e.Handled = true;
+            return;
+        }
+
+        // "?" opens the shortcut list (Survey isShortcutsSheetKey).
+        if (e.Key == Key.OemQuestion && Keyboard.Modifiers == ModifierKeys.Shift)
+        {
+            ShowShortcutSheet();
+            e.Handled = true;
+            return;
+        }
+        // Shift+S turns snapping on or off (Survey keyboardShortcuts.js "View").
+        if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Shift)
+        {
+            ToggleSnapping();
             e.Handled = true;
             return;
         }
@@ -424,6 +474,7 @@ public partial class EditorWindow : Window
     protected override void OnPreviewKeyUp(KeyEventArgs e)
     {
         base.OnPreviewKeyUp(e);
+        if (e.Key == Key.K) _groupLineKey = false;
         if (_counterDrag is not null && e.Key is Key.LeftShift or Key.RightShift)
         {
             // Releasing Shift hands the body back to the cursor with the offset it had at

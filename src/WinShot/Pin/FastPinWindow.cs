@@ -24,6 +24,14 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     public static Action<SD.Bitmap>? DefaultEditHandler { get; set; }
 
+    /// <summary>
+    /// The same default handler, told where the pin sits on screen (device pixels) so the
+    /// editor opens on the pin's own monitor and grows out of it (Isaiah 2026-11-03: "it
+    /// should show up on the same exact screen that it gets pinned to"). Takes precedence
+    /// over <see cref="DefaultEditHandler"/> when set.
+    /// </summary>
+    public static Action<SD.Bitmap, SD.Rectangle>? DefaultEditHandlerAt { get; set; }
+
     private const int WmNclbuttondown = 0x00A1;
     private const int WmNchittest = 0x0084;
     private const int WmSizing = 0x0214;
@@ -1321,7 +1329,13 @@ public sealed class FastPinWindow : WF.Form
     /// </summary>
     private void RaiseEditRequested()
     {
-        Action<SD.Bitmap>? handler = EditRequested ?? DefaultEditHandler;
+        Action<SD.Bitmap>? handler = EditRequested;
+        if (handler is null && DefaultEditHandlerAt is { } at)
+        {
+            SD.Rectangle where = Bounds;
+            handler = image => at(image, where);
+        }
+        handler ??= DefaultEditHandler;
         if (handler is null)
         {
             // Clicking the pencil and getting nothing, with nothing said, is the one failure
