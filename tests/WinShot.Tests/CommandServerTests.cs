@@ -73,6 +73,25 @@ public class CommandServerTests
     }
 
     [Fact]
+    public void ParseCommand_DecodesBrowserExtensionEditUrl()
+    {
+        // The Chrome extension's "Open in WinShot" launches winshot://edit:<encoded path>.
+        string path = Path.Combine(Path.GetTempPath(), $"winshot ext #{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(path, []);
+        try
+        {
+            string encoded = Uri.EscapeDataString(path);
+            Assert.Equal("edit:" + path, CommandServer.ParseCommand("winshot://edit:" + encoded));
+            Assert.Equal("edit:" + path, CommandServer.ParseCommand("winshot://edit:" + encoded + "/"));
+            Assert.Null(CommandServer.ParseCommand("winshot://edit:" + Uri.EscapeDataString(path + ".missing.png")));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void ParseCommand_RejectsMissingAndNonImagePaths()
     {
         // Nonexistent image path — must not become an edit command.

@@ -150,6 +150,13 @@ public sealed class CommandServer : IDisposable
         else if (s.StartsWith("winshot:", StringComparison.OrdinalIgnoreCase))
             s = s["winshot:".Length..];
 
+        // The browser extension's "Open in WinShot" saves the capture, then launches
+        // winshot://edit:<percent-encoded path>. Browsers hand the URL over still encoded
+        // (and may add a trailing slash), so decode it before resolving the file.
+        if (s.StartsWith("edit:", StringComparison.OrdinalIgnoreCase)
+            && TryParseEditCommand(DecodeUrlPath(s), out string? fromUrl))
+            return fromUrl;
+
         int queryStart = s.IndexOfAny(['?', '#']);
         if (queryStart >= 0)
             s = s[..queryStart];
@@ -256,6 +263,18 @@ public sealed class CommandServer : IDisposable
         }
         command = "edit:" + path;
         return true;
+    }
+
+    private static string DecodeUrlPath(string value)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(value).TrimEnd('/');
+        }
+        catch (UriFormatException)
+        {
+            return value;
+        }
     }
 
     private async Task RunAsync(CancellationToken token)

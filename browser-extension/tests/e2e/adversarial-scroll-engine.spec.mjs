@@ -11,6 +11,7 @@
 
 import { test, expect } from "@playwright/test";
 import puppeteer from "puppeteer";
+import { sandboxArgs } from "./launch-args.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -44,7 +45,7 @@ async function launchExactExtension(viewport = { width: 1200, height: 1000 }) {
     userDataDir: profileRoot,
     enableExtensions: true,
     defaultViewport: viewport,
-    args: [
+    args: [...sandboxArgs,
       `--window-size=${viewport.width},${viewport.height}`,
       // Viewport emulation alone does not reach chrome.tabs.captureVisibleTab
       // (the physical surface stays 1x), so a DPR test must scale the real window.

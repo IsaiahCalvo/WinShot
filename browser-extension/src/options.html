@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WinShot settings</title>
+  <link rel="icon" href="../icons/32.png">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/48.png" alt="" width="32" height="32">
+    <div><h1>WinShot settings</h1><p>Browser capture · everything stays on this device</p></div>
+  </header>
+  <main>
+    <section>
+      <h2>After a capture</h2>
+      <div class="field">
+        <label for="after-capture">When a capture finishes</label>
+        <select id="after-capture">
+          <option value="editor">Open the editor</option>
+          <option value="save">Save the image</option>
+          <option value="save-pdf">Save as PDF</option>
+          <option value="copy">Copy to clipboard (and open the editor)</option>
+        </select>
+        <small>A partial or failed capture always opens the editor so you can see what went wrong.</small>
+      </div>
+      <div class="field">
+        <label for="image-format">Image format for "Save the image"</label>
+        <select id="image-format">
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+          <option value="webp">WebP</option>
+        </select>
+      </div>
+    </section>
+
+    <section>
+      <h2>Saving</h2>
+      <div class="field">
+        <label for="download-folder">Folder inside Downloads</label>
+        <input id="download-folder" maxlength="120" placeholder="Leave empty to save straight into Downloads">
+        <small>For example <code>WinShot</code> or <code>Screenshots/Web</code>.</small>
+      </div>
+      <label class="check"><input id="save-as" type="checkbox"> Ask where to save each file</label>
+      <div class="field">
+        <label for="filename-template">File name</label>
+        <input id="filename-template" maxlength="160" placeholder="{title}-{date}-{time}">
+        <small>Fields: {title}, {host}, {date}, {time}, {mode}, {counter} — or FireShot-style %t %e %u %n %y-%m-%d %H-%M-%S</small>
+        <small>Example: <span id="filename-example"></span></small>
+      </div>
+    </section>
+
+    <section>
+      <h2>Capturing</h2>
+      <div class="field">
+        <label for="capture-delay">Delay before capture</label>
+        <select id="capture-delay">
+          <option value="0">No delay</option>
+          <option value="3000">3 seconds</option>
+          <option value="5000">5 seconds</option>
+          <option value="10000">10 seconds</option>
+          <option value="15000">15 seconds</option>
+          <option value="30000">30 seconds</option>
+        </select>
+        <small>Hold Alt while starting a capture from the popup for a one-off 5 second delay.</small>
+      </div>
+      <label class="check"><input id="capture-infinite" type="checkbox"> Follow growing or infinite pages</label>
+      <div class="row">
+        <div class="field"><label for="capture-timeout">Time limit (minutes)</label><input id="capture-timeout" type="number" min="0.5" max="60" step="0.5"></div>
+        <div class="field"><label for="capture-height">Max page height (CSS px)</label><input id="capture-height" type="number" min="1000" max="2000000" step="1000"></div>
+        <div class="field"><label for="capture-tiles">Max tiles</label><input id="capture-tiles" type="number" min="1" max="2000" step="1"></div>
+      </div>
+      <div class="field">
+        <label for="batch-mode">Batch captures (all tabs, URL list)</label>
+        <select id="batch-mode">
+          <option value="full-page">Entire page</option>
+          <option value="visible">Visible part</option>
+        </select>
+      </div>
+    </section>
+
+    <section>
+      <h2>Menus and shortcuts</h2>
+      <label class="check"><input id="context-menu" type="checkbox"> Show WinShot in the page's right-click menu</label>
+      <div class="shortcuts" id="shortcuts"></div>
+      <button id="edit-shortcuts">Change keyboard shortcuts…</button>
+    </section>
+
+    <section>
+      <h2>History</h2>
+      <div class="field">
+        <label for="history-retention">Keep captures for</label>
+        <select id="history-retention">
+          <option value="7">1 week</option>
+          <option value="30">30 days</option>
+          <option value="90">3 months</option>
+          <option value="180">6 months</option>
+          <option value="365">1 year</option>
+          <option value="0">Forever</option>
+        </select>
+      </div>
+      <a href="history.html">Open capture history</a>
+    </section>
+
+    <section>
+      <h2>WinShot desktop</h2>
+      <p class="note">With WinShot for Windows installed, the popup's <b>Browser window</b> button and the editor's <b>Open in WinShot</b> button hand captures to the desktop app.</p>
+    </section>
+  </main>
+  <p id="status" role="status"></p>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

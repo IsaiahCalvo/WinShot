@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>WinShot — History</title>
+  <link rel="icon" href="../icons/32.png">
   <link rel="stylesheet" href="history.css">
 </head>
 <body>
@@ -10,11 +11,16 @@
     <input type="checkbox" id="select-all" title="Select all shown">
     <button id="delete-selected" disabled>Delete selected [0]</button>
     <input type="search" id="filter" placeholder="Filter by title or URL…">
+    <button id="open-image">Open image…</button>
+    <button id="paste-image">Paste image</button>
+    <input type="file" id="image-file" accept="image/*" hidden>
   </header>
   <main id="list" aria-live="polite"></main>
   <footer>
     <button id="load-more" hidden>Load more</button>
     <p id="empty" hidden>No captures yet. Use the WinShot toolbar button or Alt+Shift+1.</p>
+    <p class="tip">Drop an image here, or press Ctrl+V, to open it in the editor.</p>
+    <p id="import-status" role="status"></p>
   </footer>
   <script type="module" src="history.js"></script>
 </body>

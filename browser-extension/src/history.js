@@ -1,4 +1,5 @@
 import { deleteCapture, listRecords } from "./store.js";
+import { imageFromClipboard, importImage } from "./import.js";
 
 const PAGE_SIZE = 50;
 const list = document.querySelector("#list");
@@ -131,3 +132,54 @@ loadMore.addEventListener("click", () => render(false));
 addEventListener("pagehide", releaseObjectUrls);
 
 reload();
+
+// ---- open an image from disk or the clipboard in the editor ----------------
+
+const importStatus = document.querySelector("#import-status");
+async function openImported(blob, name) {
+  try {
+    importStatus.textContent = "";
+    const id = await importImage(blob, name);
+    location.href = `editor.html?id=${encodeURIComponent(id)}`;
+  } catch (error) {
+    importStatus.textContent = error.message;
+  }
+}
+
+const fileInput = document.querySelector("#image-file");
+document.querySelector("#open-image").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files?.[0];
+  if (file) openImported(file, file.name);
+});
+document.querySelector("#paste-image").addEventListener("click", async () => {
+  try {
+    await openImported(await imageFromClipboard(), "Pasted image");
+  } catch (error) {
+    importStatus.textContent = error.message;
+  }
+});
+document.addEventListener("paste", (event) => {
+  if (event.target.closest?.("input")) return;
+  const file = [...(event.clipboardData?.files || [])].find((item) => item.type.startsWith("image/"));
+  if (file) {
+    event.preventDefault();
+    openImported(file, "Pasted image");
+  }
+});
+document.addEventListener("dragover", (event) => {
+  if ([...(event.dataTransfer?.items || [])].some((item) => item.kind === "file")) {
+    event.preventDefault();
+    document.body.classList.add("dropping");
+  }
+});
+document.addEventListener("dragleave", (event) => {
+  if (!event.relatedTarget) document.body.classList.remove("dropping");
+});
+document.addEventListener("drop", (event) => {
+  document.body.classList.remove("dropping");
+  const file = [...(event.dataTransfer?.files || [])].find((item) => item.type.startsWith("image/"));
+  if (!file) return;
+  event.preventDefault();
+  openImported(file, file.name);
+});

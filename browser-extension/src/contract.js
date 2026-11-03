@@ -139,7 +139,7 @@ export function friendlyError(error) {
   if (/cannot access|cannot be scripted|missing host permission|receiving end does not exist/i.test(message)) {
     return "This page is restricted by the browser. Visible capture may work, but scrolling and element capture are unavailable.";
   }
-  if (/navigation|tab was closed|no tab with id/i.test(message)) {
+  if (/navigation|tab was closed|no tab with id|message channel closed|back\/forward cache/i.test(message)) {
     return "The page changed or closed during capture. WinShot stopped without claiming a complete result.";
   }
   if (/quota|max.*tile|limit/i.test(message)) {

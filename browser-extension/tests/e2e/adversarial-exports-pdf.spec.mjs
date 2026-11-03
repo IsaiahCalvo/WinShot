@@ -7,6 +7,7 @@
 // injected into /body at runtime so no fixture-server changes are required.
 import { test, expect } from "@playwright/test";
 import puppeteer from "puppeteer";
+import { sandboxArgs } from "./launch-args.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -70,7 +71,7 @@ async function launchExactExtension() {
     userDataDir: profileRoot,
     enableExtensions: true,
     defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
+    args: [...sandboxArgs, "--window-size=1200,1000"]
   });
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;

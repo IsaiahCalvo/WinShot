@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import puppeteer from "puppeteer";
+import { sandboxArgs } from "./launch-args.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -63,11 +64,14 @@ async function launchExactExtension() {
     userDataDir: profileRoot,
     enableExtensions: true,
     defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
+    args: [...sandboxArgs, "--window-size=1200,1000"]
   });
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
-    const page = await target.page().catch(() => null);
+    // Tabs the extension opens straight onto a web page (URL batches) are watched without
+    // puppeteer's viewport emulation: applying it late resizes the page mid-capture, which
+    // a real browser never does. Test-made tabs start blank and keep the emulated viewport.
+    const page = await (/^https?:/.test(target.url()) ? target.asPage() : target.page()).catch(() => null);
     if (page) monitorPage(page, errors);
   });
   const extensionId = await browser.installExtension(extensionPath);
@@ -377,12 +381,18 @@ test("URL-list batch closes its disposable fixture tabs", async () => {
       return (await chrome.storage.local.get(`batch:${id}`))[`batch:${id}`];
     });
     expect(urlBatch.results).toHaveLength(2);
-    expect(urlBatch.results.every((item) => item.state === "complete")).toBe(true);
-    expect(urlBatch.mode).toBe("full-page");
     const urlRecords = await urlSummary.evaluate(async (results) => {
       const store = await import(chrome.runtime.getURL("src/store.js"));
-      return await Promise.all(results.map((item) => store.getRecord(item.captureId)));
+      return await Promise.all(results.map((item) => item.captureId ? store.getRecord(item.captureId) : null));
     }, urlBatch.results);
+    // Name each result (and its capture warnings) so a failure says which page did not complete and why.
+    expect(urlBatch.results.map((item, index) => {
+      const warnings = urlRecords[index]?.report?.warnings || [];
+      const seam = urlRecords[index]?.report?.seamConfidence?.minimum;
+      const detail = item.state === "complete" ? "" : ` (${[item.error, ...warnings, seam != null ? `seam ${seam.toFixed(3)}` : ""].filter(Boolean).join("; ")})`;
+      return `${item.url}: ${item.state}${detail}`;
+    })).toEqual(["http://127.0.0.1:4173/frame: complete", "http://127.0.0.1:4173/sticky: complete"]);
+    expect(urlBatch.mode).toBe("full-page");
     expect(urlRecords.every((record) => record.report.mode === "full-page" && record.report.tileCount > 1)).toBe(true);
     const remainingFixturePages = (await run.browser.pages()).filter((page) => /^http:\/\/127\.0\.0\.1:4173\/(frame|sticky)$/.test(page.url()));
     expect(remainingFixturePages).toHaveLength(0);

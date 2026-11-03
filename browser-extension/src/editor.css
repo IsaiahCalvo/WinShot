@@ -1,42 +1,222 @@
-:root { color-scheme: dark; font: 13px/1.4 system-ui,Segoe UI,sans-serif; background:#0d0f13; color:#f4f6f8; }
-* { box-sizing:border-box; }
-body { margin:0; min-height:100vh; display:grid; grid-template-rows:auto 1fr; }
-header { height:58px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 18px; border-bottom:1px solid #ffffff18; background:#12151b; position:sticky; top:0; z-index:2; }
-.brand { display:flex; align-items:center; gap:9px; font-size:15px; }
-.mark { width:24px; height:24px; border:3px solid #0a84ff; border-radius:50%; }
-.actions { display:flex; gap:7px; }
-button { border:1px solid #ffffff24; border-radius:7px; background:#20252e; color:inherit; padding:7px 11px; cursor:pointer; }
-button:hover,button:focus-visible { border-color:#208bff; outline:none; }
-button:disabled { opacity:.4; cursor:not-allowed; }
-main { min-height:0; display:grid; grid-template-columns:290px 1fr; }
-aside { padding:20px; border-right:1px solid #ffffff14; background:#12151b; overflow:auto; }
-h1 { font-size:16px; margin:0 0 10px; overflow-wrap:anywhere; }
-h2 { font-size:12px; margin:22px 0 6px; text-transform:uppercase; color:#a8b0bd; letter-spacing:.04em; }
-.pill { display:inline-block; border-radius:99px; padding:3px 8px; background:#1e6239; font-size:11px; text-transform:capitalize; }
-.pill.partial,.pill.failed { background:#763d24; }
-dl { display:grid; grid-template-columns:auto 1fr; gap:7px 10px; margin:18px 0; }
-dt { color:#929cab; } dd { margin:0; overflow-wrap:anywhere; }
-ul { margin:0; padding-left:18px; color:#f4c99c; }
-.privacy, details small { color:#8e98a7; font-size:11px; }
-details { margin-top:18px; padding:10px; border:1px solid #ffffff18; border-radius:8px; display:grid; gap:7px; }
-summary { cursor:pointer; color:#cbd2dc; }
-details label { color:#929cab; font-size:11px; }
-details input, details select { width:100%; border:1px solid #ffffff24; border-radius:6px; background:#20252e; color:inherit; padding:6px; }
-.custom-size { display:grid; grid-template-columns:1fr 1fr; gap:5px 8px; }
-.privacy { color:#8e98a7; font-size:11px; margin-top:24px; }
-.stage { min-width:0; overflow:auto; padding:28px; background:repeating-conic-gradient(#171a20 0 25%,#1a1e25 0 50%) 50%/20px 20px; }
-#preview { position:relative; transform-origin:top left; background:white; box-shadow:0 10px 40px #000a; }
-#preview img { position:absolute; display:block; margin:0; }
-#toast { position:fixed; right:18px; bottom:18px; max-width:420px; padding:10px 13px; border-radius:8px; background:#202832; box-shadow:0 4px 20px #0008; opacity:0; pointer-events:none; transition:opacity .15s; }
-#toast.show { opacity:1; }
-@media(max-width:800px){ main{grid-template-columns:1fr} aside{border-right:0;border-bottom:1px solid #ffffff14} header{height:auto;padding:10px;align-items:flex-start}.actions{flex-wrap:wrap;justify-content:flex-end} }
+/* The WinShot desktop editor's frame, copied from EditorWindow.xaml and Theme.xaml
+   (which port Survey's chrome). Sizes are the desktop's DIPs as CSS px. */
+:root {
+  color-scheme: dark;
+  font: 13px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --field: #1c1c1e;        /* WindowBg: the ground under the capture */
+  --chrome: #262628;       /* ToolbarBg: top bar, settings row, rail, bottom bar */
+  --surface: #2e2e30;      /* Surface: secondary pill buttons */
+  --surface-alt: #38383b;  /* SurfaceAlt: size / line-style pills, inputs */
+  --elevated: #323236;     /* Elevated: popovers */
+  --line: #ffffff1f;       /* Border: every hairline */
+  --hover: #ffffff1f;      /* HoverFill */
+  --press: #0000002e;      /* PressedShade */
+  --chip: #3a3a40;         /* ToolChip: the armed tool */
+  --chip-ring: #85858f;    /* ToolChipRing */
+  --text: #f2f2f4;
+  --muted: #ffffffb3;
+  --disabled: #ffffff66;
+  --accent: #0a84ff;
+  --accent-deep: #0a73e0;
+  --info: #6bb1ff;
+  background: var(--field);
+  color: var(--text);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden; display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
 
-#open-history { color: #7ab8ff; align-self: center; margin-left: 6px; font-size: 13px; }
+/* ---- buttons -------------------------------------------------------------- */
+button, .ib { font: inherit; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 0; cursor: pointer; display: inline-grid; place-items: center; flex: none; text-decoration: none; }
+button:hover, .ib:hover { background: var(--hover); }
+button:active, .ib:active { background: var(--press); }
+button:focus-visible, .ib:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--info); outline-offset: 0; }
+button:disabled { color: var(--disabled); background: transparent; cursor: default; }
+button.busy { pointer-events: none; opacity: .6; }
+button svg, .ib svg { display: block; }
+/* Lucide draws at stroke 2; the desktop family is 1.25px at 18px (1.667 on 24 units). */
+[data-lucide] svg { stroke-width: 1.667px; }
+
+/* SurveyDefaultButton: 26 tall, 30 minimum, 8x4 padding. Undo, redo, the text saves. */
+.btn { height: 26px; min-width: 30px; padding: 0 8px; }
+.btn svg { width: 18px; height: 18px; }
+.btn.text { font-weight: 500; padding: 0 10px; }
+/* CompactToolIconButton: a 28x28 square. Crop, page links, share, delete. */
+.ib { width: 28px; height: 28px; }
+.ib svg { width: 18px; height: 18px; }
+/* SurveyIconToggle / StripToolButton: 28x28, 16px glyph, the neutral chip when armed. */
+.tb { width: 28px; height: 28px; margin: 0 3px; }
+.tb svg { width: 16px; height: 16px; }
+.tb.text { width: auto; min-width: 28px; padding: 0 8px; font-size: 12px; font-weight: 600; }
+.tb.active, .ib.active { background: var(--chip); border-color: var(--chip-ring); }
+/* ToolIconButton: the group buttons, 36x36 with an 18px glyph. The open group's glyph is blue. */
+.gb { width: 36px; height: 36px; margin: 0 3px; }
+.gb svg { width: 18px; height: 18px; }
+.gb.active { color: var(--accent); }
+/* SurveyPrimaryButton: 30 tall, 16px padding, 13px semibold on AccentDeep. */
+.primary { height: 30px; min-width: 72px; padding: 0 16px; background: var(--accent-deep); border-color: var(--accent-deep); color: #fff; font-size: 13px; font-weight: 600; }
+.primary:hover { background: #0966c7; }
+.primary:active { background: #0060df; }
+.primary:disabled { background: var(--accent-deep); color: #fff; opacity: .4; }
+/* PillButtonSecondary: 30 tall, 14px padding, 13px semibold on Surface. */
+.pill-button { height: 30px; min-width: 64px; padding: 0 14px; background: var(--surface); font-size: 13px; font-weight: 600; border-radius: 8px; }
+.pill-button:hover { background: #3a3a3d; }
+.divider { width: 1px; height: 22px; background: var(--line); margin: 0 6px; flex: none; }
+
+/* ---- top bar: undo/redo/crop left, Survey's centred cluster, page links right ---- */
+.topbar {
+  grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  height: 53px; padding: 8px 12px; background: var(--chrome); border-bottom: 1px solid var(--line);
+  position: relative; z-index: 4;
+}
+.top-left { justify-self: start; display: flex; align-items: center; }
+.top-left .btn { margin-right: 8px; }
+.top-left .btn + .divider { margin-left: -2px; }
+.top-left .ib { margin: 0 1px; }
+.top-right { justify-self: end; display: flex; align-items: center; gap: 2px; }
+/* The group buttons are centred and never move; Pan/Select hang off their left and the open
+   group's tools off their right, outside the layout (Survey's position:absolute blocks). */
+.cluster { position: relative; display: flex; align-items: center; }
+.pan-select { position: absolute; right: 100%; top: 50%; transform: translateY(-50%); display: flex; align-items: center; padding-right: 5px; }
+.pan-select .divider { margin: 0 4px 0 7px; }
+.tool-slot { position: absolute; left: 100%; top: 50%; transform: translateY(-50%); display: flex; align-items: center; }
+.tool-slot:empty { display: none; }
+.tool-slot::before { content: ""; width: 1px; height: 22px; background: var(--line); margin: 0 6px 0 4px; }
+
+/* ---- settings row: the armed tool's or selected mark's style, centred, 34px ---- */
+.subrow {
+  grid-column: 1; grid-row: 2; height: 35px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--line);
+  position: relative; z-index: 3; white-space: nowrap; overflow-x: auto; overflow-y: visible; scrollbar-width: none;
+}
+.subrow .hint { color: var(--muted); font-size: 12px; }
+.subrow .caption { color: var(--muted); font-size: 11px; font-weight: 600; margin-right: 4px; }
+.subrow .group { display: inline-flex; align-items: center; }
+.subrow .group .tb { margin: 0 1px; }
+.subrow .divider { margin: 0 2px; }
+/* ColorSwatchWell: a 24px ring holding the current colour; the palette opens under it. */
+.color-well { width: 28px; height: 28px; }
+.color-well i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #ffffffd9; box-shadow: 0 0 0 1px #0006; }
+/* SurveyDropdown / ChromePillToggle: 20 tall, radius 10, 11px semibold on SurfaceAlt. */
+.subrow select, .subrow input[type="number"] {
+  font-family: inherit; font-size: 11px; font-weight: 600; line-height: 20px; color: var(--muted);
+  background-color: var(--surface-alt); border: 0; border-radius: 10px; height: 20px; padding: 0 8px; cursor: pointer;
+}
+.subrow select {
+  appearance: none; min-width: 74px; padding: 0 24px 0 10px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23ffffffb3' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; background-size: 10px;
+}
+.subrow select option { background: var(--elevated); color: var(--text); }
+.subrow input[type="number"] { width: 56px; cursor: text; }
+.subrow select:hover { background: var(--elevated); color: var(--text); }
+.popover {
+  position: fixed; z-index: 30; padding: 8px; border-radius: 8px; background: var(--elevated);
+  border: 1px solid var(--surface-alt); box-shadow: 0 8px 24px #0009;
+}
+.popover[hidden] { display: none; }
+.palette { display: grid; grid-template-columns: repeat(5, 24px); gap: 6px; }
+.palette .swatch { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #ffffff40; }
+.palette .swatch:hover { background: inherit; transform: scale(1.08); }
+.palette .swatch.active { outline: 2px solid #fff; outline-offset: 1px; }
+.popover .custom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.popover input[type="color"] { width: 28px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; }
+
+/* ---- the field ------------------------------------------------------------ */
+.stage { grid-column: 1; grid-row: 3; position: relative; min-width: 0; min-height: 0; overflow: auto; background: var(--field); outline: none; }
+.viewport-pin { position: sticky; top: 0; left: 0; width: 0; height: 0; overflow: visible; z-index: 1; }
+#view { display: block; position: absolute; left: 0; top: 0; }
+#preview { position: relative; }
+#preview.message { padding: 30px; color: var(--muted); }
+.stage.tool-pan, .stage.panning { cursor: grab; }
+.stage.panning:active { cursor: grabbing; }
+.stage.tool-draw { cursor: crosshair; }
+.stage.tool-text { cursor: text; }
+.stage.tool-eraser { cursor: cell; }
+.stage.over-mark { cursor: move; }
+#text-editor { position: absolute; z-index: 2; min-width: 40px; min-height: 1.3em; margin: 0; padding: 0; border: 1px dashed var(--accent); background: transparent; resize: none; overflow: hidden; white-space: pre; outline: none; line-height: 1.25; }
+
+/* ---- right rail: 48px, from under the top bar to the bottom; zoom at its foot ---- */
+.rail { grid-column: 2; grid-row: 2 / -1; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 8px 0; background: var(--chrome); border-left: 1px solid var(--line); z-index: 4; }
+.rail-top, .rail-bottom { display: flex; flex-direction: column; align-items: center; }
+/* RailButton: 28x28, radius 4, secondary text. */
+.rb { position: relative; width: 28px; height: 28px; margin: 2px 0; border-radius: 4px; color: var(--muted); }
+.rb:hover { color: var(--text); }
+.rb svg { width: 16px; height: 16px; }
+.rb.small svg { width: 14px; height: 14px; }
+.rb.active { color: var(--text); background: var(--chip); border-color: var(--chip-ring); }
+.rb .dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: #ff9f0a; box-shadow: 0 0 0 2px var(--chrome); }
+.rb .dot[hidden] { display: none; }
+.rail-rule { width: 24px; height: 1px; background: var(--line); margin: 4px 0; }
+/* RailZoomBox: 36x18, 10px medium. */
+#zoom-label { width: 40px; height: 18px; margin: 1px 0; border-radius: 3px; font-size: 10px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+#zoom-label:hover { color: var(--text); }
+
+/* ---- capture details: slides out of the rail over the field, and back ---- */
+.panel { grid-column: 1; grid-row: 2 / -1; justify-self: end; position: relative; width: 360px; max-width: 100%; padding: 14px 16px 18px; overflow: auto; background: var(--chrome); border-left: 1px solid var(--line); box-shadow: -14px 0 30px #0006; z-index: 5;
+  transform: translateX(calc(100% + 48px)); visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+.panel.open { transform: none; visibility: visible; transition: transform .2s ease; }
+@media (prefers-reduced-motion: reduce) { .panel, .panel.open { transition: none; } }
+.panel-head { display: flex; align-items: flex-start; gap: 8px; }
+.panel-head .ib { margin: -4px -6px 0 auto; }
+h1 { font-size: 15px; line-height: 1.35; margin: 0 0 8px; overflow-wrap: anywhere; font-weight: 600; }
+.pill { display: inline-block; border-radius: 99px; padding: 2px 10px; background: #1e6239; font-size: 12px; text-transform: capitalize; }
+.pill.partial, .pill.failed { background: #763d24; }
+.section { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.section > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px; }
+.section > summary::-webkit-details-marker { display: none; }
+.section > summary::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg) translateY(-2px); transition: transform .15s; }
+.section[open] > summary::after { transform: rotate(225deg) translateY(-2px); }
+.section > summary:hover { background: var(--hover); }
+.section > :not(summary) { margin: 0 12px 12px; }
+.section.warn > summary { color: #ffb661; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+ul { padding-left: 18px; color: #f4c99c; font-size: 13px; }
+.fields { display: grid; gap: 6px; }
+.fields label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.fields input, .fields select { width: 100%; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); color: inherit; padding: 5px 8px; }
+.fields small { color: var(--muted); font-size: 11px; }
+.custom-size[hidden] { display: none; }
+.custom-size { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+.privacy { color: var(--muted); font-size: 11px; margin-top: 16px; }
+
+/* ---- bottom bar: save on the left, share on the right; 6x12 padding ---- */
+.bottombar { grid-column: 1; grid-row: 4; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; background: var(--chrome); border-top: 1px solid var(--line); position: relative; z-index: 4; }
+.actions { display: flex; align-items: center; }
+.save .primary { margin-right: 6px; }
+.save .btn.text { margin-left: 2px; }
+.tools { gap: 2px; }
+
+/* ---- dialog ---------------------------------------------------------------- */
+dialog { background: var(--chrome); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; width: 340px; box-shadow: 0 20px 60px #000a; }
+dialog::backdrop { background: #0008; }
+dialog h2 { margin: 0 0 12px; font-size: 14px; color: var(--text); }
+.resize-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+.resize-grid label { color: var(--muted); }
+.resize-grid input { font: inherit; background: var(--surface-alt); color: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; }
+.hint { color: var(--muted); font-size: 12px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.dialog-actions button:not(.primary) { height: 30px; padding: 0 14px; background: var(--surface); font-weight: 600; border-radius: 8px; }
+.dialog-actions button:first-child { margin-right: auto; }
+
+#tooltip { position: fixed; z-index: 40; pointer-events: none; background: var(--elevated); color: var(--text); font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--surface-alt); box-shadow: 0 4px 14px #0007; opacity: 0; transition: opacity .08s; white-space: nowrap; }
+#tooltip.show { opacity: 1; }
+#toast { position: fixed; right: 62px; bottom: 56px; max-width: 440px; padding: 9px 12px; border-radius: 8px; background: var(--elevated); border: 1px solid var(--surface-alt); box-shadow: 0 4px 20px #0008; opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 30; }
+#toast.show { opacity: 1; }
 
 #print-image { display: none; }
-
 @media print {
-  header, main, aside, #toast { display: none !important; }
-  body { background: #fff !important; }
+  header, .subrow, .stage, .rail, .panel, footer, #toast, #tooltip, .popover { display: none !important; }
+  body { background: #fff !important; display: block; overflow: visible; }
   #print-image { display: block !important; width: 100%; }
 }
+@media (max-width: 900px) {
+  .top-right { display: none; }
+}
+/* Inside the 34px settings row the crop actions use Survey's compact 24px buttons. */
+.subrow .pill-button, .subrow .primary { height: 24px; min-width: 0; padding: 0 12px; font-size: 12px; border-radius: 6px; }

@@ -1,0 +1,69 @@
+name: publish-browser-extension
+
+# Headless Chrome Web Store release. Run it from the Actions tab (or the API) after the
+# version in browser-extension/manifest.json has been raised and tested. Google reviews
+# every submission; a version goes live when review passes.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'upload-only = save as a draft in the dashboard; publish = submit for review and go live when approved; staged = submit, then wait for a manual Publish click'
+        type: choice
+        options: ['upload-only', 'publish', 'staged']
+        default: 'upload-only'
+      percentage:
+        description: 'Optional rollout percentage (1-100). Leave empty for everyone.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-web-store
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: chrome-web-store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+      - name: Unit tests
+        run: npm run test:browser
+      - name: Package
+        id: package
+        run: node browser-extension/tools/package-extension.mjs
+      - name: Upload to the Chrome Web Store
+        env:
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          ACTION: ${{ inputs.action }}
+          PERCENTAGE: ${{ inputs.percentage }}
+        run: |
+          set -euo pipefail
+          args=("${{ steps.package.outputs.zip }}")
+          case "$ACTION" in
+            upload-only) args+=(--upload-only) ;;
+            staged) args+=(--staged) ;;
+          esac
+          if [ -n "$PERCENTAGE" ]; then args+=(--percentage "$PERCENTAGE"); fi
+          node browser-extension/tools/publish-webstore.mjs "${args[@]}"
+      - name: Keep the uploaded package
+        uses: actions/upload-artifact@v4
+        with:
+          name: winshot-capture-${{ steps.package.outputs.version }}-store
+          path: ${{ steps.package.outputs.zip }}

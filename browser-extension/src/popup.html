@@ -8,15 +8,18 @@
 </head>
 <body>
   <header>
-    <span class="mark" aria-hidden="true"></span>
+    <img class="mark" src="../icons/32.png" alt="" width="28" height="28">
     <div><strong>WinShot</strong><small>Browser capture</small></div>
+    <nav>
+      <a id="open-options-top" href="#" title="Settings">Settings</a>
+    </nav>
   </header>
   <main>
-    <button id="repeat-last"><span>Repeat last capture</span><kbd>Ctrl Shift S</kbd><small id="repeat-label"></small></button>
-    <button data-mode="full-page"><span>Entire page</span><kbd>Alt Shift 1</kbd></button>
-    <button data-mode="visible"><span>Visible viewport</span><kbd>Alt Shift 3</kbd></button>
+    <button id="repeat-last"><span>Repeat last capture</span><kbd data-command="last-used-action">Ctrl Shift S</kbd><small id="repeat-label"></small></button>
+    <button data-mode="full-page"><span>Entire page</span><kbd data-command="capture-full-page">Alt Shift 1</kbd></button>
+    <button data-mode="visible"><span>Visible viewport</span><kbd data-command="capture-visible">Alt Shift 3</kbd></button>
     <button id="browser-window"><span>Browser window</span><small>Uses WinShot desktop window capture</small></button>
-    <button data-picker="region"><span>Drag a selection</span><kbd>Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
+    <button data-picker="region"><span>Drag a selection</span><kbd data-command="capture-region">Alt Shift 4</kbd><small>Auto-scrolls at page edges</small></button>
     <button data-picker="element"><span>Select an element</span><small>Ctrl-hover for exact DOM node</small></button>
     <button data-picker="frame"><span>Capture a scrolling frame</span><small>Click inside an accessible frame or iframe</small></button>
     <details>
@@ -49,7 +52,14 @@
         <option value="365">1 year</option>
         <option value="0">Forever</option>
       </select>
-      <label class="check"><input id="context-menu" type="checkbox"> Right-click menu: repeat last capture</label>
+      <label class="check"><input id="context-menu" type="checkbox"> Show WinShot in the right-click menu</label>
+      <label for="after-capture">After capture</label>
+      <select id="after-capture">
+        <option value="editor">Open the editor</option>
+        <option value="save">Save the image</option>
+        <option value="save-pdf">Save as PDF</option>
+        <option value="copy">Copy to clipboard</option>
+      </select>
       <small>Safety limits prevent a runaway page from exhausting memory. Filename fields: {title}, {host}, {date}, {time}, {mode}, {counter} — or FireShot-style %t %e %n %y-%m-%d %H:%M:%S</small>
     </details>
     <label for="batch-mode">Batch capture area</label>
@@ -62,8 +72,8 @@
     <label for="batch-urls">Capture a URL list</label>
     <textarea id="batch-urls" rows="3" placeholder="One website URL per line"></textarea>
     <button id="url-batch"><span>Capture URL list</span><small>Opens temporary tabs, then closes them</small></button>
-    <button id="cancel"><span>Cancel active capture</span><kbd>Ctrl Shift S</kbd><small>Restores the page and discards the result</small></button>
-    <a id="open-history" href="#">Capture history…</a>
+    <button id="cancel"><span>Cancel active capture</span><kbd data-command="last-used-action">Ctrl Shift S</kbd><small>Restores the page and discards the result</small></button>
+    <div class="links"><a id="open-history" href="#">Capture history…</a><a id="open-options" href="#">All settings…</a></div>
   </main>
   <p id="status" role="status">Captures stay on this device.</p>
   <script type="module" src="popup.js"></script>

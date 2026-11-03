@@ -15,3 +15,6 @@ main { padding: 10px 20px; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; background: #3d5; color: #042; }
 .pill.partial, .pill.failed, .pill.cancelled { background: #d95; color: #310; }
 footer { padding: 14px 20px; }
+.tip { color: #8a93a3; font-size: 12px; }
+#import-status { color: #ffb4a8; }
+body.dropping { outline: 3px dashed #0a84ff; outline-offset: -8px; }
