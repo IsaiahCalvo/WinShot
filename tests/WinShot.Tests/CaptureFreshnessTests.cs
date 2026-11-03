@@ -157,6 +157,9 @@ public class CaptureFreshnessTests
                 release.Set();
                 selector.Dispose();
             }
+
+            // Every ramp the session started gives the shared clock back with it.
+            Assert.Equal(0, Motion.Holders);
         });
     }
 
@@ -195,6 +198,9 @@ public class CaptureFreshnessTests
                 release.Set();
                 selector.Dispose();
             }
+
+            // Every ramp the session started gives the shared clock back with it.
+            Assert.Equal(0, Motion.Holders);
         });
     }
 

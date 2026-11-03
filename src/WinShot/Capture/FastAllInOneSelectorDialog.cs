@@ -263,7 +263,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
         }
 
-        if (_completion != session || IsDisposed)
+        // _sessionEnded too: Complete keeps the same _completion, so a frame that lands after
+        // a cancel used to pass this check and fade the parked surfaces up to the freeze.
+        if (_completion != session || IsDisposed || _sessionEnded)
         {
             snapshot?.Dispose(); // stale: touch nothing shared
             return;
@@ -540,6 +542,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         if (disposing)
         {
+            // Disposing mid-ramp must give the high-resolution clock back.
+            _freezeFade?.Dispose();
+            _freezeFade = null;
             DisposePanes();
             DisposeFrozen();
             _handleTween?.Dispose();
