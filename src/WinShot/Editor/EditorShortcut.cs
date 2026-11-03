@@ -17,6 +17,8 @@ internal enum EditorShortcutCommand
     Paste,
     Duplicate,
     ActualSize,
+    Cut,
+    ShowShortcuts,
 }
 
 /// <summary>Windows-native editor shortcuts kept separate from the window handler for focused tests.</summary>
@@ -45,6 +47,10 @@ internal static class EditorShortcut
             (Key.OemMinus or Key.Subtract, ModifierKeys.Control) => EditorShortcutCommand.ZoomOut,
             (Key.C, ModifierKeys.Control) => EditorShortcutCommand.Copy,
             (Key.V, ModifierKeys.Control) => EditorShortcutCommand.Paste,
+            (Key.X, ModifierKeys.Control) => EditorShortcutCommand.Cut,
+            // Survey opens its shortcut list on "?" or Ctrl+/ (KeyboardShortcutsOverlay.jsx).
+            // The bare "?" is a typed character, so it is handled with the letters instead.
+            (Key.OemQuestion or Key.Divide, ModifierKeys.Control) => EditorShortcutCommand.ShowShortcuts,
             (Key.D, ModifierKeys.Control) => EditorShortcutCommand.Duplicate,
             (Key.S, ModifierKeys.Control | ModifierKeys.Shift) => EditorShortcutCommand.SaveAs,
             _ => EditorShortcutCommand.None,

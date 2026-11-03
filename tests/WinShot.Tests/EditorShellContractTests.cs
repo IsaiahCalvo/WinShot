@@ -9,8 +9,9 @@ public class EditorShellContractTests
     /// Every tool has a home in the one-row toolbar: the two pointer tools sit outside the
     /// categories, everything else is in exactly one category's sub-row. Nothing is behind
     /// an overflow popup any more, so a tool missing from this set is a tool no click can
-    /// reach. CurvedArrow is the one deliberate exception — it is the Curved row of the
-    /// arrow-style menu, not a button.
+    /// reach. Two deliberate exceptions: Crop is the single crop button beside Undo, and
+    /// CurvedArrow has no button at all (Survey has none) and stays only so curved arrows in
+    /// older projects still edit.
     /// </summary>
     [Fact]
     public void EveryToolIsReachableFromThePointerPairOrOneCategory()
@@ -27,14 +28,14 @@ public class EditorShellContractTests
         // Survey's own order (PDFViewer.jsx:34035-34045): Polygon and Polyline sit between the
         // closed shapes and the open ones, because that is what they bridge — a polygon is a
         // many-sided Rectangle, a polyline a many-segment Line.
-        Assert.Equal(new[] { "Rectangle", "Ellipse", "Polygon", "Polyline", "Line", "Arrow", "Step" },
+        Assert.Equal(new[] { "Rectangle", "Ellipse", "Polygon", "Cloud", "Polyline", "Line", "Arrow", "Step" },
             EditorShellContract.ToolsIn(EditorToolCategory.Shapes));
         Assert.Equal(new[] { "Text", "Callout" }, EditorShellContract.ToolsIn(EditorToolCategory.Text));
         // One redaction tool, not Survey's two: pixelate and blur are STYLES on the mark it
         // draws. The three marks that act on the pixels underneath share the Effects row.
         Assert.Equal(new[] { "Redact", "Spotlight", "Magnifier" },
             EditorShellContract.ToolsIn(EditorToolCategory.Redact));
-        Assert.Equal(new[] { "Crop" }, EditorShellContract.ToolsIn(EditorToolCategory.Image));
+        Assert.Empty(EditorShellContract.ToolsIn(EditorToolCategory.Image));
         Assert.Empty(EditorShellContract.MoreToolOrder);
 
         string[] buttons = EditorShellContract.PointerToolOrder
@@ -44,7 +45,8 @@ public class EditorShellContractTests
 
         string[] reachable = buttons
             .Append(nameof(EditorTool.Eyedropper))     // inside the colour picker
-            .Append(nameof(EditorTool.CurvedArrow))    // the Curved row of the arrow menu
+            .Append(nameof(EditorTool.CurvedArrow))    // no button: kept so older curved arrows still edit
+            .Append(nameof(EditorTool.Crop))           // the one crop button, beside Undo
             .ToArray();
         Assert.DoesNotContain(nameof(EditorTool.Emoji), reachable);
         Assert.All(Enum.GetNames<EditorTool>().Where(name => name != nameof(EditorTool.Emoji)),
@@ -58,8 +60,8 @@ public class EditorShellContractTests
         {
             foreach (string name in EditorShellContract.ToolsIn(category))
             {
-                // FilledRectangle is a second button for the Rectangle tool.
-                string toolName = name == "FilledRectangle" ? "Rectangle" : name;
+                // Cloud is a second button for the Rectangle tool (Rectangle + cloud border).
+                string toolName = name is "FilledRectangle" or "Cloud" ? "Rectangle" : name;
                 var tool = Enum.Parse<EditorTool>(toolName);
                 Assert.Equal(category, EditorShellContract.CategoryOf(tool));
             }
@@ -94,9 +96,7 @@ public class EditorShellContractTests
     {
         Assert.Equal(EditorContextControls.None,
             EditorShellContract.ContextFor(EditorTool.Select, filledRectangle: false));
-        // An outlined shape owns a stroke, so it owns the stroke's two choices too: the
-        // dash pattern and the hand-drawn quality. A filled one has no stroke to dash,
-        // but it keeps Style because "sketchy" is a property of the whole mark.
+        // An outlined shape owns a stroke, so it owns the stroke's dash pattern too.
         Assert.Equal(EditorContextControls.Color | EditorContextControls.Thickness |
                      EditorContextControls.Fill | EditorContextControls.Opacity |
                      EditorContextControls.LineStyle | EditorContextControls.FillStrokeTabs |
@@ -105,7 +105,8 @@ public class EditorShellContractTests
         // Survey offers Cloud on every region marker, so every cloud-capable tool carries the
         // Bump field. Ellipse was the last one wired; polygon takes a rectangle's whole row.
         foreach (var cloudTool in new[]
-                 { EditorTool.Rectangle, EditorTool.Ellipse, EditorTool.Polygon, EditorTool.Polyline })
+                 { EditorTool.Rectangle, EditorTool.Ellipse, EditorTool.Polygon, EditorTool.Polyline,
+                   EditorTool.Text, EditorTool.Callout })
             Assert.True(EditorShellContract.ContextFor(cloudTool, false)
                 .HasFlag(EditorContextControls.CloudBump), $"{cloudTool} has no Bump field");
         Assert.True(EditorShellContract.ContextFor(EditorTool.Rectangle, filledRectangle: true)
@@ -120,7 +121,8 @@ public class EditorShellContractTests
             .HasFlag(EditorContextControls.ArrowStyle));
         Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.TextStyle));
-        Assert.False(EditorShellContract.ContextFor(EditorTool.Text, false)
+        // Survey's Style pill includes the text box: it styles the box border.
+        Assert.True(EditorShellContract.ContextFor(EditorTool.Text, false)
             .HasFlag(EditorContextControls.LineStyle));
         // Redaction shows its style dropdown and a continuous strength, and nothing else:
         // colour and thickness mean nothing to a mark whose job is to hide pixels.

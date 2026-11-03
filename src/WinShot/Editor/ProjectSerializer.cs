@@ -207,15 +207,10 @@ internal sealed class AnnotationData
     public double? Alpha { get; set; }
 
     /// <summary>
-    /// <see cref="StrokeRender"/> name — the hand-drawn line quality, which is ORTHOGONAL to
-    /// <see cref="LineStyle"/>: a sketchy outline can still be dashed. Absent reads as Clean.
-    /// </summary>
-    public string? Sketch { get; set; }
-
-    /// <summary>
-    /// Jitter seed. One field, two users: a redaction's mosaic and a sketchy outline's wobble
-    /// both have to redraw identically after a move, an undo or a project reload instead of
-    /// reshuffling every time they are recomputed.
+    /// A redaction's jitter seed, so its mosaic redraws identically after a move, an undo or
+    /// a project reload instead of reshuffling every time it is recomputed. (Older files may
+    /// also carry a "sketch" field from the removed hand-drawn toggle; the reader ignores
+    /// unknown fields, so those marks simply load ruled.)
     /// </summary>
     public int? Seed { get; set; }
 
@@ -240,6 +235,12 @@ internal sealed class AnnotationData
                 : null;
         a.Dash = null;
     }
+
+    /// <summary>
+    /// Survey's Lock: a locked mark can be picked and copied but not moved, resized, restyled,
+    /// erased or deleted until it is unlocked. Null (not written) when unlocked.
+    /// </summary>
+    public bool? Locked { get; set; }
 
     public AnnotationData Clone() => (AnnotationData)MemberwiseClone();
 
@@ -564,7 +565,6 @@ internal static class ProjectSerializer
     {
         // Schema v1 wrote the dash as its own field; Survey's LineStyle is a superset of it.
         AnnotationData.MigrateLegacyDash(a);
-        var render = StrokeStyles.ParseRender(a.Sketch);
         int seed = a.Seed ?? 0;
         switch (a.Type)
         {
@@ -603,9 +603,9 @@ internal static class ProjectSerializer
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
                     Data = curved
-                        ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t, render, seed)
+                        ? AnnotationFactory.CurvedArrowGeometry(pts[0], pts[1], pts[2], t)
                         : AnnotationFactory.ArrowGeometry(
-                            pts[0], pts[1], t, end, start, thin, LineCurve.ParseMid(a.Mid), render, seed),
+                            pts[0], pts[1], t, end, start, thin, LineCurve.ParseMid(a.Mid)),
                 };
                 AnnotationFactory.ApplyDash(path, AnnotationStyle.LineStyleFrom(a));
                 return path;
@@ -621,7 +621,7 @@ internal static class ProjectSerializer
                     StrokeStartLineCap = PenLineCap.Round,
                     StrokeEndLineCap = PenLineCap.Round,
                     StrokeLineJoin = PenLineJoin.Round,
-                    Data = AnnotationFactory.LineGeometry(pts[0], pts[1], mid, render, seed),
+                    Data = AnnotationFactory.LineGeometry(pts[0], pts[1], mid),
                 };
                 AnnotationFactory.ApplyDash(line, AnnotationStyle.LineStyleFrom(a));
                 return line;
@@ -637,7 +637,7 @@ internal static class ProjectSerializer
                     run, closed, ink,
                     closed && polyFill.A != 0 ? polyFill : Colors.Transparent,
                     RequireThickness(a), AnnotationStyle.LineStyleFrom(a),
-                    a.CloudIntensity ?? CloudPath.DefaultIntensity, render, seed);
+                    a.CloudIntensity ?? CloudPath.DefaultIntensity);
                 if (closed && polyFill.A == 0)
                     poly.Fill = ShapeFillBrush.CreateFromName(a.Fill, ink);
                 return poly;
@@ -653,8 +653,7 @@ internal static class ProjectSerializer
                     a.Type, bounds, color,
                     fillColor.A == 0 ? Colors.Transparent : fillColor,
                     RequireThickness(a), lineStyle,
-                    a.CloudIntensity ?? CloudPath.DefaultIntensity,
-                    render, seed);
+                    a.CloudIntensity ?? CloudPath.DefaultIntensity);
                 if (fillColor.A == 0)
                     shape.Fill = ShapeFillBrush.CreateFromName(a.Fill, color);
                 return shape;
@@ -676,7 +675,8 @@ internal static class ProjectSerializer
                     : null;
                 return AnnotationFactory.CreateCallout(
                     layout, a.Text ?? "", stroke, fill, RequireThickness(a),
-                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily, fontColor);
+                    head, AnnotationStyle.LineStyleFrom(a), fontSize, a.FontFamily, fontColor,
+                    a.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
             }
             case AnnotationData.TypeFreehand:
             case AnnotationData.TypeHighlighter:
@@ -711,7 +711,7 @@ internal static class ProjectSerializer
                     a.Italic == true, a.Underline == true, a.Strike == true,
                     AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
                     box?.Width, box?.Height, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
-                    new SolidColorBrush(stroke));
+                    new SolidColorBrush(stroke), a.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
                 SetPos(label, pts[0]);
                 return label;
             }

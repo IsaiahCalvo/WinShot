@@ -56,6 +56,8 @@ public class Settings
 
     /// <summary>Editor eraser mode. Survey persists this ('eraserMode') and defaults to partial.</summary>
     public bool EraserPartial { get; set; } = true;
+    /// <summary>Editor: moving marks snap their edges and centres to other marks (Shift+S toggles).</summary>
+    public bool EditorSnapping { get; set; } = true;
 
     // Editor view: Survey persists the zoom MODE and the manual scale and restores them on
     // load (zoomController.js:9, :18-21, :36-71; PDFViewer.jsx:916-937, :7856-7863).
@@ -83,6 +85,17 @@ public class Settings
     /// <summary>The user's own palette, newest first, capped at SavedColors.MaxCount. Runtime
     /// state rather than a settings control: it is written by picking a colour, never typed.</summary>
     public List<string> SavedColors { get; set; } = new();
+
+    /// <summary>Editor: the pinned tools dock (Survey pinnedTools.js), each pin a tool with its
+    /// own settings, in dock order. Runtime state, written by pinning, never typed.</summary>
+    public List<PinnedToolSetting> EditorPinnedTools { get; set; } = new();
+
+    /// <summary>Editor: the tool keys the user changed in the shortcut list, by row label
+    /// ("Polyline" -> "Shift+K"). Shipped keys are absent.</summary>
+    public Dictionary<string, string> EditorToolKeyBindings { get; set; } = new();
+
+    /// <summary>Editor: which side of the canvas the pinned tools dock sits on (Left, Right, Bottom).</summary>
+    public string EditorPinDock { get; set; } = "Left";
 
     /// <summary>Hide every pin, or bring them all back.</summary>
     public string HotkeyPinToggleVisibility { get; set; } = "";
@@ -372,6 +385,9 @@ public class SettingsService
             // every load path already funnels through.
             loaded.ShortcutBindings ??= new();
             loaded.SavedColors ??= new();
+            loaded.EditorPinnedTools ??= new();
+            loaded.EditorPinDock ??= "Left";
+            loaded.EditorToolKeyBindings ??= new();
             Current = loaded;
             return true;
         }
@@ -487,4 +503,16 @@ public class SettingsService
         }
         File.Move(tmp, FilePath, overwrite: true);
     }
+}
+
+/// <summary>One pinned editor tool: its kind and the settings it arms with (Survey pinnedTools.js).</summary>
+public sealed class PinnedToolSetting
+{
+    public string Kind { get; set; } = "";
+    public string? StrokeColor { get; set; }
+    public double? StrokeOpacity { get; set; }
+    public double? StrokeWidth { get; set; }
+    public string? FillColor { get; set; }
+    public double? FillOpacity { get; set; }
+    public string? LineStyle { get; set; }
 }

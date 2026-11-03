@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using WinShot.Editor;
 using Xunit;
 using SD = System.Drawing;
@@ -163,5 +163,38 @@ public class EditorGrowLayoutTests
 
         Assert.True(mid.Width >= 1);
         Assert.True(mid.Height >= 1);
+    }
+
+    [Fact]
+    public void DesiredForCapture_WrapsTheCaptureInItsInsetsAndChrome()
+    {
+        Size s = EditorGrowLayout.DesiredForCapture(300, 350, new Size(40, 32), new Size(62, 168));
+
+        Assert.Equal(402, s.Width);
+        Assert.Equal(550, s.Height);
+    }
+
+    [Fact]
+    public void DesiredForCapture_ABigCaptureIsCappedByTarget()
+    {
+        Size want = EditorGrowLayout.DesiredForCapture(3840, 2160, new Size(40, 32), new Size(62, 168));
+        var work = new SD.Rectangle(0, 0, 1920, 1040);
+
+        SD.Rectangle t = EditorGrowLayout.Target(work, want, 1.0);
+
+        Assert.Equal(1728, t.Width);
+        Assert.Equal(936, t.Height);
+    }
+
+    [Fact]
+    public void DesiredForCapture_ASmallCaptureLandsOnTheWindowMinimum()
+    {
+        Size want = EditorGrowLayout.DesiredForCapture(120, 80, new Size(40, 32), new Size(62, 168));
+        var work = new SD.Rectangle(0, 0, 1920, 1040);
+
+        SD.Rectangle t = EditorGrowLayout.Target(work, want, 1.0, new Size(980, 520));
+
+        Assert.Equal(980, t.Width);
+        Assert.Equal(520, t.Height);
     }
 }

@@ -179,15 +179,6 @@ public partial class EditorWindow : Window
     private bool _hueDragging;
     private double _opacity = 1.0; // annotation alpha multiplier (0–1.0) for new + restyled marks
 
-    /// <summary>
-    /// The hand-drawn line quality for the NEXT mark; a selected one carries its own. It is
-    /// ORTHOGONAL to Survey's LINE STYLE dropdown, which owns solid/dashed/dotted/cloud.
-    /// </summary>
-    private StrokeRender _strokeRender = StrokeRender.Clean;
-
-    /// <summary>The jitter seed of the shape being drawn, so its wobble is stable as the drag grows.</summary>
-    private int _sketchSeed;
-
 
     // Redaction defaults for the NEXT mark; a selected redaction carries its own. Survey's
     // separate Pixelate and Blur tools are two of these four styles.
@@ -293,6 +284,7 @@ public partial class EditorWindow : Window
         HistoryService history,
         Func<Task>? afterInitialPreview)
     {
+        _openClock.Start();
         ThemeResources.EnsureLoaded();
         InitializeComponent();
         _source = source;
@@ -307,15 +299,21 @@ public partial class EditorWindow : Window
         ContentRendered += OnInitialContentRendered;
         ContentRendered += OnChromeContentRendered;
 
-        // The viewport zooms/pans instead of the window sizing itself to the
-        // image, so a sensible default footprint is enough; the image is
-        // fitted and centered once layout is known.
+        // The window wraps the capture (CleanShot): a small shot opens in a small window
+        // and a big one is capped at 90 % of the work area and fitted by shrinking.
+        // WPF's MinWidth/MinHeight floor the small case.
         var wa = SystemParameters.WorkArea;
-        Width = Math.Min(1167, wa.Width * 0.9);
-        Height = Math.Min(590, wa.Height * 0.9);
+        Size want = DesiredWindowDip();
+        Width = Math.Min(want.Width, wa.Width * EditorGrowLayout.MaxWorkAreaFraction);
+        Height = Math.Min(want.Height, wa.Height * EditorGrowLayout.MaxWorkAreaFraction);
 
+        WireSelectionQuickBar();
+        WireBrushAdjust();
+        WireSurveyRow();
         Viewport.LostMouseCapture += (_, _) =>
         {
+            // A brush drag that loses the mouse changes nothing (Survey: a cancelled pointer).
+            EndBrushAdjust(commit: false);
             // A counter drag owns PointerMove outright, so it must never survive a lost capture.
             CancelCounterDrag();
             AbortDrag();
@@ -329,10 +327,18 @@ public partial class EditorWindow : Window
                 _marqueeArmed = false;
                 _marqueeShift = _marqueeAlt = false;
                 HideDragRect();
+                HideLasso();
             }
         };
         Loaded += (_, _) => RestorePersistedZoom();
         Loaded += (_, _) => WirePopoverMotion();
+        Loaded += (_, _) =>
+        {
+            EditorToolKeys.Overrides = _settings?.Current.EditorToolKeyBindings;
+            AddKeysToToolTips();
+        };
+        Loaded += (_, _) => WireSelectModeMenu();
+        Loaded += (_, _) => SyncSnappingButton();
         SetEraserPartial(_settings.Current.EraserPartial);
         // Survey re-runs the CURRENT non-manual zoom mode on every layout change
         // (applyLayoutDrivenZoom, PDFViewer.jsx:7999-8009); only MANUAL opts out.
@@ -346,13 +352,17 @@ public partial class EditorWindow : Window
         Viewport.SizeChanged += (_, _) => ReapplyFit();
         Deactivated += (_, _) =>
         {
+            EndBrushAdjust(commit: false);
             _spaceDown = false;
             if (!_panning) UpdateCursor();
         };
         Closed += (_, _) =>
         {
-            PersistZoomPreference();
-            PersistSavedColors();
+            if (!_prewarm)
+            {
+                PersistZoomPreference();
+                PersistSavedColors();
+            }
             _closed = true;
             // Every timer this window owns, stopped in one place. A tick that lands after the
             // template is gone is an unhandled dispatcher exception, and an unhandled
@@ -378,11 +388,22 @@ public partial class EditorWindow : Window
         };
         UpdateCursor();
         DarkTitleBar.Apply(this);
+        // Place the window before it is first shown: grown out of its origin on the origin's
+        // monitor, or with no origin centred on the monitor the pointer is on. Without this
+        // the editor always opened on the primary display (Isaiah 2026-11-03).
+        SourceInitialized += (_, _) => { if (!_prewarm) BeginGrowFromOrigin(); };
     }
+
+    /// <summary>
+    /// Open-time perf, from the constructor: first frame on screen, then the picture in it.
+    /// Logged so a slow open on a real machine shows up as a number in the log, not a feeling.
+    /// </summary>
+    private readonly System.Diagnostics.Stopwatch _openClock = new();
 
     private void OnInitialContentRendered(object? sender, EventArgs e)
     {
         ContentRendered -= OnInitialContentRendered;
+        Log.Info($"Perf editor first frame: {_openClock.ElapsedMilliseconds} ms");
         Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(() =>
@@ -403,6 +424,40 @@ public partial class EditorWindow : Window
                 FitEditorCombos();
             }));
     }
+
+    /// <summary>
+    /// Pays the editor's one-time costs at app idle so the first real open is as quick as
+    /// the second (measured on a real PC: 960 ms cold against 195 ms warm). Building the
+    /// window loads its XAML, theme and templates; a layout pass and an off-screen render
+    /// warm the text, geometry and brush paths. The window is never shown, and its close
+    /// writes nothing back to settings.
+    /// </summary>
+    public static void Prewarm(SettingsService settings, HistoryService history)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var bmp = new SD.Bitmap(64, 48);
+        var w = new EditorWindow(bmp, settings, history) { _prewarm = true };
+        try
+        {
+            if (w.Content is FrameworkElement root)
+            {
+                var size = new Size(Math.Max(w.Width, 400), Math.Max(w.Height, 300));
+                root.Measure(size);
+                root.Arrange(new Rect(size));
+                root.UpdateLayout();
+                var rtb = new RenderTargetBitmap(
+                    (int)size.Width, (int)size.Height, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(root);
+            }
+        }
+        finally
+        {
+            w.Close();
+        }
+        Log.Info($"Perf editor prewarm: {clock.ElapsedMilliseconds} ms");
+    }
+
+    private bool _prewarm;
 
     public static EditorWindow CreateForCapture(SD.Bitmap source, SettingsService settings, HistoryService history)
     {
@@ -442,6 +497,7 @@ public partial class EditorWindow : Window
         try
         {
             await RefreshImageAsync();
+            Log.Info($"Perf editor image shown: {_openClock.ElapsedMilliseconds} ms ({_source.Width}x{_source.Height})");
         }
         catch (Exception ex)
         {
@@ -523,14 +579,16 @@ public partial class EditorWindow : Window
         AnnotationCanvas.Height = h;
         InteractionCanvas.Width = w;
         InteractionCanvas.Height = h;
+        ChromeCanvas.Width = w;
+        ChromeCanvas.Height = h;
     }
 
     // --------------------------------------------------------- view (zoom/pan)
 
     /// <summary>
     /// Fits the WHOLE image into the viewport, centered. Tall scrolling captures scale down
-    /// so top-to-bottom is visible; a capture that already fits opens at 100%, never blown up
-    /// (see <see cref="FitWidthScale"/>). Use <see cref="FitToWidth"/> to read a long capture
+    /// so top-to-bottom is visible; a small capture scales up to fill the view, up to
+    /// <see cref="MaxFitZoom"/>. Use <see cref="FitToWidth"/> to read a long capture
     /// at full width and scroll down it. Ctrl+0 / Center button / open all route here.
     /// </summary>
     private void FitToView()
@@ -594,29 +652,29 @@ public partial class EditorWindow : Window
     private const double FitGap = 16;
 
     /// <summary>
-    /// Fit SHRINKS ONLY. Survey's arithmetic is unchanged below; this is the one place the
-    /// result is capped at 1.0, so every fit mode inherits it instead of three call sites
-    /// each remembering to.
+    /// The most a fit may MAGNIFY a capture. Survey's arithmetic is unchanged below; this is
+    /// the one place the result is capped, so every fit mode inherits it instead of three
+    /// call sites each remembering to.
     ///
-    /// <para>Survey never needs the cap because a PDF page is always about 612x792pt, so its
-    /// fit lands near 100% on any real viewport. A screenshot is whatever size it is, and
-    /// Survey's formula applied to a small one magnifies it: a 300x200 capture opened at
-    /// <b>331%</b> in a 1337x768 viewport, and an 80x50 one at over 900%. Upscaling a bitmap
-    /// cannot add detail — it just serves blurry pixels and makes the annotation you draw on
-    /// top land on a soft target. Isaiah, 2026-09-17: "fit-to-page and how the page fits is
-    /// weird"; this was it.</para>
+    /// <para>History: until 2026-09-17 fit had no cap, and Survey's formula blew small
+    /// captures up to 331% (300x200) or over 900% (80x50) — blurry. That day the cap became
+    /// 100%, which swung too far the other way: a small capture opened at 100% as a little
+    /// island with big empty bands above and below it. Isaiah, 2026-11-02: "it's too small.
+    /// You have these massive borders above and below it."</para>
     ///
-    /// <para>So a capture smaller than the viewport opens at 100%, centred by the callers'
-    /// existing translate maths. Zooming past 100% is still a thing the user can ask for —
-    /// the rail, Ctrl+wheel and the %-box all go to MaxZoom 40. Fit just stops volunteering.</para>
+    /// <para>So fit now fills the viewport (with Survey's small margin) and may magnify, but
+    /// never past 200%: big enough to work on, not so far that the pixels go soft. The rail,
+    /// Ctrl+wheel and the %-box still go to MaxZoom 40.</para>
     /// </summary>
-    private static double ShrinkOnly(double scale) => Math.Min(1.0, scale);
+    private const double MaxFitZoom = 2.0;
+
+    private static double CapFit(double scale) => Math.Min(MaxFitZoom, scale);
 
     /// <summary>Survey's getFitWidthForContainer / pw (PdfjsViewerContainer.jsx:137-140, :1891).</summary>
-    private double FitWidthScale(double vw) => ShrinkOnly(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
+    private double FitWidthScale(double vw) => CapFit(Math.Max(1, vw - FitPadX * 2) / _sourceWidth);
 
     /// <summary>Survey's fh: clientHeight / (ph + 2*gap) (PdfjsViewerContainer.jsx:1892-1893).</summary>
-    private double FitHeightScale(double vh) => ShrinkOnly(vh / (_sourceHeight + 2 * FitGap));
+    private double FitHeightScale(double vh) => CapFit(vh / (_sourceHeight + 2 * FitGap));
 
     /// <summary>The pan bound used by <see cref="ClampView"/>; unrelated to the fit insets.</summary>
     private const double ViewMargin = 12;
@@ -825,17 +883,11 @@ public partial class EditorWindow : Window
         {
             case "FitWidth": FitToWidth(); break;
             case "FitHeight": FitToHeight(); break;
-            case "Free":
-                FitToView(); // establishes a sane translation before the stored scale is applied
-                // A remembered zoom is a preference, not an instruction to show a sliver. If
-                // the stored scale is bigger than what this capture fits at, the capture wins:
-                // a 1000x4000 scroll capture opened at the 200 % left over from the last small
-                // screenshot showed a hand's width of it and no way to know that was the whole
-                // picture. Zooming back in is one gesture; realising you are looking at 5 % of
-                // an image is not.
-                if (_settings.Current.EditorManualZoom <= _zoom)
-                    ZoomAt(ViewportCentre(), _settings.Current.EditorManualZoom);
-                break;
+            // "Free" (the last capture was zoomed by hand) opens fitted too. A hand zoom
+            // belongs to the capture it was made on: a stored scale bigger than this capture's
+            // fit showed a sliver of a tall scroll capture, and a smaller one (often the 100%
+            // left by Ctrl+0) opened a small capture as a little island with empty bands
+            // around it (Isaiah, 2026-11-02).
             default: FitToView(); break;
         }
     }
@@ -993,8 +1045,15 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnSizePresetsPopupOpened(object sender, EventArgs e)
     {
-        if (SizeField is not null)
-            SizePresetsPopup.HorizontalOffset = (SizeField.ActualWidth - 126) / 2;
+        // Survey's pill card is Radix align="start": its left edge under the pill's.
+        SizePresetsPopup.HorizontalOffset = 0;
+        // The card opens with its number ready to type over (AnnotationSizeControl SizeCard).
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!SizePresetsPopup.IsOpen || SizeInput is null) return;
+            SizeInput.Focus();
+            SizeInput.SelectAll();
+        }, System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void SetSurfaceCursor(Cursor cursor)
@@ -1036,6 +1095,50 @@ public partial class EditorWindow : Window
     {
         if (sender is not RadioButton rb || rb.Tag is not string tag || !Enum.TryParse(tag, out EditorTool tool))
             return;
+        if (_syncingShapeButtons) return;
+        ArmTool(rb, tool);
+        // Survey cloudShapeTool.js: pressing Rectangle while the cloud border is on goes back
+        // to a solid rectangle — Cloud and Rectangle are two buttons for one tool.
+        if (IsLoaded && ReferenceEquals(rb, RectangleToolBtn) && _lineStyle == LineBorderStyle.Cloud)
+        {
+            ApplyQuickBarLineStyle(LineBorderStyle.Solid);
+            UpdateContextPanels();
+        }
+    }
+
+    /// <summary>
+    /// Survey's Shape row Cloud button: Rectangle with the cloud border
+    /// (utils/cloudShapeTool.js resolveShapeToolPick).
+    /// </summary>
+    private void OnCloudToolChecked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingShapeButtons || sender is not RadioButton rb) return;
+        ArmTool(rb, EditorTool.Rectangle);
+        if (!IsLoaded) return;
+        ApplyQuickBarLineStyle(LineBorderStyle.Cloud);
+        UpdateContextPanels();
+    }
+
+    private bool _syncingShapeButtons;
+
+    /// <summary>
+    /// Cloud shows pressed exactly while Rectangle is armed with the cloud border, and
+    /// Rectangle never shows pressed then (cloudShapeTool.js isShapeToolButtonActive). Keys,
+    /// pins and the line-style menu can all get there without pressing either button.
+    /// </summary>
+    private void SyncCloudButton()
+    {
+        if (CloudToolBtn is null || RectangleToolBtn is null || _tool != EditorTool.Rectangle) return;
+        bool cloud = _lineStyle == LineBorderStyle.Cloud;
+        RadioButton want = cloud ? CloudToolBtn : RectangleToolBtn;
+        if (want.IsChecked == true) return;
+        _syncingShapeButtons = true;
+        try { want.IsChecked = true; }
+        finally { _syncingShapeButtons = false; }
+    }
+
+    private void ArmTool(RadioButton rb, EditorTool tool)
+    {
         // Checked also fires while XAML is parsing, before sibling elements exist.
         if (IsLoaded)
         {
@@ -1057,8 +1160,11 @@ public partial class EditorWindow : Window
                 EyedropSwatch.Visibility = Visibility.Collapsed;
         }
         RememberGroupTool(tool);
+        // Survey closes the group row when Pan or Select is armed (PDFViewer.jsx "Close
+        // secondary toolbar when pan or select tools are active").
+        if (tool is EditorTool.Select or EditorTool.Pan) _imageGroupOpen = false;
         _tool = tool;
-        if (ReferenceEquals(rb, RectangleToolBtn))
+        if (ReferenceEquals(rb, RectangleToolBtn) || ReferenceEquals(rb, CloudToolBtn))
         {
             _fillMode = ShapeFillMode.None;
             if (FillNoneBtn is not null) FillNoneBtn.IsChecked = true;
@@ -1091,43 +1197,42 @@ public partial class EditorWindow : Window
             foreach (var rb in ShapeGroupPanel.Children.OfType<RadioButton>()) yield return rb;
         if (TextGroupPanel is not null)
             foreach (var rb in TextGroupPanel.Children.OfType<RadioButton>()) yield return rb;
+        if (EffectsGroupPanel is not null)
+            foreach (var rb in EffectsGroupPanel.Children.OfType<RadioButton>()) yield return rb;
     }
 
     private void OnDrawGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Draw")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastDrawTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Draw" || _imageGroupOpen)
+            CheckToolButton(_lastDrawTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnShapeGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Shapes")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastShapeTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Shapes" || _imageGroupOpen)
+            CheckToolButton(_lastShapeTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
 
     private void OnTextGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Text")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastTextTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Text" || _imageGroupOpen)
+            CheckToolButton(_lastTextTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
@@ -1139,11 +1244,11 @@ public partial class EditorWindow : Window
     /// </summary>
     private void OnImageGroupClick(object sender, RoutedEventArgs e)
     {
+        // The one chip that still toggles: its row is mostly one-shot actions and it arms
+        // nothing, so closing it never leaves a live tool with no row on screen.
         if (EditorShellContract.GroupFor(_tool, false) == "Image")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            _groupRowOpen = true;
-        _imageGroupOpen = _groupRowOpen && EditorShellContract.GroupFor(_tool, false) != "Image";
+            return;
+        _imageGroupOpen = !_imageGroupOpen;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
@@ -1157,13 +1262,12 @@ public partial class EditorWindow : Window
 
     private void OnEffectsGroupClick(object sender, RoutedEventArgs e)
     {
-        // AppShell.jsx:1637-1641 — the chip is a TOGGLE: already on this category
-        // closes the sub-row and leaves the tool alone; otherwise it opens and
-        // restores that category's last tool.
-        if (EditorShellContract.GroupFor(_tool, false) == "Effects")
-            _groupRowOpen = !_groupRowOpen;
-        else
-            CheckToolButton(_lastEffectsTool); // RememberGroupTool re-opens the row
+        // Survey (UX 2026-09-22): a second click on the lit chip is a NO-OP. While one of a
+        // group's tools is armed its tools stay on screen, so you can always see and change
+        // which tool it is; Pan, Select or Escape is how you put it down.
+        if (EditorShellContract.GroupFor(_tool, false) != "Effects" || _imageGroupOpen)
+            CheckToolButton(_lastEffectsTool);
+        _imageGroupOpen = false;
         UpdateContextPanels();
         UpdateGroupButtonChrome();
     }
@@ -1222,6 +1326,7 @@ public partial class EditorWindow : Window
         Paint(ShapeGroupBtn, group == "Shapes");
         Paint(TextGroupBtn, group == "Text");
         Paint(EffectsGroupBtn, group == "Effects");
+        Paint(ImageGroupBtn, _imageGroupOpen || group == "Image");
         PaintCropChrome(_tool == EditorTool.Crop);
     }
 
@@ -1249,6 +1354,15 @@ public partial class EditorWindow : Window
     /// </summary>
     private void UpdateContextPanels()
     {
+        // Survey's row 2 swap / leave motion wraps every change (EditorWindow.RowMotion.cs).
+        var motion = BeginRowMotion();
+        try { UpdateContextPanelsCore(); }
+        finally { EndRowMotion(motion); }
+    }
+
+    private void UpdateContextPanelsCore()
+    {
+        QueueQuickBarUpdate();
         EditorTool chrome = ChromeTool();
         bool filled = ChromeFilledRectangle();
         EditorContextControls controls = EditorShellContract.ContextFor(chrome, filled);
@@ -1279,6 +1393,10 @@ public partial class EditorWindow : Window
                 chrome is EditorTool.Text or EditorTool.Callout || _activeText is not null);
         CropRatioPanel.Visibility = Show(Has(EditorContextControls.CropRatio));
         StepModePanel.Visibility = Show(Has(EditorContextControls.StepMode));
+        // Survey's 'start' slot renders only with a counter PICKED (selectedCounterSeriesId).
+        if (StepStartPanel is not null)
+            StepStartPanel.Visibility = Show(Has(EditorContextControls.StepMode) &&
+                _selected is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeStep } });
         // The series rows are derived from the pins on the canvas, so they are rebuilt whenever
         // the counter row comes into view — that covers a freshly loaded project, whose pins
         // arrive with their series ids already stamped, without a load-path hook of its own.
@@ -1290,8 +1408,9 @@ public partial class EditorWindow : Window
         // cloud can mark. All four are live: CloudPath.For takes an arbitrary ring for the two
         // poly tools, and CloudPath.ForBox picks the rectangle or ellipse walk for the two
         // sized ones.
+        // w43: the text box and callout cloud their box border too (textCloudBorder.js).
         bool cloudCapable = chrome is EditorTool.Rectangle or EditorTool.Ellipse
-            or EditorTool.Polygon or EditorTool.Polyline;
+            or EditorTool.Polygon or EditorTool.Polyline or EditorTool.Text or EditorTool.Callout;
         if (CloudStyleItem is not null)
             CloudStyleItem.Visibility = Show(cloudCapable);
         // Survey gates the Bump field on a cloud-capable tool + the cloud border (AppShell.jsx:2590).
@@ -1321,23 +1440,24 @@ public partial class EditorWindow : Window
             Has(EditorContextControls.RedactStrength) &&
             Redaction.UsesStrength(SelectedRedactStyle() ?? _redactStyle));
         MagnifyPanel.Visibility = Show(Has(EditorContextControls.Magnification));
-        StrokePanel.Visibility = Show(Has(EditorContextControls.LineStyle));
         CropToolsPanel.Visibility = Show(Has(EditorContextControls.CropTools));
         if (Has(EditorContextControls.RedactStyle)) SyncRedactControls();
         if (Has(EditorContextControls.Magnification)) SyncMagnifySlider();
-        if (Has(EditorContextControls.LineStyle)) SyncSketchCheck();
 
-        // Survey's `activeCategoryDropdown` follows the ARMED tool only: it starts null, is
-        // force-cleared whenever activeTool becomes pan/select/text-select (PDFViewer.jsx:4340,
-        // :4558-4568), and no call site anywhere reads the selection. Selecting a committed mark
-        // must therefore never re-open the 34px strip. GroupFor returns "" for Select and Pan.
-        string group = EditorShellContract.GroupFor(_tool, false);
-        if (group.Length > 0 && group != "Image") _imageGroupOpen = false;
-        DrawGroupPanel.Visibility = Show(_groupRowOpen && group == "Draw");
-        ShapeGroupPanel.Visibility = Show(_groupRowOpen && group == "Shapes");
-        TextGroupPanel.Visibility = Show(_groupRowOpen && group == "Text");
-        EffectsGroupPanel.Visibility = Show(_groupRowOpen && group == "Effects");
-        ImageGroupPanel.Visibility = Show(_groupRowOpen && (group == "Image" || _imageGroupOpen));
+        // Row 1, right of the group chips (Survey toolbarRows.js resolveToolBarGroup): the
+        // armed tool's group; under Select or Pan with a mark picked, THAT mark's group, so a
+        // picked pen stroke reads pen / highlighter / eraser up top (pressing one arms it);
+        // under Select with nothing picked (or a mark no group makes), Box / Lasso.
+        string group = ToolBarGroup(chrome);
+        DrawGroupPanel.Visibility = Show(group == "Draw");
+        ShapeGroupPanel.Visibility = Show(group == "Shapes");
+        TextGroupPanel.Visibility = Show(group == "Text");
+        EffectsGroupPanel.Visibility = Show(group == "Effects");
+        ImageGroupPanel.Visibility = Show(group == "Image");
+        bool selectModes = group.Length == 0 && _tool == EditorTool.Select;
+        if (SelectModePanel is not null) SelectModePanel.Visibility = Show(selectModes);
+        if (ToolSlotDivider is not null) ToolSlotDivider.Visibility = Show(group.Length > 0 || selectModes);
+        SyncCloudButton();
 
         EditorColorBar.Visibility = Visibility.Visible;
         if (SizeEffectHost is not null)
@@ -1351,18 +1471,60 @@ public partial class EditorWindow : Window
         if (SecondaryToolPanel is not null)
             SecondaryToolPanel.Visibility = Show(props);
         EditorFormatBar.Visibility = Visibility.Visible;
-        // Survey portals the rich-text strip into the 34px sub-row and suppresses the
-        // category portal for as long as it is up (AppShell.jsx:1756-1772, 2009).
+        // The text formatting sits IN row 2 after Aa (Survey first-run walk 2026-10-21 #10),
+        // not in a bar of its own, so it never leaves its home in the format row.
         bool richText = TextStylePanel.Visibility == Visibility.Visible;
-        HostRichTextRow(richText);
-        EditorGroupToolsHost.Visibility = Show(_groupRowOpen && !richText && group is "Draw" or "Shapes" or "Text" or "Effects" or "Image");
-        // Survey PORTALS the 34px strip in only while something occupies it
-        // (PDFViewer.jsx:32015, AppShell.jsx:1756-1772); with Pan/Select active or the chip
-        // toggled shut there is no band and no hairline at all — the top bar butts straight
-        // onto the canvas. Collapsing the Border (not just its children) reproduces that,
-        // and because the band overlays the canvas the viewport never resizes or re-fits.
-        EditorGroupBar.Visibility = Show(EditorGroupToolsHost.Visibility == Visibility.Visible || richText);
+        HostRichTextRow(false);
+        // Row 2 is on screen exactly when it has settings to show (toolbarRows.js
+        // showsFormatRow): Pan, and Select with nothing picked, have none, and then there is
+        // no band and no hairline — the top bar butts straight onto the canvas. The band
+        // overlays the canvas, so the picture never moves when it comes and goes.
+        bool formatRow = props || richText;
+        EditorFormatHost.Visibility = Show(formatRow);
+        EditorGroupBar.Visibility = Show(formatRow);
+        SyncSurveyRow();
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// Which group's tools row 1 shows right of the chips ("" for none). Survey
+    /// toolbarRows.js resolveToolBarGroup: an open chip first (WinShot's Image chip, which
+    /// arms nothing), then the armed tool's group, then — under Select or Pan — the picked
+    /// mark's.
+    /// </summary>
+    private string ToolBarGroup(EditorTool chrome)
+    {
+        string armed = EditorShellContract.GroupFor(_tool, false);
+        if (armed.Length > 0 && armed != "Image") _imageGroupOpen = false;
+        if (_imageGroupOpen) return "Image";
+        if (armed.Length > 0) return armed;
+        if (_tool is EditorTool.Select or EditorTool.Pan && _selected is not null && _activeText is null)
+        {
+            string picked = EditorShellContract.GroupFor(chrome, false);
+            if (picked is "Draw" or "Shapes" or "Text" or "Effects") return picked;
+        }
+        return "";
+    }
+
+    private bool _syncingSelectMode;
+
+    /// <summary>Row 1's Box / Lasso pair under Select (Survey w46 "select modes in top bar").</summary>
+    private void OnSelectModeChecked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _syncingSelectMode || sender is not RadioButton rb) return;
+        SetLassoSelect(rb.Tag as string == "Lasso");
+    }
+
+    private void SyncSelectModeButtons()
+    {
+        if (SelectBoxModeBtn is null || SelectLassoModeBtn is null) return;
+        _syncingSelectMode = true;
+        try
+        {
+            SelectBoxModeBtn.IsChecked = !_lassoSelect;
+            SelectLassoModeBtn.IsChecked = _lassoSelect;
+        }
+        finally { _syncingSelectMode = false; }
     }
 
     /// <summary>
@@ -1456,19 +1618,17 @@ public partial class EditorWindow : Window
     /// </summary>
     private double MeasureFormatSlack()
     {
-        double inner = TopToolbar is { ActualWidth: > 0 } top
-            ? top.ActualWidth
-            : Math.Max(0, ActualWidth - 24);
-        double tools = MeasureWidth(ToolPanel);
-        // Tools are centred; the props block gets the star column to their right.
-        // Pan/Select hang off the cluster's left inside that same star column, so they eat
-        // slack even though they are not part of the centred measure.
-        double right = 64 + MeasureWidth(PanSelectPanel); // divider, panel margins, bar padding
+        // The settings own row 2 (Survey w44): the whole band less its 48px centring margin
+        // and a gutter each side, less what always stays (colour and size) and the "..." button.
+        double inner = EditorGroupBar is { ActualWidth: > 0 } bar
+            ? bar.ActualWidth - 48
+            : Math.Max(0, (Viewport?.ActualWidth ?? ActualWidth) - 48);
+        double right = 24 + 40;
         if (ColorPanel?.Visibility == Visibility.Visible)
             right += MeasureWidth(ColorPanel);
         if (SizeEffectHost?.Visibility == Visibility.Visible)
             right += MeasureWidth(SizeEffectHost);
-        double slack = (inner - tools) / 2 - right;
+        double slack = inner - right;
         // Letters and Apply crop stay on the strip even if tools walk a few DIP.
         if (TextStylePanel?.Visibility == Visibility.Visible && TextFormatButtons is not null)
             slack = Math.Max(slack, MeasureWidth(TextFormatButtons) + 4);
@@ -1520,10 +1680,7 @@ public partial class EditorWindow : Window
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) == "Apply crop")
                     yield return inner;
-        // While the strip is portalled into the 34px sub-row it owns a full-width row of
-        // its own, so nothing in it can overflow the top bar.
-        if (TextStylePanel?.Visibility == Visibility.Visible
-            && !ReferenceEquals(EditorRichTextHost?.Child, TextStylePanel))
+        if (TextStylePanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in TextStylePanel.Children.OfType<FrameworkElement>())
             {
                 if (inner is Popup) continue;
@@ -1536,13 +1693,13 @@ public partial class EditorWindow : Window
         // which is backwards — it kept them and overflowed the choices they qualify. With
         // Arrow armed at a 1400 DIP window that put the ARROWHEAD dropdown into the "..."
         // flyout (measured: slack 344.35, LineStyle 90 + Arrowhead 257.3 = 347.3, so it
-        // lost by 2.95 DIP) while the hand-drawn toggle kept its place. That is Isaiah's
+        // lost by 2.95 DIP) while a qualifier toggle kept its place. That is Isaiah's
         // "I can't change arrow heads": the control was wired and working, just filed away
         // behind an overflow button on the one tool that exists to use it.
         //
         // So: each tool's DEFINING control first, then the shared ones, then the qualifiers
-        // — a hand-drawn toggle and a redaction's strength are refinements of a choice made
-        // elsewhere on the row, and are the right things to lose first.
+        // — a redaction's strength is a refinement of a choice made elsewhere on the row,
+        // and is the right thing to lose first.
         if (ArrowStylePanel is not null) yield return ArrowStylePanel;
         if (RedactStylePanel is not null) yield return RedactStylePanel;
         if (StepModePanel is not null) yield return StepModePanel;
@@ -1551,7 +1708,6 @@ public partial class EditorWindow : Window
         if (LineStylePanel is not null) yield return LineStylePanel;
         if (RedactStrengthPanel is not null) yield return RedactStrengthPanel;
         if (CropToolsPanel is not null) yield return CropToolsPanel;
-        if (StrokePanel is not null) yield return StrokePanel;
         if (CropPanel?.Visibility == Visibility.Visible)
             foreach (FrameworkElement inner in CropPanel.Children.OfType<FrameworkElement>())
                 if (AutomationProperties.GetName(inner) != "Apply crop")
@@ -1704,6 +1860,8 @@ public partial class EditorWindow : Window
         try
         {
             SizeInput.Text = current.ToString(CultureInfo.InvariantCulture);
+            if (SizePillLabel is not null)
+                SizePillLabel.Text = current.ToString(CultureInfo.InvariantCulture) + " pt";
             // label is 'Size' for the counter and the eraser, 'Width' otherwise
             // (AppShell.jsx:2476).
             bool sizeLabel = _tool == EditorTool.Eraser || ChromeTool() is EditorTool.Step;
@@ -1718,8 +1876,9 @@ public partial class EditorWindow : Window
             }
             if (SizePresetsBtn is not null)
             {
-                SizePresetsBtn.ToolTip = $"{label} presets";
-                System.Windows.Automation.AutomationProperties.SetName(SizePresetsBtn, $"{label} presets");
+                SizePresetsBtn.ToolTip = label;
+                System.Windows.Automation.AutomationProperties.SetName(SizePresetsBtn,
+                    $"{label}: {current.ToString(CultureInfo.InvariantCulture)} pt");
             }
             BuildSizePresetRows(current);
         }
@@ -1729,59 +1888,80 @@ public partial class EditorWindow : Window
         }
     }
 
+    /// <summary>
+    /// Survey SizeCard chips (AnnotationSizeControl.jsx): six to a row, each 40 tall with a
+    /// mark over its number. Marks grow by RANK, not value: a line width shows a 22px line of
+    /// weight round((1 + rank * 7) * 2) / 2; a round size (counter, eraser) a dot of
+    /// round(2 + rank * 18). The current pick is accent text; hover is a surface step.
+    /// </summary>
     private void BuildSizePresetRows(int current)
     {
         if (SizePresetList is null) return;
         SizePresetList.Children.Clear();
         int[] presets = ActiveSizePresets();
-        int scaleMin = presets[0], scaleMax = presets[^1];
-        foreach (int preset in presets)
+        bool dot = _tool == EditorTool.Eraser || ChromeTool() is EditorTool.Step;
+        for (int index = 0; index < presets.Length; index++)
         {
-            double thickness = SizePreviewThickness(preset, scaleMin, scaleMax);
-            var bar = new Rectangle
+            int preset = presets[index];
+            double rank = presets.Length > 1 ? index / (double)(presets.Length - 1) : 0;
+            FrameworkElement mark;
+            if (dot)
             {
-                Width = 64,
-                Height = thickness,
-                // CSS border-radius:999px clamps to half the short side — a stadium,
-                // not the ellipse WPF would draw from a literal 999 radius.
-                RadiusX = thickness / 2,
-                RadiusY = thickness / 2,
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(68) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var preview = new Grid { Height = 22 };
-            preview.Children.Add(bar);
-            row.Children.Add(preview);
+                double size = Math.Round(2 + rank * 18);
+                mark = new Ellipse { Width = size, Height = size };
+            }
+            else
+            {
+                double weight = Math.Round((1 + rank * 7) * 2) / 2;
+                mark = new Rectangle { Width = 22, Height = weight, RadiusX = weight / 2, RadiusY = weight / 2 };
+            }
+            mark.HorizontalAlignment = HorizontalAlignment.Center;
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            var face = new Grid { Height = 40 };
+            face.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
+            face.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            face.Margin = new Thickness(0, 3, 0, 4);
+            face.Children.Add(mark);
             var numeral = new TextBlock
             {
                 Text = preset.ToString(CultureInfo.InvariantCulture),
-                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 10.5,
+                FontWeight = FontWeights.Medium,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Bottom,
             };
-            Grid.SetColumn(numeral, 1);
-            row.Children.Add(numeral);
-
-            // Survey builds these rows as plain buttons and paints the active one with two
-            // literal greys. WinShot already has a row style for exactly this menu, and it
-            // carries the accent chip and its cross-fade, so the row is the RadioButton that
-            // style was written for and "active" is IsChecked rather than two hardcoded colours.
-            var button = new RadioButton
+            Grid.SetRow(numeral, 1);
+            face.Children.Add(numeral);
+            var chip = new Button
             {
-                Style = (Style)FindResource("SizePresetRow"),
-                GroupName = "SizePreset",
-                Content = row,
+                Content = face,
                 Tag = (double)preset,
-                IsChecked = preset == current,
+                Margin = new Thickness(1),
+                Cursor = Cursors.Hand,
+                Focusable = true,
+                Template = SizeChipTemplate,
+                Foreground = preset == current
+                    ? (Brush)FindResource("ChromeAccentBrush")
+                    : (Brush)FindResource("TextSecondaryBrush"),
             };
-            // The bar is `background: currentColor`, so it tracks the row foreground.
-            bar.SetBinding(Shape.FillProperty,
-                new Binding(nameof(Control.Foreground)) { Source = button });
-            button.Click += OnSizePresetClick;
-            SizePresetList.Children.Add(button);
+            System.Windows.Automation.AutomationProperties.SetName(chip, $"{preset} pt");
+            ((Shape)mark).SetBinding(Shape.FillProperty, new Binding(nameof(Control.Foreground)) { Source = chip });
+            numeral.SetBinding(TextBlock.ForegroundProperty, new Binding(nameof(Control.Foreground)) { Source = chip });
+            chip.Click += OnSizePresetClick;
+            SizePresetList.Children.Add(chip);
         }
     }
+
+    private static readonly ControlTemplate SizeChipTemplate = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
+        "<ControlTemplate TargetType='Button' xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+        "<Border x:Name='Bg' Background='Transparent' CornerRadius='6' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>" +
+        "<ContentPresenter/></Border>" +
+        "<ControlTemplate.Triggers>" +
+        "<Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Bg' Property='Background' Value='#1FFFFFFF'/></Trigger>" +
+        "<Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Bg' Property='Background' Value='#1FFFFFFF'/></Trigger>" +
+        "<Trigger Property='IsPressed' Value='True'><Setter TargetName='Bg' Property='RenderTransformOrigin' Value='0.5,0.5'/>" +
+        "<Setter TargetName='Bg' Property='RenderTransform'><Setter.Value><ScaleTransform ScaleX='0.94' ScaleY='0.94'/></Setter.Value></Setter></Trigger>" +
+        "</ControlTemplate.Triggers></ControlTemplate>");
 
     /// <summary>
     /// utils/annotationSize.js getAnnotationSizePreviewThickness: square-root scaling
@@ -1811,8 +1991,24 @@ public partial class EditorWindow : Window
 
     private void OnSizeInputKey(object sender, KeyEventArgs e)
     {
-        // Enter blurs, which commits (AnnotationSizeControl.jsx:118).
-        if (e.Key == Key.Enter) { CommitSizeInput(); Viewport.Focus(); e.Handled = true; }
+        // Enter commits and closes the card (AnnotationSizeControl.jsx:118).
+        if (e.Key == Key.Enter)
+        {
+            CommitSizeInput();
+            if (SizePresetsBtn is not null) SizePresetsBtn.IsChecked = false;
+            Viewport.Focus();
+            e.Handled = true;
+            return;
+        }
+        // SizeCard: Up / Down step the number by 1 and apply it at once.
+        if (e.Key is Key.Up or Key.Down && SizeInput is not null)
+        {
+            double typed = double.TryParse(SizeInput.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out double v)
+                ? v : ActiveSize();
+            ApplySize(typed + (e.Key == Key.Up ? 1 : -1));
+            SizeInput.SelectAll();
+            e.Handled = true;
+        }
     }
 
     private void OnSizeInputBlur(object sender, KeyboardFocusChangedEventArgs e) => CommitSizeInput();
@@ -1852,7 +2048,7 @@ public partial class EditorWindow : Window
         double dip = 1;
         try { dip = VisualTreeHelper.GetDpi(box).PixelsPerDip; }
         catch (InvalidOperationException) { /* not in a visual tree yet */ }
-        // SurveyDropdown renders its trigger in Arial SemiBold 12; measuring in the UI
+        // SurveyDropdown renders its trigger in Arial SemiBold 11 (Survey .chrome-pill); measuring in the UI
         // font would under-size the combo and clip the label.
         var typeface = new Typeface(new FontFamily("Arial"), FontStyles.Normal,
             FontWeights.SemiBold, FontStretches.Normal);
@@ -1862,14 +2058,14 @@ public partial class EditorWindow : Window
             if (string.IsNullOrEmpty(text)) return;
             var ft = new FormattedText(
                 text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                typeface, 12, Brushes.White, dip);
+                typeface, 11, Brushes.White, dip);
             if (ft.Width > max) max = ft.Width;
         }
         foreach (string s in extra) Consider(s);
         foreach (object item in box.Items)
             Consider(item is ComboBoxItem cbi ? cbi.Content?.ToString() : item?.ToString());
-        // SurveyDropdown ContentSite margin is 9 left + 29 for the chevron column.
-        double width = Math.Ceiling(max) + 38;
+        // Survey .chrome-pill: 8 px inset, then the label, then 6 + 9 + 6 for the chevron.
+        double width = Math.Ceiling(max) + 29;
         // AnnotationDropdown.css:9 min-width: 72px.
         if (width < 72) width = 72;
         box.MinWidth = width;
@@ -1880,18 +2076,21 @@ public partial class EditorWindow : Window
     {
         // SizeField is a fixed-width composite (43px input + 24px chevron), so it
         // never needs measuring.
-        FitComboToLongestItem(ArrowStyleBox);
-        FitComboToLongestItem(LineStyleBox);
+        // The arrowhead (90) and line style (92) pills are Survey's fixed
+        // --chrome-field-w-arrowhead / --chrome-field-w-style; their cards match.
+        if (ArrowStyleBox is not null) { ArrowStyleBox.MinWidth = 90; ArrowStyleBox.Width = 90; }
+        if (LineStyleBox is not null) { LineStyleBox.MinWidth = 92; LineStyleBox.Width = 92; }
         FitComboToLongestItem(FontFamilyBox);
         FitComboToLongestItem(FontSizeBox);
         FitComboToLongestItem(AlignBox);
         FitComboToLongestItem(VerticalAlignBox);
         FitComboToLongestItem(CropRatioBox);
-        FitComboToLongestItem(StepModeBox);
 
     }
 
-    private double ActiveSize() => ChromeTool() switch
+    private double ActiveSize() => SizeForTool(ChromeTool());
+
+    private double SizeForTool(EditorTool tool) => tool switch
     {
         // Survey has no highlighter width of its own: the Width box shows the shared
         // strokeWidth (default 3) and the highlighter draws at max(that, 8).
@@ -2005,6 +2204,7 @@ public partial class EditorWindow : Window
     private void SyncColorWellIndicator()
     {
         if (CurrentColorIndicator is null) return;
+        SyncSurveyRow();
         EditorTool chrome = ChromeTool();
         bool fillTabs = EditorShellContract.ContextFor(chrome, ChromeFilledRectangle())
             .HasFlag(EditorContextControls.FillStrokeTabs);
@@ -2368,7 +2568,8 @@ public partial class EditorWindow : Window
         // The bump is per-annotation, so stamp it on the selection before the restyle
         // rebuilds their geometry from it.
         foreach (UIElement el in SelectionList())
-            if (el is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeRectangle } m })
+            if (el is FrameworkElement { Tag: AnnotationData m }
+                && AnnotationStyle.LineStyleFrom(m) == LineBorderStyle.Cloud)
                 m.CloudIntensity = _cloudIntensity;
         RestyleSelectedLineStyle(_lineStyle);
     }
@@ -2437,23 +2638,6 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// The caret both arms the eraser and toggles its mode popup, exactly as Survey's
-    /// in-button split trigger does (PDFViewer.jsx:32107-32120).
-    /// </summary>
-    private void OnEraserCaretClick(object sender, RoutedEventArgs e)
-    {
-        if (EraserToolBtn is not null) EraserToolBtn.IsChecked = true;
-        if (EraserModePopup is not null) EraserModePopup.IsOpen = !EraserModePopup.IsOpen;
-    }
-
-    private void OnEraserModeRowClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button b || b.Tag is not string tag) return;
-        if (EraserModePopup is not null) EraserModePopup.IsOpen = false;
-        SetEraserPartial(tag != "Full");
-    }
-
-    /// <summary>
     /// Survey's eraser mode is persisted ('eraserMode' in localStorage, default 'partial')
     /// and the eraser TOOL's tooltip / accessible name is the CURRENT MODE rather than a
     /// static "Eraser" (PDFViewer.jsx:4274-4281, :32080-32097).
@@ -2461,19 +2645,16 @@ public partial class EditorWindow : Window
     private void SetEraserPartial(bool partial)
     {
         _eraserPartial = partial;
-        // The selected row keeps Survey's #1f2430 wash (PDFViewer.jsx:32170).
-        var selectedRow = new SolidColorBrush(Color.FromRgb(0x1F, 0x24, 0x30));
-        if (EraserPartialItem is not null)
-            EraserPartialItem.Background = partial ? selectedRow : Brushes.Transparent;
-        if (EraserFullItem is not null)
-            EraserFullItem.Background = partial ? Brushes.Transparent : selectedRow;
+        SyncSurveyRow();
 
         // Survey never shows a static "Eraser": the chip IS the mode (PDFViewer.jsx:32080-32082).
-        string label = partial ? "Partial erase" : "Full stroke erase";
+        // Survey PASS 7 (2026-09-22 review): the tool is called "Eraser" whatever kind is live —
+        // the Partial / Whole toggle in row 2 shows the kind, and two controls must not answer
+        // to one name.
         if (EraserToolBtn is not null)
         {
-            EraserToolBtn.ToolTip = label;
-            System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, label);
+            EraserToolBtn.ToolTip = ToolTipWithKey("Eraser", "E");
+            System.Windows.Automation.AutomationProperties.SetName(EraserToolBtn, "Eraser");
         }
         // The combo's XAML SelectedIndex fires this before the ctor has assigned _settings.
         if (_settings is not null && _settings.Current.EraserPartial != partial)
@@ -2525,6 +2706,29 @@ public partial class EditorWindow : Window
     private const double DefaultWidthDip = 1167;
     private const double DefaultHeightDip = 590;
 
+    /// <summary>
+    /// Everything around the viewport at the default size, in DIP: the 48 DIP rail plus the
+    /// frame across, and the title bar, both toolbar rows and the bottom bar down. Read off
+    /// the installed build at 125 %: a 1167x590 window holds a 1105x422 viewport.
+    /// </summary>
+    private const double ChromeWidthDip = DefaultWidthDip - 1105;
+    private const double ChromeHeightDip = DefaultHeightDip - 422;
+
+    /// <summary>
+    /// The landing size: the capture's own footprint (see
+    /// <see cref="EditorGrowLayout.DesiredForCapture"/>), but never narrower than the default,
+    /// because the one-row toolbar needs that width (EditorShellContract). The height has no
+    /// such need, so a short capture gets a short window down to MinHeight and fills it.
+    /// </summary>
+    private Size DesiredWindowDip()
+    {
+        Size want = EditorGrowLayout.DesiredForCapture(
+            _sourceWidth, _sourceHeight,
+            new Size(FitPadX * 2, FitGap * 2),
+            new Size(ChromeWidthDip, ChromeHeightDip));
+        return new Size(Math.Max(DefaultWidthDip, want.Width), want.Height);
+    }
+
     private SD.Rectangle? _origin;
     private IDisposable? _growMotion;
 
@@ -2563,11 +2767,14 @@ public partial class EditorWindow : Window
     /// </summary>
     private void BeginGrowFromOrigin()
     {
-        if (_origin is not SD.Rectangle origin) return;
-        _origin = null;
-
         IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
+        if (_origin is not SD.Rectangle origin)
+        {
+            PlaceOnPointerMonitor(hwnd);
+            return;
+        }
+        _origin = null;
 
         double scale = RecordingMonitorDpi.ScaleFor(origin);
         SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
@@ -2583,7 +2790,7 @@ public partial class EditorWindow : Window
         // the restored minimum then yanks the window up to the larger one on the next
         // layout pass, which is exactly the size snap the motion rule forbids.
         SD.Rectangle to = EditorGrowLayout.Target(
-            work, new Size(DefaultWidthDip, DefaultHeightDip), scale, new Size(minWidth, minHeight));
+            work, DesiredWindowDip(), scale, new Size(minWidth, minHeight));
         SD.Rectangle from = EditorGrowLayout.Origin(origin);
 
         // Restored to at most where the window actually landed, so a work area smaller than
@@ -2619,6 +2826,22 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
+    /// No origin (History, the tray, the CLI): open centred on the monitor the pointer is on,
+    /// at the same landing size the grow would use there, which is where the user is working.
+    /// </summary>
+    private void PlaceOnPointerMonitor(IntPtr hwnd)
+    {
+        if (WindowStartupLocation == WindowStartupLocation.Manual) return; // caller placed it
+        var screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
+        SD.Rectangle work = screen.WorkingArea;
+        double scale = RecordingMonitorDpi.ScaleFor(work);
+        SD.Rectangle to = EditorGrowLayout.Target(work, DesiredWindowDip(), scale, new Size(MinWidth, MinHeight));
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        PlaceWindow(hwnd, to);
+        ClampMinimumsTo(to.Width / scale, to.Height / scale);
+    }
+
+    /// <summary>
     /// One frame of the grow. Left/Top/Width/Height are DIPs in whichever monitor's scale
     /// the window currently believes it is on, which is exactly what breaks when it moves
     /// between monitors mid-tween; SetWindowPos takes the physical rect and means it.
@@ -2645,7 +2868,6 @@ public partial class EditorWindow : Window
     {
         (ColorPickerPopup, ColorWellBtn),
         (SizePresetsPopup, SizePresetsBtn),
-        (EraserModePopup, EraserToolBtn),
         (AlignPopup, AlignMenuBtn),
         (FontColorPopup, FontColorBtn),
         (FitMenuPopup, FitMenuBtn),

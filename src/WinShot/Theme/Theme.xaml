@@ -267,7 +267,7 @@
     <!-- Glyph size inside a `.btn-icon` toggle (Pan, Select, the fill radios), read off
          live Survey: its Pan mask span is 20x20 in the same 28x28 box. Select overrides
          this to 22 at its use site, which is Survey's number for that one glyph. -->
-    <sys:Double x:Key="SurveyIconToggleGlyph">20</sys:Double>
+    <sys:Double x:Key="SurveyIconToggleGlyph">16</sys:Double>
     <sys:Double x:Key="CategoryRowHeight">34</sys:Double>
     <sys:Double x:Key="CircleActionSize">34</sys:Double>
     <sys:Double x:Key="CircleGlyphSize">17</sys:Double>
@@ -611,9 +611,38 @@
         <Setter Property="Margin" Value="2,0"/>
     </Style>
 
+    <!-- ====================================================================
+         FOCUS RING — the one keyboard focus affordance.
+
+         Eight styles had none at all: the checkbox, both sliders, the disclosure
+         row, the strip tab, the strip tool chip, the size-preset row and the menu
+         row. What they fell back on is WPF's default focus visual, which is a
+         dotted BLACK rectangle — on a #1C1C1E window that is nothing at all, so a
+         keyboard user tabbing through Settings could not see where they were.
+
+         A FocusVisualStyle rather than a ring inside each template, because it
+         only draws when focus arrived from the KEYBOARD, which is the whole point
+         of a focus ring, and because it is one line per style instead of surgery
+         on eight templates. Info blue, not Accent: the accent is a selection, and
+         a focus ring landing on an already-selected accent chip would vanish.
+         ==================================================================== -->
+    <Style x:Key="FocusRing">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="-2" StrokeThickness="2" RadiusX="8" RadiusY="8"
+                               Stroke="{StaticResource InfoBrush}" SnapsToDevicePixels="True"
+                               IsHitTestVisible="False"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- A plain (non-toggle) round icon button variant for one-shot actions
          that live in the toolbar (e.g. undo/redo/rotate). Same look at rest. -->
     <Style x:Key="ToolIconButton" TargetType="Button">
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Width"  Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Height" Value="{StaticResource ToolButtonSize}"/>
         <Setter Property="Margin" Value="3,0"/>
@@ -658,32 +687,6 @@
         </Setter>
     </Style>
 
-    <!-- ====================================================================
-         FOCUS RING — the one keyboard focus affordance.
-
-         Eight styles had none at all: the checkbox, both sliders, the disclosure
-         row, the strip tab, the strip tool chip, the size-preset row and the menu
-         row. What they fell back on is WPF's default focus visual, which is a
-         dotted BLACK rectangle — on a #1C1C1E window that is nothing at all, so a
-         keyboard user tabbing through Settings could not see where they were.
-
-         A FocusVisualStyle rather than a ring inside each template, because it
-         only draws when focus arrived from the KEYBOARD, which is the whole point
-         of a focus ring, and because it is one line per style instead of surgery
-         on eight templates. Info blue, not Accent: the accent is a selection, and
-         a focus ring landing on an already-selected accent chip would vanish.
-         ==================================================================== -->
-    <Style x:Key="FocusRing">
-        <Setter Property="Control.Template">
-            <Setter.Value>
-                <ControlTemplate>
-                    <Rectangle Margin="-2" StrokeThickness="2" RadiusX="8" RadiusY="8"
-                               Stroke="{StaticResource InfoBrush}" SnapsToDevicePixels="True"
-                               IsHitTestVisible="False"/>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
 
     <!-- ====================================================================
          POPOVER CARD — the card inside EVERY floating layer: the seven editor
@@ -906,6 +909,7 @@
          PILL BUTTON — SECONDARY (gray). Neutral action ("Save as…", Cancel).
          ==================================================================== -->
     <Style x:Key="PillButtonSecondary" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Height" Value="{StaticResource PillHeight}"/>
         <Setter Property="MinWidth" Value="64"/>
         <Setter Property="Padding" Value="14,0"/>
@@ -1756,6 +1760,7 @@
     </Style>
 
     <Style x:Key="ColorSwatch" TargetType="RadioButton">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="24"/>
         <Setter Property="Height" Value="24"/>
         <Setter Property="Margin" Value="2"/>
@@ -2004,6 +2009,8 @@
 
     <!-- `.btn.btn-default.btn-sm`: min-height 26, inline padding 8x4. Undo/redo. -->
     <Style x:Key="SurveyDefaultButton" TargetType="Button">
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Height" Value="26"/>
         <Setter Property="MinWidth" Value="30"/>
         <Setter Property="Padding" Value="8,4"/>
@@ -2020,6 +2027,8 @@
 
     <!-- `.btn.btn-icon`: a 28x28 square with no padding. Crop / rotate / more. -->
     <Style x:Key="CompactToolIconButton" TargetType="Button" BasedOn="{StaticResource SurveyDefaultButton}">
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="MinWidth" Value="0"/>
@@ -2034,6 +2043,8 @@
          (28 tall, 6px radius, 12x6 padding) instead of the 30px pill.
          ==================================================================== -->
     <Style x:Key="SurveyPrimaryButton" TargetType="Button">
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <!-- Vertical padding is zero: the presenter centres the label, and 6+6 inside a
              28 px button left 14 px for 13 px type, which clipped the descender and read
              as a tiny word in a big pill. Height is the pill token every other primary uses. -->
@@ -2113,6 +2124,8 @@
          ContentPresenter, so a text glyph and a vector glyph now agree on what
          "how big" means instead of disagreeing silently. -->
     <Style x:Key="SurveyIconToggle" TargetType="ToggleButton">
+        <!-- The template draws its own FocusRing; no second ring on top. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="3,0"/>
@@ -2194,13 +2207,13 @@
     </Style>
 
     <!-- ====================================================================
-         STRIP TOOL BUTTON — the category sub-row's button: 40x32 (5px padding +
-         20px icon + 1px border per side), 6px radius. Checked = neutral chip.
+         STRIP TOOL BUTTON — the category sub-row's button: Survey's 28x28 chrome-subcontrol
+         with a 16px glyph, 6px radius. Checked = neutral chip.
          ==================================================================== -->
     <Style x:Key="StripToolButton" TargetType="ToggleButton">
         <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-        <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="32"/>
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="0"/>
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -2220,8 +2233,8 @@
                                     Background="{StaticResource HoverFillBrush}"/>
                             <Border x:Name="Press" Opacity="0" CornerRadius="5"
                                     Background="{StaticResource PressedShadeBrush}"/>
-                            <!-- Survey's sub-row glyphs are 20px; the shared resources are 18. -->
-                            <Viewbox Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <!-- Survey PASS 7: chrome-sub-control 28x28 holding the 16px chrome glyph. -->
+                            <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
                             </Viewbox>
                         </Grid>
@@ -2252,7 +2265,7 @@
     </Style>
 
     <!-- StripToolButton's material on a row that carries WORDS as well as a glyph.
-         Same chip, same washes, same radius — only the fixed 40x32 box and the 20x20
+         Same chip, same washes, same radius — only the fixed 28x28 box and the 16x16
          Viewbox are gone, because a Viewbox sized for one glyph scales a whole
          sentence down to fit it. -->
     <Style x:Key="StripToolRow" TargetType="ToggleButton" BasedOn="{StaticResource StripToolButton}">
@@ -2482,6 +2495,7 @@
     <!-- One cell of the 3x3 align grid: 26x26, 4px gap, 4px radius, recessed
          fill on a hairline. -->
     <Style x:Key="AlignCellButton" TargetType="Button" BasedOn="{StaticResource CompactFormatButton}">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="26"/>
         <Setter Property="Height" Value="26"/>
         <Setter Property="Margin" Value="2"/>
@@ -2504,6 +2518,7 @@
          and the same shared cross-fade storyboards as every other button in this file,
          so nothing here snaps either. -->
     <Style x:Key="RailButton" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="28"/>
         <Setter Property="Height" Value="28"/>
         <Setter Property="Margin" Value="0,2"/>
@@ -2559,6 +2574,7 @@
          with the page's three rules lost underneath a chevron. Alignment inside the content
          only means anything once the content has the cell's full width to align within. -->
     <Style x:Key="RailFitButton" TargetType="Button" BasedOn="{StaticResource RailButton}">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Width" Value="36"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -2651,7 +2667,7 @@
          ==================================================================== -->
     <ControlTemplate x:Key="SurveyDropdownToggleTemplate" TargetType="ToggleButton">
         <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
-                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="5">
+                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -2660,16 +2676,16 @@
                 <!-- Wave 0: hover and open both raise the cell to Elevated, so each gets
                      its own layer inside Bg's 1px border — where Bg's own fill already
                      stops — and cross-fades in. Chip under Hover, per the house order. -->
-                <Border x:Name="Chip" Grid.ColumnSpan="2" Opacity="0" CornerRadius="4"
+                <Border x:Name="Chip" Grid.ColumnSpan="2" Opacity="0" CornerRadius="9"
                         Background="{StaticResource ElevatedBrush}" IsHitTestVisible="False"/>
-                <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" CornerRadius="4"
+                <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" CornerRadius="9"
                         Background="{StaticResource ElevatedBrush}" IsHitTestVisible="False"/>
                 <!-- The chevron pins its own colour in Survey, so it does NOT brighten
                      with the label on hover. -->
-                <Path x:Name="Caret" Grid.Column="1" Margin="8,0,7,0"
+                <Path x:Name="Caret" Grid.Column="1" Margin="6,0,6,0"
                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Data="M0,0 L4,4 L8,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
-                      StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Data="M0,0 L3.5,3.5 L7,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
+                      StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       StrokeLineJoin="Round" Fill="Transparent"/>
             </Grid>
         </Border>
@@ -2685,32 +2701,29 @@
         </ControlTemplate.Triggers>
     </ControlTemplate>
 
+    <!-- Survey AnnotationDropdown.css: one 26px row, 0 6px padding, 6px radius, 600 11px.
+         The current row is accent text and nothing else; hover is a surface step. -->
     <Style x:Key="SurveyDropdownItem" TargetType="ComboBoxItem">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="MinHeight" Value="34"/>
-        <Setter Property="Padding" Value="9,4"/>
-        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="Bg" Background="Transparent" CornerRadius="4"
+                    <Border x:Name="Bg" Background="Transparent" CornerRadius="6"
                             Padding="{TemplateBinding Padding}" MinHeight="{TemplateBinding MinHeight}">
                         <ContentPresenter VerticalAlignment="Center"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <!-- The selected row persists under the hover wash, so IsSelected
-                             comes first and IsHighlighted overrides it. AccentDeep on the
-                             highlight, matching DarkComboBoxItem: white on plain Accent is
-                             only 3.65:1. -->
-                        <Trigger Property="IsSelected" Value="True">
+                        <Trigger Property="IsHighlighted" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="{StaticResource HoverFillBrush}"/>
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
-                        <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentDeepBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource ChromeAccentBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -2718,8 +2731,12 @@
         </Setter>
     </Style>
 
+    <!-- Survey .chrome-pill (styles.css): a 20px pill with a 10px radius, the value left-aligned
+         after an 8px inset, a 9px chevron 6px from the right, 600 11px. Its menu is the plain
+         list every chrome menu is: no heading, 5px padding, at least as wide as the pill. -->
     <Style x:Key="SurveyDropdown" TargetType="ComboBox">
-        <Setter Property="Height" Value="24"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <Setter Property="Height" Value="20"/>
         <Setter Property="MinWidth" Value="72"/>
         <!-- Three levels, and they have to stay three: the chevron below the resting label,
              the resting label below the open one. Survey's are #9da6b4 / #e8e2d4 / #fff;
@@ -2727,7 +2744,7 @@
              palette's own steps. A label that started at the top would have nothing to
              brighten to. -->
         <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
-        <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
@@ -2742,14 +2759,14 @@
                         <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
                                           Content="{TemplateBinding SelectionBoxItem}"
                                           ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                          Margin="9,0,29,0"
+                                          Margin="8,0,21,0"
                                           VerticalAlignment="Center" HorizontalAlignment="Left"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                         <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="6"
                                IsOpen="{TemplateBinding IsDropDownOpen}"
                                AllowsTransparency="True" Focusable="False">
                             <Border x:Name="Pop" Style="{StaticResource PopoverCard}"
-                                    MinWidth="126" Padding="5" Margin="0,0,36,36">
+                                    MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Padding="5" Margin="0,0,36,36">
                                 <Border.RenderTransform>
                                     <TransformGroup>
                                         <ScaleTransform x:Name="PopScale" ScaleX="0.98" ScaleY="0.98"/>
@@ -2757,12 +2774,12 @@
                                     </TransformGroup>
                                 </Border.RenderTransform>
                                 <StackPanel>
-                                    <TextBlock x:Name="Heading" Padding="7,7,9,8"
+                                    <TextBlock x:Name="Heading" Padding="7,7,9,8" Visibility="Collapsed"
                                                FontSize="{StaticResource TextCaption}" FontWeight="Bold"
                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
-                                    <Border x:Name="HeadingRule" Height="1" Background="{StaticResource BorderBrush}"/>
-                                    <ScrollViewer MaxHeight="280" Margin="0,4,0,0">
+                                    <Border x:Name="HeadingRule" Height="1" Background="{StaticResource BorderBrush}" Visibility="Collapsed"/>
+                                    <ScrollViewer MaxHeight="520">
                                         <ItemsPresenter/>
                                     </ScrollViewer>
                                 </StackPanel>
@@ -2806,6 +2823,56 @@
                         </Trigger>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
                             <Setter TargetName="Toggle" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Survey .chrome-pill as a ToggleButton (the Width / Size pill): 20 tall, 10px radius,
+         control fill, the value left-aligned after an 8px inset, a 9px chevron 6px from the right,
+         600 11px tabular. Hover is a surface step; open keeps the label lit. -->
+    <Style x:Key="ChromePillToggle" TargetType="ToggleButton">
+        <Setter Property="Foreground" Value="{StaticResource ChromeTextMutedBrush}"/>
+        <Setter Property="FontSize" Value="{StaticResource TextCaption}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10"
+                            Padding="8,0,6,0" SnapsToDevicePixels="True">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- Hover wash under the content, faded by HoverIn/HoverOut like
+                                 every other chrome template, never a snapped Background. -->
+                            <Border x:Name="Hover" Grid.ColumnSpan="2" Opacity="0" Margin="-8,0,-6,0"
+                                    CornerRadius="10" Background="{StaticResource ElevatedBrush}"/>
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Left"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            <Path Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center"
+                                  Data="M0,0 L3.5,3.5 L7,0" Stroke="{StaticResource ChromeTextDisabledBrush}"
+                                  StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                            <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>

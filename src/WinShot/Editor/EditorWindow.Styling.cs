@@ -219,8 +219,7 @@ public partial class EditorWindow : Window
                     var rebuilt = AnnotationFactory.CreatePolyShape(
                         run, closed, snap.StrokeColor, polyFill, snap.Thickness,
                         AnnotationStyle.LineStyleFrom(snap.Meta),
-                        snap.Meta.CloudIntensity ?? _cloudIntensity,
-                        StrokeStyles.ParseRender(snap.Meta.Sketch), snap.Meta.Seed ?? 0);
+                        snap.Meta.CloudIntensity ?? _cloudIntensity);
                     poly.Data = rebuilt.Data;
                     poly.Stroke = stroke;
                     poly.StrokeThickness = snap.Thickness;
@@ -263,7 +262,7 @@ public partial class EditorWindow : Window
                     callout.Apply(layout, snap.Meta.Text ?? callout.Text, snap.StrokeColor, snap.FillColor,
                         snap.Thickness, head, AnnotationStyle.LineStyleFrom(snap.Meta),
                         snap.Meta.FontSize ?? CalloutLayout.DefaultFontSize, snap.Meta.FontFamily,
-                        CalloutFontColor(snap.Meta));
+                        CalloutFontColor(snap.Meta), snap.Meta.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
                     ApplyTextFormat(callout, snap.Meta);
                 }
                 break;
@@ -290,6 +289,9 @@ public partial class EditorWindow : Window
                                     : AnnotationStyle.LineStyleFrom(snap.Meta));
                         }
                     }
+                    AnnotationFactory.SyncTextCloud(textBox,
+                        AnnotationStyle.LineStyleFrom(snap.Meta) == LineBorderStyle.Cloud,
+                        snap.Meta.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
                 }
                 break;
             case AnnotationData.TypeStep:
@@ -358,7 +360,8 @@ public partial class EditorWindow : Window
     private IReadOnlyList<UIElement> RestyleTargets()
     {
         var selected = SelectionList();
-        if (selected.Count > 0) return selected;
+        // A locked mark keeps its style until it is unlocked.
+        if (selected.Count > 0) return selected.Where(el => !IsLocked(el)).ToArray();
         return EditTarget() is { } editing ? new[] { editing } : Array.Empty<UIElement>();
     }
 
@@ -577,7 +580,7 @@ public partial class EditorWindow : Window
             a.Italic == true, a.Underline == true, a.Strike == true,
             AnnotationFactory.ParseAlign(a.Align), a.VerticalAlign,
             boxW, boxH, fill, a.Thickness ?? 0, AnnotationStyle.LineStyleFrom(a),
-            new SolidColorBrush(stroke));
+            new SolidColorBrush(stroke), a.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
         label.Tag = a;
         return label;
     }
@@ -626,7 +629,7 @@ public partial class EditorWindow : Window
         callout.Apply(layout, liveText ?? meta.Text ?? callout.Text, stroke,
             AnnotationStyle.FillColorFrom(meta, stroke), meta.Thickness ?? 2, head,
             AnnotationStyle.LineStyleFrom(meta), meta.FontSize ?? CalloutLayout.DefaultFontSize,
-            meta.FontFamily, CalloutFontColor(meta));
+            meta.FontFamily, CalloutFontColor(meta), meta.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
         ApplyTextFormat(callout, meta);
     }
 
@@ -683,14 +686,6 @@ public partial class EditorWindow : Window
             _stepLetters = string.Equals(tag, "Letter", StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// "Reset" puts the ACTIVE count back to 1. It used to set a free-floating _nextStep, which
-    /// a series-numbered counter has no room for: a pin's number is derived from where it sits
-    /// in its series, so the only thing left to reset is where that series starts. To begin a
-    /// genuinely separate run from 1, "+ New Count" in the series picker is the control.
-    /// </summary>
-    private void OnResetStepCounter(object sender, RoutedEventArgs e) =>
-        SetCounterSeriesStart(CounterSeries.DefaultStart);
 
     private void OnTextStyleChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -717,14 +712,6 @@ public partial class EditorWindow : Window
         if (sender is not ComboBox cb || cb.SelectedItem is not ComboBoxItem item ||
             item.Tag is not string tag)
             return;
-        if (string.Equals(tag, nameof(ArrowStyle.Curved), StringComparison.Ordinal))
-        {
-            // Curved is not a head at all: it is the other arrow TOOL, which is why it has
-            // no button of its own — picking it here is how you reach it.
-            _arrowStyle = ArrowStyle.Curved;
-            CheckToolButton(EditorTool.CurvedArrow);
-            return;
-        }
         if (Enum.TryParse(tag, out ArrowStyle legacy))
         {
             _arrowStyle = legacy;
@@ -733,6 +720,12 @@ public partial class EditorWindow : Window
         else
         {
             _arrowhead = AnnotationStyle.ParseArrowhead(tag, out _);
+            // Survey AppShell.jsx:4443-4445: picking None takes the heads off both ends.
+            if (_arrowhead == ArrowheadStyle.None && _arrowBothEnds)
+            {
+                _arrowBothEnds = false;
+                if (ArrowBothEndsBtn is not null) ArrowBothEndsBtn.IsChecked = false;
+            }
             // Survey: with "Both ends" on, a newly picked ending goes on the START as well
             // (PDFViewer.jsx:8158). With it off only the end changes.
             _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
@@ -751,12 +744,22 @@ public partial class EditorWindow : Window
     {
         if (_syncingContext) return;
         _arrowBothEnds = sender is ToggleButton { IsChecked: true };
+        // Survey AppShell.jsx:4408-4412: coming back from no head, the line needs a head
+        // before "both ends" can mean anything, so it gets the default filled head.
+        if (_arrowBothEnds && _arrowhead == ArrowheadStyle.None)
+        {
+            _arrowhead = ArrowheadStyle.SolidTriangle;
+            _syncingContext = true;
+            try { SelectComboByTag(ArrowStyleBox, ArrowTag(_arrowhead)); }
+            finally { _syncingContext = false; }
+        }
         _startArrowhead = AnnotationStyle.StartHeadFor(_arrowBothEnds, _arrowhead);
         if (IsLoaded) RestyleSelectedArrowhead();
     }
 
     private void RestyleSelectedArrowhead()
     {
+        if (SelectedIsLocked) return;
         if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
             meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCallout))
         {
@@ -795,6 +798,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void CycleSelectedArrowStyle()
     {
+        if (SelectedIsLocked) return;
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta ||
             meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeCurvedArrow))
             return;
@@ -818,6 +822,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private void RestyleSelectedArrow(ArrowStyle style)
     {
+        if (SelectedIsLocked) return;
         if (_selected is not Path arrow || arrow.Tag is not AnnotationData meta ||
             meta.Type != AnnotationData.TypeArrow)
             return;
@@ -843,21 +848,18 @@ public partial class EditorWindow : Window
             Point from = new(pts[0][0], pts[0][1]);
             Point to = new(pts[^1][0], pts[^1][1]);
             double thickness = meta.Thickness ?? arrow.StrokeThickness;
-            var render = StrokeStyles.ParseRender(meta.Sketch);
-            int seed = meta.Seed ?? 0;
             var whole = AnnotationFactory.ParseArrowStyle(meta.Style);
             if (whole == ArrowStyle.Fancy)
             {
                 // A filled silhouette, so it carries no stroke: a stroked one rounds the tail.
-                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, ArrowStyle.Fancy, render, seed);
+                arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, ArrowStyle.Fancy);
                 arrow.StrokeThickness = 0;
             }
             else
             {
                 var (end, start) = AnnotationStyle.HeadsFrom(meta);
                 arrow.Data = AnnotationFactory.ArrowGeometry(from, to, thickness, end, start,
-                    thin: whole == ArrowStyle.Thin, mid: LineCurve.ParseMid(meta.Mid),
-                    render: render, seed: seed);
+                    thin: whole == ArrowStyle.Thin, mid: LineCurve.ParseMid(meta.Mid));
                 arrow.StrokeThickness = thickness;
             }
         }
@@ -887,7 +889,7 @@ public partial class EditorWindow : Window
 
         // Apply live to the selection without pushing undo, capturing a one-time "before" for
         // the whole gesture so the eventual commit is a single reversible step.
-        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta && CanSetOpacity(_selected))
+        if (!SelectedIsLocked && _selected is FrameworkElement fe && fe.Tag is AnnotationData meta && CanSetOpacity(_selected))
         {
             if (_opacityBefore is null || !ReferenceEquals(_opacityElement, _selected))
             {
@@ -1050,7 +1052,7 @@ public partial class EditorWindow : Window
         if (!IsLoaded || _syncingContext) return;
         _magnification = value;
 
-        if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
+        if (!SelectedIsLocked && _selected is FrameworkElement fe && fe.Tag is AnnotationData meta &&
             meta.Type == AnnotationData.TypeMagnifier)
         {
             if (_magnifyBefore is null || !ReferenceEquals(_magnifyElement, _selected))
@@ -1106,82 +1108,6 @@ public partial class EditorWindow : Window
             MagnifySlider.Value = value;
             MagnifyValueLabel.Text = string.Create(CultureInfo.InvariantCulture, $"{value:0.#}x");
         }
-        finally { _syncingContext = wasSyncing; }
-    }
-
-    /// <summary>
-    /// The hand-drawn line quality. Orthogonal to Survey's LINE STYLE dropdown: a sketchy
-    /// outline can still be dashed, so the two controls sit side by side rather than one
-    /// menu trying to spell both.
-    /// </summary>
-    private void OnSketchClick(object sender, RoutedEventArgs e)
-    {
-        if (_syncingContext) return;
-        _strokeRender = SketchCheck.IsChecked == true ? StrokeRender.Sketchy : StrokeRender.Clean;
-        RestyleSelectedSketch(_strokeRender);
-    }
-
-    /// <summary>
-    /// Repaints the selected outline in the chosen line quality, as one undo entry. The
-    /// mark is rebuilt rather than mutated because the wobble lives in the GEOMETRY: a
-    /// ruled rectangle is a <c>Rectangle</c> and a sketched one is a <c>Path</c>, and the
-    /// two cannot be turned into each other in place. Same swap-and-push shape as
-    /// <see cref="RestyleSelectedLineStyle"/>.
-    /// </summary>
-    private void RestyleSelectedSketch(StrokeRender render)
-    {
-        if (RestyleTargets().FirstOrDefault() is not FrameworkElement fe ||
-            fe.Tag is not AnnotationData meta) return;
-        if (meta.Type is not (AnnotationData.TypeLine or AnnotationData.TypeArrow
-            or AnnotationData.TypeCurvedArrow or AnnotationData.TypeRectangle
-            or AnnotationData.TypeEllipse
-            or AnnotationData.TypePolygon or AnnotationData.TypePolyline))
-            return;
-
-        var before = meta.Clone();
-        var after = meta.Clone();
-        after.Sketch = render == StrokeRender.Clean ? null : render.ToString();
-        // A mark that has never been sketched has no seed; give it one and keep it, so
-        // toggling hand-drawn off and on again reproduces the same wobble.
-        after.Seed = meta.Seed ?? ToolRandom.Next();
-
-        var rebuilt = (FrameworkElement)ProjectSerializer.CreateElement(
-            after, Array.Empty<BitmapSource>(), _source);
-        rebuilt.Tag = after;
-        AnnotationTransform.Apply(rebuilt, AnnotationTransform.OffsetOf(fe), AnnotationTransform.AngleOf(fe));
-
-        FrameworkElement original = fe;
-        ReplaceCanvasElement(original, rebuilt);
-        Push(new EditorAction(
-            undo: () =>
-            {
-                ReplaceCanvasElement(rebuilt, original);
-                original.Tag = before;
-                if (ReferenceEquals(_selected, rebuilt) || ReferenceEquals(_selected, original))
-                    Select(original);
-            },
-            redo: () =>
-            {
-                ReplaceCanvasElement(original, rebuilt);
-                rebuilt.Tag = after;
-                if (ReferenceEquals(_selected, original) || ReferenceEquals(_selected, rebuilt))
-                    Select(rebuilt);
-            }),
-            apply: false);
-        Select(rebuilt);
-    }
-
-    /// <summary>Pulls the selected outline's own line quality into the checkbox.</summary>
-    private void SyncSketchCheck()
-    {
-        if (SketchCheck is null) return;
-        StrokeRender render = _selected is FrameworkElement fe && fe.Tag is AnnotationData meta
-            ? StrokeStyles.ParseRender(meta.Sketch)
-            : _strokeRender;
-
-        bool wasSyncing = _syncingContext;
-        _syncingContext = true;
-        try { SketchCheck.IsChecked = render == StrokeRender.Sketchy; }
         finally { _syncingContext = wasSyncing; }
     }
 
@@ -1553,6 +1479,8 @@ public partial class EditorWindow : Window
             foreach (var child in textGrid.Children)
                 if (child is Shape chrome)
                     AnnotationFactory.ApplyDash(chrome, style == LineBorderStyle.Cloud ? LineBorderStyle.Solid : style);
+            AnnotationFactory.SyncTextCloud(textGrid, style == LineBorderStyle.Cloud,
+                after.CloudIntensity ?? AnnotationFactory.DefaultTextCloudIntensity);
         }
         if (fe is CalloutAnnotation callout)
             ApplyStyleSnapshot(callout, SnapshotStyle(callout, after));

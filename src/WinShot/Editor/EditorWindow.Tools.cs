@@ -26,14 +26,17 @@ public partial class EditorWindow : Window
             descender: fontSize * CalloutLayout.DescenderRatio);
         var (stroke, fill) = AnnotationStyle.EnforceOneVisible(CurrentStrokeBrush(), CurrentFillBrush());
         double thickness = AnnotationStyle.ClampSize(_shapeSize);
-        var lineStyle = _lineStyle == LineBorderStyle.Cloud ? LineBorderStyle.Solid : _lineStyle;
+        // Survey w43: a callout's box may be clouded; its leader stays straight.
+        var lineStyle = _lineStyle;
         // Survey seeds a new callout's fontColor from the picker (Callout creation commit),
         // and the field stays independent of the border colour from then on.
         Color? fontColor = _textFontColor;
         var visual = AnnotationFactory.CreateCallout(
-            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor);
+            layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor,
+            _cloudIntensity);
         visual.Tag = AnnotationData.ForCallout(
             layout, "", stroke, fill, thickness, _arrowhead, lineStyle, fontSize, fontFamily, fontColor);
+        if (lineStyle == LineBorderStyle.Cloud) ((AnnotationData)visual.Tag).CloudIntensity = _cloudIntensity;
         AnnotationCanvas.Children.Add(visual);
 
         var tb = AnnotationFactory.CreateTextEditor(new SolidColorBrush(fontColor ?? stroke), fontSize);
@@ -422,7 +425,11 @@ public partial class EditorWindow : Window
         // TextBlock] (AnnotationFactory.cs:507-526), so hiding the inner child is exactly that
         // render. Outline (Path) and Pill (Border) carry no chrome of their own, so they hide
         // whole and the preview rectangle stands in.
-        _reeditHiddenGlyphs = label is Grid grid && grid.Children.Count > 1 ? grid.Children[1] : label;
+        // The glyphs are the one child that is not a Shape (a Cloud border adds a Path).
+        _reeditHiddenGlyphs = label is Grid grid
+            && grid.Children.OfType<UIElement>().FirstOrDefault(c => c is not Shape) is { } glyphs
+            ? glyphs
+            : label;
         _reeditHiddenGlyphs.Visibility = Visibility.Collapsed;
         _reeditBox = ReferenceEquals(_reeditHiddenGlyphs, label) ? null : label;
 
@@ -700,7 +707,8 @@ public partial class EditorWindow : Window
             boxH = contentHeight + 2 * pad;
             fillColor = Colors.Transparent; // Survey pins backgroundColor '' for new text
             strokeWidth = NewTextStrokeWidth;
-            lineStyle = LineBorderStyle.Solid;
+            // Survey's Style pill sits on the text tool and styles the box border.
+            lineStyle = _lineStyle; // Survey w43: Cloud clouds the box border too
         }
 
         // Survey keeps a Textbox's border colour (`stroke`) and its glyph colour (`fill`)
@@ -720,11 +728,13 @@ public partial class EditorWindow : Window
             topLeft.X -= dh / 2 * Math.Sin(rad);
             topLeft.Y -= dh / 2 * (1 - Math.Cos(rad));
         }
+        double cloudIntensity = (reeditSource?.Tag as AnnotationData)?.CloudIntensity ?? _cloudIntensity;
         var label = AnnotationFactory.CreateStyledTextLabel(
             text, tb.Foreground, tb.FontSize, style, _textFontFamily,
             _textBold, _textItalic, _textUnderline, _textStrike,
             AnnotationFactory.ParseAlign(_textAlign), _textVerticalAlign,
-            boxW, boxH, fillColor, strokeWidth, lineStyle, new SolidColorBrush(borderColor));
+            boxW, boxH, fillColor, strokeWidth, lineStyle, new SolidColorBrush(borderColor),
+            cloudIntensity);
         Canvas.SetLeft(label, topLeft.X);
         Canvas.SetTop(label, topLeft.Y);
         var textMeta = AnnotationData.ForText(topLeft, text, style, tb.FontSize, borderColor,
@@ -732,6 +742,7 @@ public partial class EditorWindow : Window
             _textVerticalAlign, new Rect(topLeft.X, topLeft.Y, boxW, boxH),
             fillColor, strokeWidth, lineStyle);
         textMeta.FontColor = ToHex(glyphColor);
+        if (lineStyle == LineBorderStyle.Cloud) textMeta.CloudIntensity = cloudIntensity;
         textMeta.Angle = reeditAngle;
         label.Tag = textMeta;
         // The committed box stayed on the canvas for the whole edit, so the commit is ONE
@@ -839,6 +850,7 @@ public partial class EditorWindow : Window
         {
             if (child is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
                 continue;
+            if (meta.Locked == true) continue; // a locked mark can't be erased
             // Survey getEraserOperation: 'partial' only for true freehand ink; everything
             // else resolves to 'entire' and is deleted whole by the same partial-mode
             // gesture (eraserPolicy.js:52-75, PageAnnotationLayer.jsx:6668-6684).
@@ -1740,6 +1752,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private bool RestyleSelectedRedaction(RedactStyle? style, int? strength, bool push)
     {
+        if (SelectedIsLocked) return false;
         if (_selected is not System.Windows.Shapes.Rectangle mark ||
             mark.Tag is not AnnotationData meta || meta.Type != AnnotationData.TypeRedact)
             return false;
@@ -1821,6 +1834,11 @@ public partial class EditorWindow : Window
         if (marks.Count == 0) return false;
         AnnotationClipboard.Clear();
         AnnotationClipboard.AddRange(marks);
+        // Where the marks were, so a paste can land them under the pointer.
+        Rect union = Rect.Empty;
+        foreach (UIElement el in SelectionList())
+            if (AnnotationCanvas.Children.Contains(el)) union.Union(GetCanvasBounds(el));
+        AnnotationClipboardBounds = union;
         // Ctrl+C over a mark used to be completely silent: nothing on screen, nothing on the
         // Windows clipboard, while the button beside it said the image had been copied. The
         // user pressed it twice with no clue why the first press did nothing. Same checkmark
@@ -1832,15 +1850,38 @@ public partial class EditorWindow : Window
     /// <summary>How far a pasted or duplicated mark lands from the one it came from.</summary>
     private const double PasteOffset = 32;
 
-    private void PasteAnnotations() => PlaceCopies(AnnotationClipboard);
+    /// <summary>Where the copied marks sat, in canvas coordinates (empty when unknown).</summary>
+    private static Rect AnnotationClipboardBounds = Rect.Empty;
 
-    private void DuplicateSelectedAnnotations() => PlaceCopies(SnapshotSelection());
+    /// <summary>
+    /// Survey "Paste at the pointer": with the pointer over the picture, the copies land centred
+    /// under it; otherwise they land one paste-offset away from where they were copied.
+    /// </summary>
+    private void PasteAnnotations()
+    {
+        Vector offset = new(PasteOffset, PasteOffset);
+        if (Viewport.IsMouseOver && !AnnotationClipboardBounds.IsEmpty)
+        {
+            Point pointer = Mouse.GetPosition(AnnotationCanvas);
+            var surface = new Rect(0, 0, AnnotationCanvas.ActualWidth, AnnotationCanvas.ActualHeight);
+            if (surface.Contains(pointer))
+            {
+                Point centre = new(
+                    AnnotationClipboardBounds.X + AnnotationClipboardBounds.Width / 2,
+                    AnnotationClipboardBounds.Y + AnnotationClipboardBounds.Height / 2);
+                offset = pointer - centre;
+            }
+        }
+        PlaceCopies(AnnotationClipboard, offset);
+    }
+
+    private void DuplicateSelectedAnnotations() => PlaceCopies(SnapshotSelection(), new Vector(PasteOffset, PasteOffset));
 
     /// <summary>
     /// Rebuilds a set of copied marks through the same factory a project reload uses, offset
     /// so the copy is visibly a copy, then selects them — one undo step for the whole set.
     /// </summary>
-    private void PlaceCopies(IReadOnlyList<ClipboardMark> marks)
+    private void PlaceCopies(IReadOnlyList<ClipboardMark> marks, Vector offset)
     {
         if (marks.Count == 0) return;
         CommitText();
@@ -1850,9 +1891,10 @@ public partial class EditorWindow : Window
         foreach (ClipboardMark mark in marks)
         {
             var data = mark.Data.Clone();
-            data.Tx += PasteOffset;
-            data.Ty += PasteOffset;
+            data.Tx += offset.X;
+            data.Ty += offset.Y;
             if (data.ImageIndex is not null) data.ImageIndex = 0;
+            data.Locked = null; // a copy starts unlocked
             IReadOnlyList<BitmapSource> images = mark.Image is null
                 ? Array.Empty<BitmapSource>()
                 : new[] { mark.Image };
@@ -1922,7 +1964,7 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>
-    /// Alt-drag: leaves a copy behind and drags the copy, so the original stays put. The
+    /// Ctrl-drag: leaves a copy behind and drags the copy, so the original stays put. The
     /// clone lands exactly on top of the original (no paste offset) — the drag itself is
     /// what separates them.
     /// </summary>
@@ -1931,6 +1973,7 @@ public partial class EditorWindow : Window
         if (source is not FrameworkElement fe || fe.Tag is not AnnotationData meta) return null;
         var data = SnapshotAnnotation(fe, meta);
         if (data.ImageIndex is not null) data.ImageIndex = 0;
+        data.Locked = null; // the dragged copy starts unlocked, so it can be moved
         IReadOnlyList<BitmapSource> images = source is Image img && img.Source is BitmapSource bs
             ? new[] { bs }
             : Array.Empty<BitmapSource>();

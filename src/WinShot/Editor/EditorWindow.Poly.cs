@@ -129,7 +129,7 @@ public partial class EditorWindow
         var path = AnnotationFactory.CreatePolyShape(
             finish.Points, finish.Closed, CurrentStrokeBrush(),
             finish.Closed ? CurrentFillBrush() : Colors.Transparent,
-            _thickness, _lineStyle, _cloudIntensity, _strokeRender, _sketchSeed);
+            _thickness, _lineStyle, _cloudIntensity);
         var data = AnnotationData.ForPoly(
             finish.FinalType, finish.Points, CurrentStrokeBrush(), _thickness, _lineStyle);
         if (finish.Closed)
@@ -138,8 +138,6 @@ public partial class EditorWindow
             data.FillColor = AnnotationStyle.ToHex(CurrentFillBrush());
         }
         if (_lineStyle == LineBorderStyle.Cloud) data.CloudIntensity = _cloudIntensity;
-        data.Sketch = _strokeRender == StrokeRender.Clean ? null : _strokeRender.ToString();
-        data.Seed = _sketchSeed;
         path.Tag = data;
         AnnotationCanvas.Children.Add(path);
         // Not selected, like a pen stroke: the tool stays armed for the next run, and a
@@ -159,7 +157,7 @@ public partial class EditorWindow
     }
 
     /// <summary>
-    /// Redraws the draft chrome: the placed run, a dashed rubber band to the cursor, a hollow
+    /// Redraws the draft: the run to the cursor drawn as the real mark, a hollow
     /// dot on every vertex, and a checkmark ring on the first vertex (closes) and the latest
     /// one (finishes) whenever those are legal (SVGAnnotationLayer.jsx:5772-5866).
     ///
@@ -181,40 +179,24 @@ public partial class EditorWindow
         }
         _polyDraftLayer.Visibility = Visibility.Visible;
 
-        Color ink = CurrentStrokeBrush();
-        double width = _thickness;
         double scale = 1.0 / _zoom;
 
-        if (draft.Points.Count > 1)
+        // Survey (SVGAnnotationLayer.jsx:8120-8145, owner 2026-10-02): the whole run — placed
+        // corners PLUS the edge to the cursor — is the real mark, built by the commit
+        // builder: colour, width, line style and, for a polygon from three points, the fill
+        // and closing edge. "No dashed placeholder edge." WinShot drew the run solid whatever
+        // the line style, then a dashed translucent band to the cursor.
+        var runPoints = new List<Point>(draft.Points) { draft.Preview };
+        bool polygon = draft.Tool == AnnotationData.TypePolygon && runPoints.Count >= 3;
+        if (runPoints.Count >= 2)
         {
-            var run = new PathGeometry();
-            var figure = new PathFigure { StartPoint = draft.Points[0], IsClosed = false, IsFilled = false };
-            for (int i = 1; i < draft.Points.Count; i++)
-                figure.Segments.Add(new LineSegment(draft.Points[i], isStroked: true));
-            run.Figures.Add(figure);
-            _polyDraftLayer.Children.Add(new Path
-            {
-                Data = run,
-                Stroke = new SolidColorBrush(ink),
-                StrokeThickness = width,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
-                StrokeLineJoin = PenLineJoin.Round,
-            });
+            var run = AnnotationFactory.CreatePolyShape(
+                runPoints, polygon, CurrentStrokeBrush(),
+                polygon ? CurrentFillBrush() : Colors.Transparent,
+                _thickness, _lineStyle, _cloudIntensity);
+            run.IsHitTestVisible = false;
+            _polyDraftLayer.Children.Add(run);
         }
-
-        // The rubber band: dashed at 0.6 opacity so it reads as "not placed yet".
-        Point last = draft.Points[^1];
-        _polyDraftLayer.Children.Add(new Line
-        {
-            X1 = last.X, Y1 = last.Y, X2 = draft.Preview.X, Y2 = draft.Preview.Y,
-            Stroke = new SolidColorBrush(ink),
-            StrokeThickness = width,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
-            StrokeDashArray = new DoubleCollection(new[] { 5.0, 5.0 }),
-            Opacity = 0.6,
-        });
 
         double vertexR = 3 * scale;
         foreach (Point p in draft.Points)
