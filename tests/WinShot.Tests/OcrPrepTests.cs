@@ -42,7 +42,7 @@ public class OcrPrepTests
         byte[] padded = OcrService.Pad(px, 2, 2, 3, out int w, out int h);
         Assert.Equal(8, w);
         Assert.Equal(8, h);
-        Assert.InRange(padded[0], 70, 75); // edge average (3 x 20 + 250) / 4
+        Assert.InRange(padded[0], 76, 78); // edge average (3 x 20 + 250) / 4
         int inner = ((3 + 1) * w + 3 + 1) * 4;
         Assert.Equal(250, padded[inner]);
     }

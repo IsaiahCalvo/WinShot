@@ -902,40 +902,8 @@
         </Canvas>
     </Viewbox>
 
-    <!-- Survey Icons.jsx `grip`: six dots, the pinned-tools dock handle. -->
-    <Viewbox x:Key="SurveyIcon.GripDots" x:Shared="False" Width="16" Height="16">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="9,5" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="15,5" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="9,12" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="15,12" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="9,19" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="15,19" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-        </Canvas>
-    </Viewbox>
 
-    <!-- Survey Icons.jsx `moreHorizontal`. -->
-    <Viewbox x:Key="SurveyIcon.MoreHorizontal" x:Shared="False" Width="16" Height="16">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="5,12" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="12,12" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-            <Path Style="{StaticResource SurveyIconFill}"><Path.Data><EllipseGeometry Center="19,12" RadiusX="1.5" RadiusY="1.5"/></Path.Data></Path>
-        </Canvas>
-    </Viewbox>
 
-    <!-- Survey Icons.jsx `close`. -->
-    <Viewbox x:Key="SurveyIcon.Close" x:Shared="False" Width="16" Height="16">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M18 6L6 18"/>
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M6 6L18 18"/>
-        </Canvas>
-    </Viewbox>
 
-    <!-- Survey Icons.jsx `chevronUp`. -->
-    <Viewbox x:Key="SurveyIcon.ChevronUp" x:Shared="False" Width="16" Height="16">
-        <Canvas Width="24" Height="24">
-            <Path Style="{StaticResource SurveyIconStroke}" Data="M18 15L12 9L6 15"/>
-        </Canvas>
-    </Viewbox>
 
 </ResourceDictionary>
