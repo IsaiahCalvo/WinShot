@@ -3,15 +3,42 @@
   globalThis.__winshotCaptureScriptInstalled = true;
 
   const WATCHDOG_MS = 9000;
+  const DOCUMENT_TOKEN = [...crypto.getRandomValues(new Uint32Array(4))].join("-");
   const PICKER_Z = "2147483647";
   let session = null;
   let frameHostSession = null;
   let pickerCleanup = null;
+  let activePickerId = null;
   let pendingPickerState = null;
+  const cancelledPickerIds = new Set();
   const announcedFrames = new Map();
 
+  function pageEffects(action, id) {
+    return new Promise(resolve => {
+      const nonce = crypto.randomUUID();
+      const done = result => { clearTimeout(timer); removeEventListener("message", receive); resolve(result); };
+      const receive = event => {
+        if (event.source === window && event.data?.source === "winshot-effects-response-v4" && event.data.nonce === nonce) done(event.data.result);
+      };
+      const timer = setTimeout(() => done({ error: "The page animation bridge did not respond." }), 700);
+      addEventListener("message", receive);
+      postMessage({ source: "winshot-effects-request-v4", action, id, nonce }, "*");
+    });
+  }
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const nextPaint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const nextPaint = (onPaint = null) => new Promise((resolve) => {
+    let frame;
+    const finish = (painted = false) => {
+      clearTimeout(timer); cancelAnimationFrame(frame);
+      if (painted && session) onPaint?.();
+      resolve();
+    };
+    // A hidden frame/tab can suspend rAF. Keep messages bounded so cancellation
+    // and the watchdog can still unwind a capture when the user switches tabs.
+    const timer = setTimeout(() => finish(), 250);
+    frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => finish(true)); });
+  });
 
   function scrollingElement() {
     return document.scrollingElement || document.documentElement;
@@ -33,6 +60,49 @@
     return root instanceof ShadowRoot ? root.host : null;
   }
 
+  function hasTransparentAncestor(node, cache = null) {
+    const visited = [];
+    let transparent = false;
+    for (let current = node; current instanceof Element; current = composedParent(current)) {
+      if (cache?.has(current)) { transparent = cache.get(current); break; }
+      if (cache) visited.push(current);
+      if (Number(getComputedStyle(current).opacity) === 0) { transparent = true; break; }
+    }
+    for (const current of visited) cache.set(current, transparent);
+    return transparent;
+  }
+
+  function floatingBounds(node, authored = false) {
+    const style = getComputedStyle(node), own = node.getBoundingClientRect();
+    const visible = target => authored ? session.floatingVisibility.get(target)?.visible : getComputedStyle(target).visibility === "visible";
+    let bounds = visible(node) && own.width > 0 && own.height > 0 ? own : null;
+    if (!bounds || style.overflowX === "visible" || style.overflowY === "visible") {
+      const children = [...node.querySelectorAll("*")];
+      if (node.shadowRoot) children.push(...node.shadowRoot.querySelectorAll("*"));
+      for (const child of children) {
+        const rect = child.getBoundingClientRect();
+        if (!rect.width || !rect.height || !visible(child) || hasTransparentAncestor(child)) continue;
+        if (!bounds) bounds = rect;
+        else {
+          const left = Math.min(bounds.left, rect.left), top = Math.min(bounds.top, rect.top);
+          const right = Math.max(bounds.right, rect.right), bottom = Math.max(bounds.bottom, rect.bottom);
+          bounds = { left, top, right, bottom, width: right - left, height: bottom - top };
+        }
+      }
+    }
+    return bounds;
+  }
+
+  function openRoots() {
+    const roots = [document];
+    for (let index = 0; index < roots.length; index++) {
+      for (const element of roots[index].querySelectorAll("*")) {
+        if (element.shadowRoot) roots.push(element.shadowRoot);
+      }
+    }
+    return roots;
+  }
+
   function nearestScrollOwner(element) {
     for (let node = composedParent(element); node && node !== document.body; node = composedParent(node)) {
       if (isScrollable(node).any) return node;
@@ -42,6 +112,7 @@
 
   function rememberStyle(element, property, value, priority = "important") {
     if (!session) return;
+    if (element.style.getPropertyValue(property) === value && element.style.getPropertyPriority(property) === priority) return;
     let entry = session.changedStyles.get(element);
     if (!entry) {
       entry = new Map();
@@ -64,13 +135,18 @@
     return ranges;
   }
 
-  function restore(reason = "requested") {
+  async function restore(reason = "requested") {
     if (!session) return { restored: true, reason, failures: [] };
     const current = session;
     session = null;
     clearInterval(current.watchdog);
     current.observer?.disconnect();
     const failures = [];
+
+    // Keep static covers in place until pending GPU work has completed. The
+    // session/watchdog are already cleared; the normal restoration order follows.
+    drainFrozenCanvasWork(current);
+    for (const snapshot of current.surfaceSnapshots.values()) snapshot.remove();
 
     for (const [element, properties] of [...current.changedStyles].reverse()) {
       if (!(element instanceof Element)) continue;
@@ -83,14 +159,38 @@
         }
       }
     }
-    current.freezeStyle?.remove();
-    if (current.freezeStyle?.isConnected) failures.push("freeze-style");
+    for (const style of current.freezeStyles) {
+      style.remove();
+      if (style.isConnected) failures.push("freeze-style");
+    }
+
+    for (const animation of current.captureAnimations) animation.cancel();
+    for (const [animation, original] of current.changedAnimations) {
+      try {
+        // These effects were created by scroll reveals during capture. Keeping
+        // their completed frame avoids replaying the entrance after restoration.
+        if (original.created && animation.playState === "finished") continue;
+        animation.playbackRate = original.playbackRate;
+        animation.currentTime = original.currentTime;
+        let resume = original.playState === "running";
+        if (original.created && animation instanceof CSSAnimation) {
+          const style = getComputedStyle(animation.effect.target);
+          const index = style.animationName.split(",").map(name => name.trim()).indexOf(animation.animationName);
+          const states = style.animationPlayState.split(",").map(state => state.trim());
+          resume = states[Math.max(0, index) % states.length] === "running";
+        }
+        if (resume) animation.play();
+        else if (original.playState === "paused") animation.pause();
+      } catch { failures.push("animation"); }
+    }
 
     if (current.owner instanceof Element && current.owner !== scrollingElement()) {
-      current.owner.scrollTo(current.ownerScroll.left, current.ownerScroll.top);
-      if (Math.abs(current.owner.scrollTop - current.ownerScroll.top) > 2) failures.push("owner-scroll");
+      current.owner.scrollTo({ ...current.ownerScroll, behavior: "instant" });
+      if (Math.abs(current.owner.scrollTop - current.ownerScroll.top) > 2 || Math.abs(current.owner.scrollLeft - current.ownerScroll.left) > 2) failures.push("owner-scroll");
     }
-    window.scrollTo(current.windowScroll.left, current.windowScroll.top);
+    // The original CSS may enable smooth scrolling again. Restoration must finish
+    // before acknowledging it, rather than leave the page animating toward home.
+    window.scrollTo({ ...current.windowScroll, behavior: "instant" });
     // Read back — restoration is only "verified" if the page actually ended up there.
     if (Math.abs(window.scrollY - current.windowScroll.top) > 2 || Math.abs(window.scrollX - current.windowScroll.left) > 2) {
       failures.push("window-scroll");
@@ -112,6 +212,9 @@
       if (current.targetAttributeBefore === null) current.targetElement.removeAttribute("data-winshot-target");
       else current.targetElement.setAttribute("data-winshot-target", current.targetAttributeBefore);
     }
+    const effects = await pageEffects("restore", current.id);
+    if (effects.error) failures.push(`page-animation-state: ${effects.error}`);
+    for (const failure of effects.failures || []) failures.push(`page-animation-state: ${failure}`);
     return { restored: failures.length === 0, reason, failures };
   }
 
@@ -171,6 +274,8 @@
       offsetTop: visual?.offsetTop ?? 0,
       width: visual?.width ?? document.documentElement.clientWidth,
       height: visual?.height ?? document.documentElement.clientHeight,
+      rasterWidth: innerWidth / (visual?.scale || 1),
+      rasterHeight: innerHeight / (visual?.scale || 1),
       scale: visual?.scale ?? 1,
       devicePixelRatio: window.devicePixelRatio
     };
@@ -202,7 +307,9 @@
           offsetLeft: visual?.offsetLeft ?? 0,
           offsetTop: visual?.offsetTop ?? 0,
           width: visual?.width ?? current.document.documentElement.clientWidth,
-          height: visual?.height ?? current.document.documentElement.clientHeight
+          height: visual?.height ?? current.document.documentElement.clientHeight,
+          rasterWidth: current.innerWidth / (visual?.scale || 1),
+          rasterHeight: current.innerHeight / (visual?.scale || 1)
         }
       };
     } catch {
@@ -287,17 +394,26 @@
       return { left: 0, top: 0, width: view.width, height: view.height };
     }
     const rect = owner.getBoundingClientRect();
+    const scale = ownerScale(owner);
     return {
-      left: rect.left + owner.clientLeft,
-      top: rect.top + owner.clientTop,
-      width: owner.clientWidth,
-      height: owner.clientHeight
+      left: rect.left + owner.clientLeft * scale.x,
+      top: rect.top + owner.clientTop * scale.y,
+      width: owner.clientWidth * scale.x,
+      height: owner.clientHeight * scale.y
+    };
+  }
+
+  function ownerScale(owner) {
+    const rect = owner.getBoundingClientRect();
+    return {
+      x: owner.offsetWidth ? rect.width / owner.offsetWidth : 1,
+      y: owner.offsetHeight ? rect.height / owner.offsetHeight : 1
     };
   }
 
   function visibleClientRect(element) {
     let result = ownerClientRect(element);
-    for (let ancestor = element.parentElement; ancestor && ancestor !== document.body; ancestor = ancestor.parentElement) {
+    for (let ancestor = composedParent(element); ancestor && ancestor !== document.body; ancestor = composedParent(ancestor)) {
       if (!isScrollable(ancestor).any) continue;
       const rect = ownerClientRect(ancestor);
       const left = Math.max(result.left, rect.left);
@@ -362,15 +478,17 @@
       reachedY = window.scrollY;
     } else if (session.kind === "self-scroller") {
       const rect = visibleClientRect(owner);
-      width = owner.scrollWidth;
-      height = owner.scrollHeight;
+      const scale = ownerScale(owner);
+      width = owner.scrollWidth * scale.x;
+      height = owner.scrollHeight * scale.y;
       const left = Math.max(0, rect.left);
       const top = Math.max(0, rect.top);
       const right = Math.min(view.width, rect.left + rect.width);
       const bottom = Math.min(view.height, rect.top + rect.height);
       clip = { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-      destX = owner.scrollLeft + Math.max(0, -rect.left);
-      destY = owner.scrollTop + Math.max(0, -rect.top);
+      const fullRect = ownerClientRect(owner);
+      destX = owner.scrollLeft * scale.x + left - fullRect.left;
+      destY = owner.scrollTop * scale.y + top - fullRect.top;
       reachedX = owner.scrollLeft;
       reachedY = owner.scrollTop;
     } else {
@@ -400,18 +518,34 @@
       reachedX,
       reachedY,
       mutationCount: session.mutationCount,
+      floatingRects: session.floating.flatMap(({ node }) => {
+        const style = getComputedStyle(node);
+        if (style.position !== "fixed" || hasTransparentAncestor(node)) return [];
+        const rect = floatingBounds(node);
+        if (!rect) return [];
+        const left = Math.max(rect.left, clip.left), top = Math.max(rect.top, clip.top);
+        const right = Math.min(rect.right, clip.left + clip.width), bottom = Math.min(rect.bottom, clip.top + clip.height);
+        return right > left && bottom > top ? [{ left: left - clip.left, top: top - clip.top, width: right - left, height: bottom - top }] : [];
+      }),
+      documentToken: DOCUMENT_TOKEN,
       url: location.href,
       frame: frameContext()
     };
   }
 
   async function waitForStable(timeoutMs) {
+    // GPU synchronization precedes the unchanged DOM-settling budget, like the
+    // native screenshot readback that follows these stability checks.
+    drainFrozenCanvasWork(session);
     const start = performance.now();
     let previous = "";
     let repeats = 0;
     while (performance.now() - start < timeoutMs) {
-      await nextPaint();
+      await nextPaint(snapshotVisibleCanvases);
+      await pageEffects("update", session.id);
+      refreshCaptureEffects();
       const metrics = currentMetrics();
+      const pendingImages = visibleImages(metrics).some((image) => !image.complete);
       const signature = JSON.stringify([
         Math.round(metrics.width * 10), Math.round(metrics.height * 10),
         Math.round(metrics.reachedX * 10), Math.round(metrics.reachedY * 10),
@@ -420,11 +554,167 @@
       ]);
       if (signature === previous) repeats++;
       else repeats = 0;
-      if (repeats >= 1) return { stable: true, metrics };
+      if (repeats >= 1 && !pendingImages && !session.animationIssues.size) {
+        // Image dimensions can be stable while their pixels are still loading.
+        // Decode only images in this tile; offscreen lazy images must not block it.
+        const remaining = Math.max(0, timeoutMs - (performance.now() - start));
+        const decoded = await Promise.race([
+          Promise.allSettled(visibleImages(metrics).map((image) => image.decode())).then(() => true),
+          sleep(remaining).then(() => false)
+        ]);
+        if (decoded) return { stable: true, metrics: currentMetrics() };
+      }
       previous = signature;
       await sleep(60);
     }
-    return { stable: false, metrics: currentMetrics() };
+    return { stable: false, metrics: currentMetrics(), warnings: [...session.animationIssues] };
+  }
+
+  function pageAnimations() {
+    return [...new Set(session.roots.flatMap(root => root === document
+      ? document.getAnimations()
+      : [...root.querySelectorAll("*")].flatMap(node => node.getAnimations())))];
+  }
+
+  function drainFrozenCanvasWork(capture) {
+    // Hidden WebGL canvases can keep drawing without compositor backpressure.
+    // A real CPU readback bounds that work before each tile and before unfreezing.
+    // Chromium implements WebGL finish() as flush(), so it cannot supply this wait.
+    for (const canvas of capture.surfaceSnapshots.keys()) {
+      if (!canvas.isConnected || !canvas.width || !canvas.height) continue;
+      try {
+        const fence = document.createElement("canvas");
+        fence.width = 1; fence.height = 1;
+        const context = fence.getContext("2d", { willReadFrequently: true });
+        context.drawImage(canvas, 0, 0, 1, 1, 0, 0, 1, 1);
+        context.getImageData(0, 0, 1, 1);
+      } catch {
+        // Tainted, transferred, or unavailable surfaces retain their existing
+        // browser capture and restoration checks; never replace their context.
+      }
+    }
+  }
+
+  function snapshotVisibleCanvases() {
+    // Copy browser-rendered canvas pixels during the paint callback's microtask,
+    // before WebGL clears a non-preserved drawing buffer. Keep the original
+    // canvas/context connected and running; cover it with a static canvas in the
+    // same containing block. No page CSP exception or image serialization needed.
+    for (const root of session.roots) for (const canvas of root.querySelectorAll("canvas:not([data-winshot-surface])")) {
+      if (session.surfaceSnapshots.has(canvas) || !canvas.width || !canvas.height) continue;
+      const rect = canvas.getBoundingClientRect(), style = getComputedStyle(canvas);
+      if (!rect.width || !rect.height || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth ||
+          style.visibility !== "visible" || hasTransparentAncestor(canvas)) continue;
+      const pixels = canvas.width * canvas.height;
+      if (pixels + session.surfacePixels > 32_000_000) continue;
+      const snapshot = document.createElement("canvas");
+      snapshot.width = canvas.width; snapshot.height = canvas.height;
+      snapshot.dataset.winshotSurface = session.id;
+      snapshot.setAttribute("aria-hidden", "true");
+      for (const property of style) snapshot.style.setProperty(property, style.getPropertyValue(property), "important");
+      snapshot.style.setProperty("pointer-events", "none", "important");
+      if (!["fixed", "absolute"].includes(style.position)) {
+        snapshot.style.setProperty("position", "absolute", "important");
+        snapshot.style.setProperty("left", `${canvas.offsetLeft - (parseFloat(style.marginLeft) || 0)}px`, "important");
+        snapshot.style.setProperty("top", `${canvas.offsetTop - (parseFloat(style.marginTop) || 0)}px`, "important");
+        snapshot.style.setProperty("right", "auto", "important");
+        snapshot.style.setProperty("bottom", "auto", "important");
+      }
+      try {
+        const context = snapshot.getContext("2d", { willReadFrequently: true });
+        context.drawImage(canvas, 0, 0);
+        try {
+          // An idle WebGL buffer may already have been cleared by the browser.
+          // Never cover its still-visible front buffer with a transparent copy.
+          const rgba = context.getImageData(0, 0, snapshot.width, snapshot.height).data;
+          let painted = false;
+          for (let i = 3; i < rgba.length; i += 4) if (rgba[i]) { painted = true; break; }
+          if (!painted) continue;
+        } catch (error) {
+          // A tainted 2D canvas can be copied for display, though script cannot
+          // inspect its pixels. Chrome's actual screenshot still owns export.
+          if (error.name !== "SecurityError") throw error;
+        }
+        canvas.after(snapshot);
+        const placed = snapshot.getBoundingClientRect();
+        if (["left", "top", "width", "height"].some(key => Math.abs(placed[key] - rect[key]) > 1)) {
+          snapshot.remove(); continue;
+        }
+        // An absolutely positioned copy can escape a non-positioned overflow
+        // ancestor's clip. Do not cover those shapes until placement is provable.
+        let clipped = false;
+        for (let parent = composedParent(canvas); parent && parent !== canvas.offsetParent; parent = composedParent(parent)) {
+          const parentStyle = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+          if ((/(hidden|clip|scroll|auto)/.test(parentStyle.overflowX) && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)) ||
+              (/(hidden|clip|scroll|auto)/.test(parentStyle.overflowY) && (rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1))) clipped = true;
+        }
+        if (clipped) { snapshot.remove(); continue; }
+        session.surfaceSnapshots.set(canvas, snapshot);
+        session.surfacePixels += pixels;
+        rememberStyle(canvas, "visibility", "hidden", "important");
+      } catch { snapshot.remove(); }
+    }
+  }
+
+  function rememberAnimation(animation, created) {
+    if (!session.changedAnimations.has(animation)) session.changedAnimations.set(animation, {
+      currentTime: animation.currentTime, playState: animation.playState,
+      playbackRate: animation.playbackRate, created
+    });
+    return session.changedAnimations.get(animation);
+  }
+
+  function refreshCaptureEffects() {
+    session.animationIssues.clear();
+    refreshOpenRoots();
+    const nodes = [...session.pendingNodes];
+    session.pendingNodes.clear();
+    trackFloatingNodes(nodes);
+    setFloatingVisibility(session.atStart, session.atEnd);
+    for (const animation of pageAnimations()) {
+      if (session.captureAnimations.has(animation) || animation.playState === "finished" || animation.playState === "idle") continue;
+      const original = rememberAnimation(animation, true);
+      // Respect animations that the page/user had already paused before capture.
+      if (!original.created && original.playState === "paused") continue;
+      try {
+        if (animation.timeline && !(animation.timeline instanceof DocumentTimeline)) {
+          // A progress-based scroll/view timeline cannot be finished(). Pin its
+          // final keyframe with a temporary document-timeline effect instead.
+          if (!session.pinnedAnimations.has(animation)) {
+            const frame = { ...animation.effect.getKeyframes().at(-1) };
+            delete frame.offset; delete frame.computedOffset; delete frame.easing; delete frame.composite;
+            const pin = animation.effect.target.animate([frame, frame], { duration: 1, fill: "both", pseudoElement: animation.effect.pseudoElement });
+            pin.pause(); pin.currentTime = 1;
+            session.captureAnimations.add(pin);
+            session.pinnedAnimations.add(animation);
+          }
+        } else if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) {
+          // Pausing an entrance animation at opacity:0 silently loses content.
+          // Complete finite effects; pause repeating effects at their current frame.
+          animation.finish();
+        } else animation.pause();
+      } catch { session.animationIssues.add("An animation could not be stabilized."); }
+    }
+  }
+
+  function refreshOpenRoots() {
+    for (const root of openRoots()) {
+      if (session.roots.includes(root)) continue;
+      session.roots.push(root);
+      for (const animation of pageAnimations()) rememberAnimation(animation, true);
+      installFreezeStyle(root, session.id);
+      session.observer?.observe(root, { childList: true, subtree: true, attributes: true });
+      for (const node of root.querySelectorAll("*")) session.pendingNodes.add(node);
+    }
+  }
+
+  function visibleImages(metrics) {
+    const { left, top, width, height } = metrics.clip;
+    return session.roots.flatMap((root) => [...root.querySelectorAll("img[src], img[srcset]")]).filter((image) => {
+      const rect = image.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.right > left && rect.bottom > top &&
+        rect.left < left + width && rect.top < top + height && getComputedStyle(image).visibility !== "hidden" && !hasTransparentAncestor(image);
+    });
   }
 
   function semanticSnapshot(metrics, limit = 5000) {
@@ -435,6 +725,9 @@
     const links = [];
     const seenText = new Set();
     const seenLinks = new Set();
+    // This function runs synchronously: authored opacity cannot change between
+    // these reads. Share ancestor results across text/links in this tile only.
+    const transparentAncestors = new Map();
 
     const intersect = (rect) => {
       const left = Math.max(rect.left, clip.left);
@@ -450,12 +743,7 @@
       };
     };
 
-    const roots = [document];
-    for (let index = 0; index < roots.length; index++) {
-      for (const element of roots[index].querySelectorAll("*")) {
-        if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
-      }
-    }
+    const roots = session?.roots || openRoots();
 
     for (const root of roots) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -465,7 +753,7 @@
         const value = node.nodeValue?.replace(/\s+/g, " ").trim();
         if (!value || !(node.parentElement instanceof Element)) continue;
         const style = getComputedStyle(node.parentElement);
-        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(node.parentElement, transparentAncestors)) continue;
         const range = document.createRange();
         range.selectNodeContents(node);
         for (const rect of range.getClientRects()) {
@@ -482,7 +770,7 @@
       for (const anchor of root.querySelectorAll("a[href]")) {
         if (links.length >= 2000) break;
         const style = getComputedStyle(anchor);
-        if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        if (style.display === "none" || style.visibility === "hidden" || hasTransparentAncestor(anchor, transparentAncestors)) continue;
         for (const rect of anchor.getClientRects()) {
           const mapped = intersect(rect);
           if (!mapped) continue;
@@ -505,7 +793,7 @@
       destX: 0,
       destY: 0
     };
-    return { metrics: { width: view.width, height: view.height }, semantics: semanticSnapshot(metrics) };
+    return { metrics: { width: view.rasterWidth, height: view.rasterHeight }, semantics: semanticSnapshot(metrics) };
   }
 
   function collectWarnings() {
@@ -545,8 +833,35 @@
     return null;
   }
 
+  function mainScrollOwner() {
+    const view = viewport();
+    const size = documentSize();
+    if (size.height > view.height + 2 || size.width > view.width + 2) return null;
+    const candidates = new Set();
+    for (const [x, y] of [[0.5, 0.5], [0.65, 0.5], [0.5, 0.75]]) {
+      let element = document.elementFromPoint(view.width * x, view.height * y);
+      while (element?.shadowRoot) {
+        const child = element.shadowRoot.elementFromPoint(view.width * x, view.height * y);
+        if (!child || child === element) break;
+        element = child;
+      }
+      for (let node = element; node && node !== document.body; node = composedParent(node)) {
+        if (node === scrollingElement() || !isScrollable(node).y) continue;
+        const rect = visibleClientRect(node);
+        if (rect.width >= view.width * 0.4 && rect.height >= view.height * 0.55 &&
+            rect.width * rect.height >= view.width * view.height * 0.3) candidates.add(node);
+      }
+    }
+    return [...candidates].sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] || null;
+  }
+
   function classifyTarget(request) {
     if (request.mode === "full-page") {
+      const owner = mainScrollOwner();
+      if (owner) return {
+        kind: "self-scroller", owner, targetElement: owner, automaticScroller: true,
+        targetRect: { left: 0, top: 0, width: owner.scrollWidth, height: owner.scrollHeight }
+      };
       return { kind: "document", owner: scrollingElement(), targetRect: { left: 0, top: 0, ...documentSize() } };
     }
     if (request.mode === "region") {
@@ -594,13 +909,14 @@
         };
       }
       const ownerRect = ownerClientRect(owner);
+      const scale = ownerScale(owner);
       return {
         kind: "ancestor-scroller",
         owner,
         targetElement: element,
         ownerOffset: {
-          left: owner.scrollLeft + rect.left - ownerRect.left,
-          top: owner.scrollTop + rect.top - ownerRect.top
+          left: owner.scrollLeft + (rect.left - ownerRect.left) / scale.x,
+          top: owner.scrollTop + (rect.top - ownerRect.top) / scale.y
         },
         targetRect: { left: 0, top: 0, width: rect.width, height: rect.height }
       };
@@ -608,21 +924,26 @@
     throw new Error(`Unsupported capture mode: ${request.mode}`);
   }
 
-  function freezePage(classification, request) {
-    const freezeStyle = document.createElement("style");
-    freezeStyle.dataset.winshotCapture = request.sessionId;
-    freezeStyle.textContent = `
+  function installFreezeStyle(root, sessionId) {
+      const freezeStyle = document.createElement("style");
+      freezeStyle.dataset.winshotCapture = sessionId;
+      freezeStyle.textContent = `
       html { scroll-behavior: auto !important; scroll-snap-type: none !important; overflow-anchor: none !important; }
       *, *::before, *::after {
         animation-play-state: paused !important;
+        transition: none !important;
         scroll-behavior: auto !important;
         scroll-snap-type: none !important;
         overflow-anchor: none !important;
         caret-color: transparent !important;
       }
     `;
-    (document.head || document.documentElement).append(freezeStyle);
-    session.freezeStyle = freezeStyle;
+      (root === document ? document.head || document.documentElement : root).append(freezeStyle);
+      session.freezeStyles.push(freezeStyle);
+  }
+
+  function freezePage(classification, request) {
+    for (const root of session.roots) installFreezeStyle(root, request.sessionId);
 
     if (classification.owner instanceof Element) {
       rememberStyle(classification.owner, "scroll-behavior", "auto");
@@ -630,16 +951,48 @@
       rememberStyle(classification.owner, "overflow-anchor", "none");
     }
 
-    const nodes = document.querySelectorAll("body *");
+    const nodes = session.roots.flatMap((root) => [...root.querySelectorAll(root === document ? "body *" : "*")]);
+    trackFloatingNodes(nodes);
+  }
+
+  function rememberFloatingTree(node) {
+    const nodes = [node];
+    for (let i = 0; i < nodes.length && session.floatingVisibility.size < 25000; i++) {
+      const current = nodes[i];
+      nodes.push(...current.children);
+      if (current.shadowRoot) nodes.push(...current.shadowRoot.children);
+      if (session.floatingVisibility.has(current)) continue;
+      // New descendants can arrive while their ancestor is capture-hidden.
+      // Read their page-authored visibility with our ancestor overrides removed.
+      const reverted = [];
+      for (let ancestor = current; ancestor; ancestor = composedParent(ancestor)) {
+        const original = session.changedStyles.get(ancestor)?.get("visibility");
+        if (!original) continue;
+        reverted.push({ node: ancestor, value: ancestor.style.getPropertyValue("visibility"), priority: ancestor.style.getPropertyPriority("visibility") });
+        if (original.value) ancestor.style.setProperty("visibility", original.value, original.priority);
+        else ancestor.style.removeProperty("visibility");
+      }
+      const visible = getComputedStyle(current).visibility === "visible";
+      for (const entry of reverted.reverse()) {
+        if (entry.value) entry.node.style.setProperty("visibility", entry.value, entry.priority);
+        else entry.node.style.removeProperty("visibility");
+      }
+      session.floatingVisibility.set(current, { visible });
+    }
+  }
+
+  function trackFloatingNodes(nodes) {
     const cap = Math.min(nodes.length, 25000);
     for (let i = 0; i < cap; i++) {
       const node = nodes[i];
       const position = getComputedStyle(node).position;
       if (position !== "fixed" && position !== "sticky") continue;
       // A fixed capture TARGET (or its fixed container) must stay visible on every tile.
-      if (classification.fixedTarget && (node === classification.targetElement || node.contains(classification.targetElement))) continue;
-      const rect = node.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (!node.isConnected) continue;
+      if (session.fixedTarget && (node === session.targetElement || node.contains(session.targetElement))) continue;
+      if (position === "fixed") rememberFloatingTree(node);
+      const rect = floatingBounds(node, position === "fixed");
+      if (!rect) continue;
       if (position === "sticky") {
         // Hiding a sticky element leaves a blank hole at its in-flow slot. Demoting it
         // to static paints it exactly once, where the layout puts it, in whichever tile
@@ -649,7 +1002,14 @@
       }
       const tall = rect.height > innerHeight * 0.5;
       const anchor = tall ? "overlay" : rect.top + rect.height / 2 < innerHeight / 2 ? "top" : "bottom";
-      session.floating.push({ node, anchor });
+      if (!session.floatingNodes.has(node)) {
+        session.floating.push({ node, anchor, opacity: {
+          value: node.style.getPropertyValue("opacity"), priority: node.style.getPropertyPriority("opacity")
+        }, visibility: {
+          value: node.style.getPropertyValue("visibility"), priority: node.style.getPropertyPriority("visibility")
+        } });
+        session.floatingNodes.add(node);
+      }
     }
   }
 
@@ -657,7 +1017,7 @@
     // A stale picker overlay must never be captured into the pixels or keep
     // swallowing page events after the capture.
     pickerCleanup?.();
-    restore("superseded");
+    await restore("superseded");
     const classification = classifyTarget(request);
     const owner = classification.owner;
     const pickerState = pendingPickerState;
@@ -678,17 +1038,59 @@
       activeElement: pickerState?.activeElement || document.activeElement,
       selection: pickerState?.selection || snapshotSelection(),
       changedStyles: new Map(),
-      freezeStyle: null,
+      freezeStyles: [],
+      roots: openRoots(),
       floating: [],
+      floatingNodes: new Set(),
+      floatingVisibility: new Map(),
+      pendingNodes: new Set(),
+      changedAnimations: new Map(),
+      captureAnimations: new Set(),
+      pinnedAnimations: new Set(),
+      animationIssues: new Set(),
+      surfaceSnapshots: new Map(),
+      surfacePixels: 0,
+      atStart: true,
+      atEnd: false,
       mutationCount: 0,
       lastHeartbeat: Date.now(),
       watchdog: 0,
       observer: null
     };
 
+    for (const animation of pageAnimations()) rememberAnimation(animation, false);
+    const effects = await pageEffects("begin", session.id);
+    if (effects.error) session.animationIssues.add(effects.error);
     freezePage(classification, request);
-    session.observer = new MutationObserver(() => { if (session) session.mutationCount++; });
-    session.observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    session.observer = new MutationObserver(mutations => {
+      if (!session) return;
+      session.mutationCount++;
+      const changedRoots = new Set();
+      for (const mutation of mutations) {
+        const candidates = mutation.type === "childList" ? [...mutation.addedNodes] : [mutation.target];
+        for (const node of candidates) {
+          if (!(node instanceof Element)) continue;
+          changedRoots.add(node);
+        }
+      }
+      // Animation libraries can write a wrapper's style hundreds of times in one
+      // task. Expand each affected subtree once, rather than walking thousands of
+      // descendants for every mutation before the pending-node Set deduplicates
+      // them. Stay within parentElement boundaries: a host's querySelectorAll does
+      // not visit its shadow tree, so that tree still needs its own expansion.
+      for (const node of changedRoots) {
+        let covered = false;
+        for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+          if (changedRoots.has(parent)) { covered = true; break; }
+        }
+        if (covered) continue;
+        session.pendingNodes.add(node);
+        for (const child of node.querySelectorAll("*")) session.pendingNodes.add(child);
+      }
+    });
+    for (const root of session.roots) {
+      session.observer.observe(root === document ? document.documentElement : root, { childList: true, subtree: true, attributes: true });
+    }
     session.watchdog = setInterval(() => {
       if (session && Date.now() - session.lastHeartbeat > WATCHDOG_MS) restore("watchdog");
     }, 1000);
@@ -696,6 +1098,7 @@
     await nextPaint();
     const metrics = currentMetrics();
     const warnings = collectWarnings();
+    if (classification.automaticScroller) warnings.push('Captured the main scrolling area. Use "Select an element" to capture another panel.');
     if (classification.kind === "ancestor-scroller") {
       warnings.push("The selected element is inside a separate scrolling panel; WinShot will scroll that panel and validate coverage.");
     }
@@ -704,11 +1107,29 @@
 
   function setFloatingVisibility(atStart, atEnd) {
     if (!session) return;
-    for (const item of session.floating) {
-      // Fixed header appears once (first tile), fixed footer/chat bar once (last tile,
-      // which lands at the true page bottom). Viewport-covering overlays only in tile 1.
-      const show = (item.anchor === "top" && atStart) || (item.anchor === "bottom" && atEnd) || (item.anchor === "overlay" && atStart);
-      rememberStyle(item.node, "visibility", show ? "visible" : "hidden");
+    session.atStart = atStart;
+    session.atEnd = atEnd;
+    const showing = new Map();
+    for (const { node, anchor } of session.floating) {
+      if (getComputedStyle(node).position !== "fixed") continue;
+      showing.set(node, (anchor === "top" && atStart) || (anchor === "bottom" && atEnd) || (anchor === "overlay" && atStart));
+    }
+    // Visibility can be overridden for a separately anchored fixed descendant.
+    // Apply it to each recorded node so explicit visibility:visible children do
+    // not leak through hidden wrappers. Group opacity would hide nested footers.
+    const owners = new Map();
+    for (const [node, original] of session.floatingVisibility) {
+      if (!node.isConnected) continue;
+      let owner = node;
+      const ancestors = [];
+      while (owner && !showing.has(owner) && !owners.has(owner)) {
+        ancestors.push(owner);
+        owner = composedParent(owner);
+      }
+      if (owner && !showing.has(owner)) owner = owners.get(owner);
+      for (const ancestor of ancestors) owners.set(ancestor, owner);
+      const visible = (!owner || showing.get(owner)) && original.visible && !session.surfaceSnapshots.has(node);
+      rememberStyle(node, "visibility", visible ? "visible" : "hidden", "important");
     }
   }
 
@@ -725,9 +1146,11 @@
       const target = session.kind === "document" ? { left: 0, top: 0 } : session.targetRect;
       window.scrollTo(target.left + request.x, target.top + request.y);
     } else if (session.kind === "self-scroller") {
-      session.owner.scrollTo(request.x, request.y);
+      const scale = ownerScale(session.owner);
+      session.owner.scrollTo(request.x / scale.x, request.y / scale.y);
     } else {
-      session.owner.scrollTo(session.ownerOffset.left + request.x, session.ownerOffset.top + request.y);
+      const scale = ownerScale(session.owner);
+      session.owner.scrollTo(session.ownerOffset.left + request.x / scale.x, session.ownerOffset.top + request.y / scale.y);
     }
 
     const result = await waitForStable(request.settleTimeoutMs);
@@ -735,9 +1158,11 @@
     return result;
   }
 
-  async function beginPicker(mode, frameInfo = null) {
+  async function beginPicker(mode, frameInfo = null, pickerId = null) {
+    if (pickerId && cancelledPickerIds.has(pickerId)) return { started: false, cancelled: true };
     pickerCleanup?.();
-    restore("picker-started");
+    activePickerId = pickerId;
+    await restore("picker-started");
     savePickerState();
     if (mode === "region") startRegionPicker();
     else startElementPicker(mode, frameInfo);
@@ -766,8 +1191,13 @@
     };
   }
 
-  function cancelPicker() {
+  function cancelPicker(pickerId = null) {
+    if (pickerId) cancelledPickerIds.add(pickerId);
+    // Bound tombstones for a long-lived page; capture IDs are never reused.
+    if (cancelledPickerIds.size > 256) cancelledPickerIds.delete(cancelledPickerIds.values().next().value);
+    if (pickerId && pickerId !== activePickerId) return { cancelled: false };
     pickerCleanup?.();
+    activePickerId = null;
     restorePickerState();
     return { cancelled: true };
   }
@@ -785,7 +1215,9 @@
   }
 
   function sendPickerResult(payload) {
-    chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload }).catch(() => {});
+    const pickerId = activePickerId;
+    activePickerId = null;
+    chrome.runtime.sendMessage({ type: "WINSHOT_PICK_RESULT", ...payload, pickerId }).catch(() => {});
   }
 
   function startElementPicker(mode = "element", frameInfo = null) {
@@ -793,7 +1225,7 @@
     const { outline, tip } = pickerChrome("Click an element · Hold Ctrl for the exact node · Yellow means hidden scrollable content · Esc cancels");
     if (frameMode) {
       const blocked = frameInfo?.inaccessible
-        ? ` · ${frameInfo.inaccessible} frame(s) here can't be captured (cross-origin or restricted)`
+        ? ` · ${frameInfo.inaccessible} frame(s) are still loading or restricted`
         : "";
       tip.textContent = window === top
         ? `Click inside the frame you want to capture${blocked} · Esc cancels`
@@ -808,7 +1240,7 @@
       if (!(candidate instanceof Element)) return null;
       if (!event.ctrlKey) {
         let scrollCandidate = candidate;
-        while (scrollCandidate && scrollCandidate !== document.body && !isScrollable(scrollCandidate).any) scrollCandidate = scrollCandidate.parentElement;
+        while (scrollCandidate && scrollCandidate !== document.body && !isScrollable(scrollCandidate).any) scrollCandidate = composedParent(scrollCandidate);
         if (scrollCandidate && scrollCandidate !== document.body) candidate = scrollCandidate;
       }
       return candidate;
@@ -896,14 +1328,17 @@
     const dim = document.createElement("div");
     dim.style.cssText = `position:fixed;inset:0;pointer-events:none;z-index:${PICKER_Z - 2};background:rgba(0,0,0,.3)`;
     dim.dataset.winshotPicker = "dim";
+    const inputPlane = document.createElement("div");
+    inputPlane.style.cssText = `position:fixed;inset:0;pointer-events:auto;z-index:${PICKER_Z - 3};cursor:crosshair`;
+    inputPlane.dataset.winshotPicker = "input";
     const guideH = document.createElement("div");
     const guideV = document.createElement("div");
     guideH.style.cssText = `position:fixed;left:0;width:100vw;height:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-top:1px dashed rgba(255,255,255,.85)`;
     guideV.style.cssText = `position:fixed;top:0;height:100vh;width:0;display:none;pointer-events:none;z-index:${PICKER_Z - 1};border-left:1px dashed rgba(255,255,255,.85)`;
     guideH.dataset.winshotPicker = "guide";
     guideV.dataset.winshotPicker = "guide";
-    document.documentElement.append(dim, guideH, guideV);
-    const ownNodes = [outline, tip, dim, guideH, guideV];
+    document.documentElement.append(inputPlane, dim, guideH, guideV);
+    const ownNodes = [outline, tip, inputPlane, dim, guideH, guideV];
     const unswallow = swallowPageEvents();
     let dragging = false;
     let start = null;
@@ -913,9 +1348,17 @@
     let autoTimer = 0;
 
     const elementUnderCursor = (event) => {
-      const path = event.composedPath?.() || [];
-      const candidate = path.find((node) => node instanceof Element && !ownNodes.includes(node)) || event.target;
-      return candidate instanceof Element ? candidate : null;
+      inputPlane.style.pointerEvents = "none";
+      let candidate;
+      try {
+        candidate = document.elementFromPoint(event.clientX, event.clientY);
+        while (candidate?.shadowRoot) {
+          const inner = candidate.shadowRoot.elementFromPoint(event.clientX, event.clientY);
+          if (!inner || inner === candidate) break;
+          candidate = inner;
+        }
+      } finally { inputPlane.style.pointerEvents = "auto"; }
+      return candidate instanceof Element && !ownNodes.includes(candidate) ? candidate : null;
     };
     const showElementHighlight = (element) => {
       const rect = element.getBoundingClientRect();
@@ -1043,7 +1486,7 @@
       removeEventListener("mousemove", move, true);
       removeEventListener("mouseup", up, true);
       removeEventListener("keydown", key, true);
-      outline.remove(); tip.remove(); dim.remove(); guideH.remove(); guideV.remove();
+      outline.remove(); tip.remove(); inputPlane.remove(); dim.remove(); guideH.remove(); guideV.remove();
       pickerCleanup = null;
     };
     pickerCleanup = cleanup;
@@ -1059,9 +1502,13 @@
         case "WINSHOT_PREPARE": return await prepare(request);
         case "WINSHOT_SCROLL": return await scrollTarget(request);
         case "WINSHOT_METRICS": return currentMetrics();
-        case "WINSHOT_HEARTBEAT":
-          if (session?.id === request.sessionId) session.lastHeartbeat = Date.now();
-          return { alive: Boolean(session) };
+        case "WINSHOT_HEARTBEAT": {
+          const current = session;
+          if (!current || current.id !== request.sessionId) return { alive: false, effectsAlive: false };
+          current.lastHeartbeat = Date.now();
+          const effects = await pageEffects("heartbeat", current.id);
+          return { alive: session === current, effectsAlive: typeof effects.handled === "boolean" ? effects.handled : null };
+        }
         case "WINSHOT_RESTORE": return restore(request.reason || "complete");
         case "WINSHOT_LOCATE_FRAME": return await locateFrameHost(request);
         case "WINSHOT_ANNOUNCE_FRAME":
@@ -1071,10 +1518,13 @@
         case "WINSHOT_RESTORE_FRAME_HOST": return restoreFrameHost();
         case "WINSHOT_HEARTBEAT_FRAME_HOST":
           if (frameHostSession?.id === request.sessionId) frameHostSession.lastHeartbeat = Date.now();
-          return { alive: Boolean(frameHostSession) };
+          return { alive: Boolean(frameHostSession && frameHostSession.id === request.sessionId) };
         case "WINSHOT_VISIBLE_SEMANTICS": return visibleSemantics();
-        case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null);
-        case "WINSHOT_CANCEL_PICKER": return cancelPicker();
+        case "WINSHOT_FRAME_INVENTORY": return {
+          count: openRoots().reduce((count, root) => count + [...root.querySelectorAll("iframe,frame")].filter(node => node.clientWidth > 100 && node.clientHeight > 50).length, 0)
+        };
+        case "WINSHOT_START_PICKER": return await beginPicker(request.mode, request.frameInfo || null, request.pickerId || null);
+        case "WINSHOT_CANCEL_PICKER": return cancelPicker(request.pickerId || null);
         default: return undefined;
       }
     };

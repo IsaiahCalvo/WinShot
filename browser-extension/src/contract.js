@@ -136,6 +136,9 @@ export function restrictedPageReason(url = "") {
 
 export function friendlyError(error) {
   const message = error instanceof Error ? error.message : String(error || "Unknown capture error");
+  if (/message (?:channel|port) closed|frame was removed/i.test(message)) {
+    return "The page navigated during capture or disconnected. WinShot stopped without claiming a complete image.";
+  }
   if (/cannot access|cannot be scripted|missing host permission|receiving end does not exist/i.test(message)) {
     return "This page is restricted by the browser. Visible capture may work, but scrolling and element capture are unavailable.";
   }

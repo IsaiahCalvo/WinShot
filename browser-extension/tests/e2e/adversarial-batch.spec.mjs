@@ -4,14 +4,14 @@
 // playwright.config.mjs starts. Executed serially (workers: 1 in the shared config).
 
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 const FIX = "http://127.0.0.1:4173";
 
 function pdfUtf16Hex(value) {
@@ -42,14 +42,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension() {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-advbatch-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -88,7 +81,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -146,6 +139,35 @@ async function activeTabUrl(run) {
 }
 
 // ---------------------------------------------------------------------------
+
+test("a parsed page with an unfinished hidden resource remains usable in an all-tabs batch", async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.setRequestInterception(true);
+    page.on("request", request => {
+      if (request.url().endsWith("/unfinished.png")) return;
+      if (request.url().endsWith("/pending-resource")) return request.respond({ contentType: "text/html", body: '<!doctype html><title>READY DOCUMENT</title><h1>READY DOCUMENT</h1><img style="display:none" src="/unfinished.png">' });
+      return request.continue();
+    });
+    await page.goto(`${FIX}/pending-resource`, { waitUntil: "domcontentloaded" });
+    expect(await page.evaluate(() => document.readyState)).toBe("interactive");
+    const target = batchTarget(run);
+    const popup = await openPopup(run, page);
+    await popup.select("#batch-mode", "visible");
+    const start = performance.now();
+    await popup.click("#all-tabs");
+    const summary = await (await target).asPage();
+    await summary.waitForSelector(".item.complete", { timeout: 10_000 });
+    expect(performance.now() - start).toBeLessThan(10_000);
+    const batch = await summary.evaluate(async () => {
+      const key = `batch:${new URL(location.href).searchParams.get("id")}`;
+      return (await chrome.storage.local.get(key))[key];
+    });
+    expect(batch.results).toHaveLength(1);
+    expect(batch.results[0]).toMatchObject({ title: "READY DOCUMENT", state: "complete" });
+  } finally { await closeExactExtension(run); }
+});
 
 test("all-tabs batch skips restricted tabs with honest reasons and renders an accurate results page", async () => {
   const run = await launchExactExtension();
@@ -266,7 +288,8 @@ test("URL batch enforces the 20-URL cap with explicit messaging and closes every
     await startBatchTask(run, "__advCapBatch", "urls", urls, { settings: { batchMode: "visible" } });
     const outcome = await settleWorkerTask(run, "__advCapBatch", 160_000);
     expect(outcome.err, `batch rejected: ${outcome.err}`).toBeUndefined();
-    expect(outcome.ok.complete).toBe(20);
+    const diagnostic = await readBatchSummary(run, outcome.ok.batchId);
+    expect(outcome.ok.complete, JSON.stringify(diagnostic)).toBe(20);
     expect(outcome.ok.failed).toBe(0);
     expect(outcome.ok.skipped).toBe(1);
 
@@ -414,15 +437,18 @@ test("cancel mid-batch closes disposable tabs, restores the original tab, and re
     await run.worker.evaluate(async () => await globalThis.__winshotTest.cancelActiveCapture());
 
     const outcome = await settleWorkerTask(run, "__advCancelBatch", 60_000);
-    expect(outcome.err, "cancelling must reject the batch instead of fabricating a report").toBeTruthy();
-    expect(outcome.err).toMatch(/cancel/i);
+    expect(outcome.err).toBeUndefined();
+    const stopped = await readBatchSummary(run, outcome.ok.batchId);
+    expect(stopped.cancelled).toBe(true);
+    expect(stopped.results.every(item => item.state !== "complete"), "a stopped first capture must not be reported complete").toBe(true);
 
-    // Disposable tabs are closed, the original tab is active again, and no report page opened.
+    // Disposable tabs close and the original stays active. A background report
+    // retains honest stopped results without interrupting the restored page.
     await expect.poll(async () =>
       (await run.browser.pages()).filter((page) => /\/(sticky|horizontal)$/.test(page.url())).length,
     { timeout: 15_000 }).toBe(0);
     await expect.poll(() => activeTabUrl(run), { timeout: 15_000 }).toBe(`${FIX}/body`);
-    expect(run.browser.targets().some((target) => target.url().includes("/src/batch.html"))).toBe(false);
+    expect(run.browser.targets().some((target) => target.url().includes(`/src/batch.html?id=${outcome.ok.batchId}`))).toBe(true);
 
     // Both the per-window lock and the batch slot must be free again.
     const followUp = await run.worker.evaluate(async () =>

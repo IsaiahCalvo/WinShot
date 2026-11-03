@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>WinShot Batch Capture</title>
+  <link rel="icon" href="../icons/32.png">
   <link rel="stylesheet" href="batch.css">
 </head>
 <body>
@@ -11,6 +12,7 @@
     <h1>Batch capture results</h1>
     <p id="summary">Loading...</p>
     <button id="save-batch-pdf" disabled>Save all completed captures as one PDF</button>
+    <div class="batch-actions"><label for="batch-file-format">Individual files</label><select id="batch-file-format"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option><option value="pdf">PDF</option><option value="gif">GIF</option><option value="bmp">BMP</option></select><button id="save-batch-files" disabled>Save files as ZIP</button></div>
     <p id="pdf-status" role="status"></p>
     <section id="results"></section>
     <section id="skipped"></section>

@@ -10,14 +10,14 @@
 // test can run the real extension at deviceScaleFactor 2.
 
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 function removeOwnedDirectory(directory, prefix) {
   const resolved = path.resolve(directory);
@@ -38,21 +38,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension(viewport = { width: 1200, height: 1000 }) {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: viewport,
-    args: [
-      `--window-size=${viewport.width},${viewport.height}`,
-      // Viewport emulation alone does not reach chrome.tabs.captureVisibleTab
-      // (the physical surface stays 1x), so a DPR test must scale the real window.
-      ...(viewport.deviceScaleFactor && viewport.deviceScaleFactor !== 1
-        ? [`--force-device-scale-factor=${viewport.deviceScaleFactor}`]
-        : [])
-    ]
-  });
+  const browser = await launchCaptureBrowser(profileRoot, viewport);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -91,7 +77,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -269,28 +255,72 @@ test("overflow:hidden body never silently claims a complete full-page capture", 
   }
 });
 
-test("rAF-animated pixels drop seam confidence and force an honest partial result", async () => {
+test("rAF canvas pixels are snapshotted consistently without stopping or replacing their context", async () => {
   const run = await launchExactExtension();
   try {
     const page = await run.browser.newPage();
     monitorPage(page, run.errors);
     await page.goto("http://127.0.0.1:4173/js-animated", { waitUntil: "networkidle0" });
 
-    const { record } = await captureFromPopup(run, page, "[data-mode='full-page']");
-    // The freeze style pauses CSS animations, but requestAnimationFrame canvas
-    // repaints cannot be frozen — overlapping tile bands MUST disagree, and the
-    // engine must say so instead of claiming a clean capture.
+    const { editor, record } = await captureFromPopup(run, page, "[data-mode='full-page']");
     expect(record.report.tileCount).toBeGreaterThanOrEqual(3);
     expect(record.report.coverage.complete).toBe(true);
-    expect(record.report.seamConfidence.minimum).toBeLessThan(0.7);
-    expect(record.state).toBe("partial");
-    expect(record.report.warnings.join(" ")).toMatch(/overlaps changed substantially/i);
+    expect(record.report.seamConfidence.minimum).toBe(1);
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    const pixels = await editor.evaluate(async () => {
+      const store = await import(chrome.runtime.getURL('src/store.js'));
+      const tile = await store.getTile(new URL(location.href).searchParams.get('id'), 0);
+      const bitmap = await createImageBitmap(tile.blob), ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+      ctx.drawImage(bitmap,0,0);bitmap.close();
+      let black=0,white=0;
+      for(let y=20;y<800;y+=40) for(let x=20;x<1000;x+=40) {
+        const [r,g,b]=ctx.getImageData(x,y,1,1).data;
+        if(r<10&&g<10&&b<10) black++;if(r>245&&g>245&&b>245) white++;
+      }
+      return {black,white};
+    });
+    expect(pixels.black).toBeGreaterThan(100); expect(pixels.white).toBeGreaterThan(100);
+    await page.bringToFront();
+    expect(await page.evaluate(()=>({copies:document.querySelectorAll('[data-winshot-surface]').length,visibility:document.querySelector('#anim').style.visibility}))).toEqual({copies:0,visibility:''});
+    const initial=await page.$eval('#anim',n=>n.toDataURL());
+    await expect.poll(()=>page.$eval('#anim',n=>n.toDataURL())).not.toBe(initial);
     expect(record.report.warnings.join(" ")).toMatch(/Canvas\/WebGL/);
     expect(record.report.restoration).toBe("verified by read-back");
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);
   }
+});
+
+for (const variant of ["static", "fixed", "idle"]) test(`a ${variant} WebGL canvas with a non-preserved buffer captures real pixels and resumes`, async () => {
+  const run = await launchExactExtension();
+  try {
+    const page = await run.browser.newPage();
+    await page.goto("http://127.0.0.1:4173/body");
+    const supported = await page.evaluate(variant => {
+      const position = variant === "fixed" ? "fixed" : "static";
+      document.body.innerHTML='<canvas id="webgl" width="1000" height="900"></canvas><div style="height:3600px">AFTER WEBGL</div>';
+      const canvas=document.querySelector('#webgl');canvas.style.cssText=`display:block;position:${position};top:0;left:0`;
+      const gl=canvas.getContext('webgl',{preserveDrawingBuffer:false});if(!gl)return false;
+      window.originalCanvas=canvas;window.originalContext=gl;window.paintCount=0;
+      function draw(time){window.paintCount++;gl.clearColor(.8+.1*Math.sin(time/120),.04,.02,1);gl.clear(gl.COLOR_BUFFER_BIT);if(variant!=="idle")requestAnimationFrame(draw);}
+      requestAnimationFrame(draw);return true;
+    }, variant);
+    expect(supported, 'WebGL must be available; this regression must not silently skip').toBe(true);
+    const { editor, record }=await captureFromPopup(run,page,"[data-mode='full-page']");
+    expect(record.state,JSON.stringify(record.report)).toBe('complete');
+    expect(record.report.seamConfidence.minimum).toBe(1);
+    const pixel=await editor.evaluate(async()=>{
+      const s=await import(chrome.runtime.getURL('src/store.js')),t=await s.getTile(new URL(location.href).searchParams.get('id'),0);
+      const b=await createImageBitmap(t.blob),c=new OffscreenCanvas(b.width,b.height).getContext('2d');c.drawImage(b,0,0);b.close();return[...c.getImageData(20,20,1,1).data];
+    });
+    expect(pixel[0]).toBeGreaterThan(170);expect(pixel[1]).toBeLessThan(25);expect(pixel[2]).toBeLessThan(15);expect(pixel[3]).toBe(255);
+    await page.bringToFront();
+    const restored=await page.evaluate(()=>({same:document.querySelector('#webgl')===window.originalCanvas,lost:window.originalContext.isContextLost(),copies:document.querySelectorAll('[data-winshot-surface]').length,visibility:window.originalCanvas.style.visibility,count:window.paintCount}));
+    expect(restored).toMatchObject({same:true,lost:false,copies:0,visibility:''});
+    if(variant!=="idle") await expect.poll(()=>page.evaluate(()=>window.paintCount)).toBeGreaterThan(restored.count);
+    expect(record.report.restoration).toBe('verified by read-back');
+  } finally {await closeExactExtension(run);}
 });
 
 test("growing page with a tall fixed footer leaves no stale footer band mid-image", async () => {
@@ -351,7 +381,7 @@ test("growing page with a tall fixed footer leaves no stale footer band mid-imag
   }
 });
 
-test("transform-scaled scroll container is never reported as a clean complete capture", async () => {
+test("transform-scaled scroll container captures its complete rendered extent", async () => {
   const run = await launchExactExtension();
   try {
     const page = await run.browser.newPage();
@@ -368,23 +398,13 @@ test("transform-scaled scroll container is never reported as a clean complete ca
     const { record } = await recordFromEditorTarget(await waitingEditor);
 
     expect(record.report.target).toBe("self-scroller");
-    // The engine mixes layout-space scroll offsets with visually-scaled clip
-    // rectangles for transformed scrollers, so a genuinely correct complete
-    // capture is impossible today. The contract under test: it must self-report
-    // (coverage gap and/or seam mismatch), never claim a clean complete result.
-    if (record.state === "complete") {
-      expect(record.report.coverage.complete).toBe(true);
-      expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
-      // A complete claim must also cover the scroller's full layout extent
-      // (25 rows x 120px = exactly 3000 CSS px).
-      expect(record.report.dimensionsCss.height).toBeGreaterThanOrEqual(3000);
-    } else {
-      expect(record.state).toBe("partial");
-      expect(
-        record.report.coverage.complete === false || record.report.seamConfidence.minimum < 0.7,
-        JSON.stringify(record.report)
-      ).toBe(true);
-    }
+    expect(record.state, JSON.stringify(record.report)).toBe("complete");
+    expect(record.report.coverage.complete).toBe(true);
+    expect(record.report.seamConfidence.minimum).toBeGreaterThanOrEqual(0.7);
+    // 25 rows x 120 layout pixels, rendered at scale(.5). Keep image placement,
+    // crop rectangles and scroll offsets in the same visual coordinate space.
+    expect(record.report.dimensionsCss.height).toBe(1500);
+    expect(record.report.dimensionsPx.height).toBe(1500);
     // Whatever the outcome, the page must be restored exactly.
     expect(await page.$eval("#scaled", (element) => element.scrollTop)).toBe(0);
     expect(await page.$eval("#scaled", (element) => element.getAttribute("data-winshot-target"))).toBeNull();

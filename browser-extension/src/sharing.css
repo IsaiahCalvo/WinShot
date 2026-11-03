@@ -1,0 +1,15 @@
+#share-dialog { width:min(560px,calc(100vw - 32px)); box-sizing:border-box; font:14px/1.5 system-ui,"Segoe UI",sans-serif; background:#202125; color:#f4f4f5; border:1px solid #45464d; border-radius:16px; padding:24px; box-shadow:0 24px 80px #0008; }
+#share-dialog::backdrop { background:#0009; backdrop-filter:blur(3px); }
+#share-dialog .share-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+#share-dialog h2 { margin:0; font-size:20px; }
+#share-dialog button,#share-dialog a { font:inherit; color:inherit; background:#303137; border:1px solid #53545e; border-radius:8px; padding:10px 14px; text-decoration:none; cursor:pointer; }
+#share-dialog button:hover,#share-dialog a:hover { border-color:#ff727b; background:#3a3035; }
+#share-dialog button:focus-visible,#share-dialog a:focus-visible { outline:2px solid #ff727b; outline-offset:3px; }
+#share-dialog button:disabled { opacity:.45; cursor:default; }
+#share-dialog p { line-height:1.5; }
+#share-dialog .share-help { color:#bdbdc7; font-size:13px; }
+#share-dialog .share-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+#share-dialog #share-file-ready:not([hidden]) { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:16px; }
+#share-dialog #share-status { min-height:24px; color:#ffd4d7; margin-bottom:0; }
+@media(max-width:480px) { #share-dialog { padding:18px; } #share-dialog .share-options { grid-template-columns:1fr; } }
+@media(prefers-reduced-motion:no-preference) { #share-dialog[open] { animation:share-appear .14s ease-out; } @keyframes share-appear { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } }

@@ -9,14 +9,14 @@
 //   - selection on a pre-scrolled page: document-anchored rect, mid-drag Ctrl square, focus/scroll restore
 //   - picker left open/dragging past the 9s state watchdog (scroll must not be yanked mid-drag)
 import { test, expect } from "@playwright/test";
-import puppeteer from "puppeteer";
+import { launchCaptureBrowser } from "./launch-browser.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const extensionPath = path.resolve(here, "..", "..", "dist", "winshot-capture");
+const extensionPath = process.env.WINSHOT_EXTENSION_PATH || path.resolve(here, "..", "..", "dist", "winshot-capture");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -39,14 +39,7 @@ function monitorPage(page, errors) {
 async function launchExactExtension() {
   const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "winshot-adversarial-e2e-"));
   const errors = [];
-  const browser = await puppeteer.launch({
-    executablePath: await puppeteer.executablePath(),
-    headless: true,
-    userDataDir: profileRoot,
-    enableExtensions: true,
-    defaultViewport: { width: 1200, height: 1000 },
-    args: ["--window-size=1200,1000"]
-  });
+  const browser = await launchCaptureBrowser(profileRoot);
   browser.on("targetcreated", async (target) => {
     if (target.type() !== "page") return;
     const page = await target.page().catch(() => null);
@@ -85,7 +78,7 @@ async function openPopup(run, fixturePage) {
   await run.extension.triggerAction(fixturePage);
   const popup = await (await popupTarget).asPage();
   monitorPage(popup, run.errors);
-  await popup.waitForSelector("[data-mode='full-page']");
+  await popup.waitForSelector("body[data-ready='true']");
   return popup;
 }
 
@@ -266,14 +259,13 @@ test("starting the picker twice leaves exactly one overlay and one capture per d
   }
 });
 
-test("starting the region picker during an active capture fails the capture honestly and the picker still works", async () => {
+test("starting the region picker during an active capture is refused and works after Stop", async () => {
   const run = await launchExactExtension();
   try {
     const page = await run.browser.newPage();
     monitorPage(page, run.errors);
     await page.goto("http://127.0.0.1:4173/long", { waitUntil: "networkidle0" });
 
-    const doomedEditor = editorTarget(run);
     const popup = await openPopup(run, page);
     await popup.click("[data-mode='full-page']");
     await page.waitForSelector("[data-winshot-capture]", { timeout: 10_000 });
@@ -281,20 +273,22 @@ test("starting the region picker during an active capture fails the capture hone
     await popup.close().catch(() => {});
     await page.bringToFront();
 
-    // The capture-region hotkey path has no in-flight guard — this is exactly what
-    // pressing the shortcut mid-capture does.
-    await run.worker.evaluate(async () => await globalThis.__winshotTest.startPicker("region"));
-    await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 10_000 });
-    // The superseded capture must release the page immediately (freeze styles removed).
+    // A shortcut must not tear down the session that owns this window.
+    const blocked = await run.worker.evaluate(async () => {
+      try { await globalThis.__winshotTest.startPicker("region"); return "unexpected start"; }
+      catch (error) { return error.message; }
+    });
+    expect(blocked).toMatch(/already (waiting|running)/i);
+    expect(await page.$$('[data-winshot-picker]')).toHaveLength(0);
+    expect(await page.$$('[data-winshot-capture]')).not.toHaveLength(0);
+    expect(await run.worker.evaluate(() => globalThis.__winshotTest.cancelActiveCapture())).toEqual({ cancelled: true });
     await page.waitForFunction(() => !document.querySelector("[data-winshot-capture]"), { timeout: 10_000 });
+    await expect.poll(() => run.worker.evaluate(() => chrome.action.getBadgeText({}))).toBe("");
+    expect(run.browser.targets().some(target => target.url().includes("/src/editor.html"))).toBe(false);
+    await run.worker.evaluate(() => globalThis.__winshotTest.startPicker("region"));
+    await page.waitForSelector("[data-winshot-picker='tip']", { timeout: 10_000 });
 
-    // The interrupted capture must end as an honest failure, never a silent "complete".
-    const { record: doomed } = await recordFromEditorTarget(await doomedEditor);
-    expect(doomed.state).toBe("failed");
-    expect(doomed.error || "").toMatch(/session|restored|active tab/i);
-    expect(doomed.report.coverage?.complete).not.toBe(true);
-
-    // The picker overlay left on the page must still produce a working region capture.
+    // After Stop releases the window, the picker must produce a real capture.
     const waitingEditor = editorTarget(run);
     await page.bringToFront();
     await page.mouse.move(150, 150);

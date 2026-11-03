@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeDesktopIcons } from "./icons.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
@@ -13,7 +14,7 @@ for (const name of ["manifest.json", "README.md", "THIRD_PARTY_NOTICES.md"]) {
 }
 fs.cpSync(path.join(project, "src"), path.join(output, "src"), { recursive: true });
 fs.cpSync(path.join(project, "docs"), path.join(output, "docs"), { recursive: true });
-fs.cpSync(path.join(project, "icons"), path.join(output, "icons"), { recursive: true });
+writeDesktopIcons(path.join(output, "icons"));
 
 const manifest = JSON.parse(fs.readFileSync(path.join(output, "manifest.json"), "utf8"));
 if (manifest.manifest_version !== 3 || !manifest.background?.service_worker) {
