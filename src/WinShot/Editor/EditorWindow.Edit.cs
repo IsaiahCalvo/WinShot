@@ -328,6 +328,22 @@ public partial class EditorWindow : Window
             return;
         }
 
+        // Text select's own keys: Ctrl+A picks every word, Esc drops the pick.
+        if (_textSelectMode && _tool == EditorTool.Select)
+        {
+            if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                SelectAllText();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None && ClearPickedText())
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
         EditorShortcutCommand shortcut = EditorShortcut.Resolve(e.Key, Keyboard.Modifiers);
         if (shortcut != EditorShortcutCommand.None)
         {
@@ -343,6 +359,7 @@ public partial class EditorWindow : Window
                 // Survey: Ctrl+C copies the picked marks. With nothing picked it copies the
                 // edited picture, which is what WinShot's Ctrl+C has always done.
                 case EditorShortcutCommand.Copy:
+                    if (TryCopyPickedText()) break; // Text select: the picked words
                     if (!CopySelectedAnnotations()) OnCopy(this, new RoutedEventArgs());
                     break;
                 case EditorShortcutCommand.Cut:
@@ -392,7 +409,7 @@ public partial class EditorWindow : Window
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers == ModifierKeys.None && _lassoSelect
+        if (Keyboard.Modifiers == ModifierKeys.None && (_lassoSelect || _textSelectMode)
             && EditorToolKeys.Resolve(e.Key, false)?.Tool == EditorTool.Select)
         {
             SetLassoSelect(false);

@@ -28,11 +28,17 @@ internal static class EditorToolKeys
     public const string ActionBackground = "background";
     public const string ActionAddImage = "addImage";
 
+    /// <summary>Shift+V: Select's Text mode, which picks the words in the picture (Survey "Text Select").</summary>
+    public const string ActionTextSelect = "textSelect";
+
     /// <summary>The keys as shipped, before any the user has changed.</summary>
     public static readonly IReadOnlyList<ToolKey> Defaults = new ToolKey[]
     {
         new(EditorTool.Pan, null, Key.M, false, "Pan"),          // Survey TOOL_SHORTCUTS: Pan is M
         new(EditorTool.Select, null, Key.V, false, "Select"),
+        // Survey: "V picks annotations up off the page, Shift+V picks the [picture's] own
+        // words off it — same key, 'more' modifier."
+        new(null, ActionTextSelect, Key.V, true, "Text select"),
         new(EditorTool.Freehand, null, Key.P, false, "Pen"),
         new(EditorTool.Highlighter, null, Key.H, false, "Highlighter"),
         new(EditorTool.Eraser, null, Key.E, false, "Eraser"),

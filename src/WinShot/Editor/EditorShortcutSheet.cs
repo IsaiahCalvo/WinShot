@@ -57,6 +57,9 @@ internal static class EditorShortcutSheet
                 new("Shift+Click", "Add to or remove from the selection"),
                 new("Alt+Drag", "Move without snapping"),
                 new("Right-click → Lock", "Lock a mark so it can't be moved, resized, restyled or deleted"),
+                new("Text select: Drag", "Select the words in the picture"),
+                new("Text select: Double / triple-click", "Select a word / a line"),
+                new("Text select: Ctrl+A / Ctrl+C", "Select all the text / copy it"),
             }),
             new ShortcutSection("Drawing", new ShortcutRow[]
             {

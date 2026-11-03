@@ -314,6 +314,64 @@ public static class OcrService
     }
 
     /// <summary>
+    /// Every word the engine reads in <paramref name="bmp"/>, with its text, its box in the
+    /// bitmap's OWN pixels and the line it sits on, in reading order. This is what the
+    /// editor's Text select draws and picks from, the way Live Text on a Mac lets you drag
+    /// across the words in a picture.
+    ///
+    /// Throws <see cref="OcrUnavailableException"/> when there is no language pack: unlike
+    /// the redaction caller, the user asked to read this text, so "nothing found" would send
+    /// them looking for a fault in the picture instead of the missing pack.
+    /// </summary>
+    public static async Task<IReadOnlyList<OcrTextWord>> ExtractWordLayoutAsync(SD.Bitmap bmp)
+    {
+        OcrEngine? engine = GetEngine();
+        if (engine is null)
+            throw new OcrUnavailableException(
+                "No OCR language pack is installed. Add one in Settings > Time & language.");
+
+        double scale = LayoutOcrScale(bmp.Width, bmp.Height);
+        BgraSnapshot snapshot = await Task.Run(() => SnapshotAtScale(bmp, scale));
+        using SoftwareBitmap softwareBitmap = ToSoftwareBitmap(snapshot);
+        OcrResult result = await engine.RecognizeAsync(softwareBitmap);
+
+        var words = new List<OcrTextWord>();
+        var image = new SD.Rectangle(0, 0, bmp.Width, bmp.Height);
+        int lineIndex = 0;
+        foreach (OcrLine line in result.Lines)
+        {
+            bool any = false;
+            foreach (OcrWord word in line.Words)
+            {
+                if (string.IsNullOrWhiteSpace(word.Text)) continue;
+                SD.Rectangle box = ScaleWordBox(
+                    word.BoundingRect.X, word.BoundingRect.Y,
+                    word.BoundingRect.Width, word.BoundingRect.Height,
+                    scale, image);
+                if (box.Width <= 0 || box.Height <= 0) continue;
+                words.Add(new OcrTextWord(word.Text, box, lineIndex));
+                any = true;
+            }
+            if (any) lineIndex++;
+        }
+        return words;
+    }
+
+    /// <summary>
+    /// Scale for a whole-picture word read. A full screenshot's text is small, and the engine
+    /// misses glyphs under ~20 px, so the picture is read as large as the engine allows, up to
+    /// twice its size — a 1080p capture reads at 1.35x instead of 1x. Small pictures still get
+    /// <see cref="InitialOcrScale"/>'s bigger lift.
+    /// </summary>
+    internal static double LayoutOcrScale(int width, int height)
+    {
+        int maxSide = Math.Max(1, Math.Max(width, height));
+        double cap = OcrEngine.MaxImageDimension / (double)maxSide;
+        double lift = Math.Max(InitialOcrScale(width, height), Math.Min(2.0, cap));
+        return Math.Min(lift, cap);
+    }
+
+    /// <summary>
     /// One word box, divided back down by the scale the engine read at and clipped to the
     /// image. Rounding is deliberately outward — floor the origin, ceil the size — so the
     /// box never lands a pixel INSIDE a glyph, which for a redaction would leave a sliver
@@ -737,3 +795,6 @@ public static class OcrService
 /// <see cref="OcrService.ExtractAsync"/> can raise, and quoted those to the user too.
 /// </summary>
 public sealed class OcrUnavailableException(string message) : Exception(message);
+
+/// <summary>One recognised word: its text, its box in the read bitmap's pixels, and its line (0-based, reading order).</summary>
+public sealed record OcrTextWord(string Text, SD.Rectangle Box, int Line);

@@ -2458,6 +2458,13 @@ public partial class EditorWindow : Window
     private void OnViewportRightClick(object sender, MouseButtonEventArgs e)
     {
         if (_sourceOperationActive || IsQuickBarSource(e.OriginalSource)) return;
+        if (IsTextBarSource(e.OriginalSource)) return;
+        if (_textSelectMode && _tool == EditorTool.Select)
+        {
+            ShowTextSelectMenu();
+            e.Handled = true;
+            return;
+        }
         var hit = HitTestAnnotation(e.GetPosition(AnnotationCanvas));
         if (hit is null) return;
         // Right-clicking inside a multi-selection keeps it whole, so the menu's z-order
@@ -2511,6 +2518,8 @@ public partial class EditorWindow : Window
         // B and I are not tools at all: they run the two image ACTIONS.
         if (entry.Action == EditorToolKeys.ActionBackground) { OnAddBackground(this, new RoutedEventArgs()); return true; }
         if (entry.Action == EditorToolKeys.ActionAddImage) { OnAddImage(this, new RoutedEventArgs()); return true; }
+        // Shift+V: Select's Text mode (Survey toolShortcuts.js "Text Select").
+        if (entry.Action == EditorToolKeys.ActionTextSelect) { EnterTextSelect(); return true; }
         if (entry.Tool is not EditorTool t) return false;
         CheckToolButton(t);
         // E leaves the eraser's mode alone; Shift+E forces partial.
