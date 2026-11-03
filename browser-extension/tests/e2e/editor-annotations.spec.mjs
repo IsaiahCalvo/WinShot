@@ -126,10 +126,21 @@ test("desktop-style markup burns into exports, persists, and supports crop, resi
     // Toolbar shows the desktop's tool groups with real icons.
     const toolbar = await editor.evaluate(() => ({
       categories: [...document.querySelectorAll("[data-category]")].map((node) => node.textContent.trim()),
-      iconCount: document.querySelectorAll("#toolbar svg").length
+      iconCount: document.querySelectorAll("#toolbar svg").length,
+      // Page and share actions are icon buttons (Lucide), as on the desktop bottom bar.
+      actionIcons: ["#copy-clipboard", "#print-capture", "#open-desktop", "#open-history", "#open-options", "#toggle-details", "#zoom-fit"]
+        .filter((selector) => document.querySelector(`${selector} svg`)).length,
+      detailsHidden: !document.querySelector("#details").classList.contains("open")
     }));
     expect(toolbar.categories).toEqual(["Draw", "Shapes", "Text", "Effects", "Image"]);
-    expect(toolbar.iconCount).toBeGreaterThanOrEqual(10);
+    expect(toolbar.iconCount).toBeGreaterThanOrEqual(9);
+    expect(toolbar.actionIcons).toBe(7);
+    // Capture details start tucked into the rail and slide out on demand.
+    expect(toolbar.detailsHidden).toBe(true);
+    await editor.click("#toggle-details");
+    expect(await editor.evaluate(() => document.querySelector("#details").classList.contains("open"))).toBe(true);
+    await editor.click("#close-details");
+    expect(await editor.evaluate(() => document.querySelector("#details").classList.contains("open"))).toBe(false);
 
     await editor.evaluate(() => globalThis.__winshotEditor.setEdits({
       annotations: [

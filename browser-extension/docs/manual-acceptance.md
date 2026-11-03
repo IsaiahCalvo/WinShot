@@ -22,7 +22,8 @@ Automated tests use disposable browser profiles. They cover every browser-native
 8. **PDF:** search for page text, click a captured link, and try single-page, multipage, Letter/A4, header, footer, and watermark settings.
 9. **Editor:** draw with each tool group (Draw, Shapes, Text, Effects, Image), change colours, undo/redo, crop, resize, then Save PNG and PDF and confirm the marks are in both. Reopen the capture from History: the marks are still editable.
 10. **After-capture action:** in Settings choose "Save the image" and a Downloads sub-folder, capture, and confirm the file lands there without the editor staying open.
-11. **Open in WinShot:** with WinShot desktop running, press Open in WinShot in the editor and confirm the desktop editor opens the saved PNG.
+11. **Open in WinShot:** with WinShot desktop running, press Open in WinShot (bottom right) in the editor and confirm the desktop editor opens the saved PNG.
+12. **Details panel:** the right rail's top button slides capture details and PDF options out and back; each section folds open and shut.
 
 ## Desktop-only acceptance
 

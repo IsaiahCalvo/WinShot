@@ -17,6 +17,12 @@ because the canvas draws only the visible window. Marks are stored in image pixe
 record (`record.edits`) and are flattened into fresh tiles by `src/annotations.js` before every
 export, so PNG/JPEG/WebP/PDF/copy/print all include them and PDF text and links follow the crop.
 
+The editor follows the desktop editor's layout: tools centred in the top bar (History and Settings
+on the right), the open group's tools and styles on the row below, zoom on a right rail, and Save
+PNG / JPEG / WebP / PDF with Copy, Print and Open in WinShot on the bottom bar. Capture details,
+warnings and PDF options sit in a panel that slides out of the rail (a dot on the rail button
+means there are warnings to read). Page icons come from Lucide (`src/lucide.js`).
+
 Other FireShot-parity additions: a Settings page (after-capture action — editor, save image,
 save PDF, or copy — Downloads sub-folder, Save As prompt, file names, shortcuts), a full
 right-click menu, opening or pasting any image from History, and **Open in WinShot**, which saves

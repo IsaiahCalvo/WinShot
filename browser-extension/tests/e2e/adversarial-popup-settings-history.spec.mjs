@@ -450,13 +450,16 @@ test("history select-all spans filter and pagination, thumbnail falls back, and 
       preview: document.querySelector("#preview").textContent,
       warningsHidden: document.querySelector("#warnings").hidden,
       warningText: document.querySelector("#warnings").textContent,
-      disabled: [...document.querySelectorAll("header button")].map((button) => button.disabled)
+      disabled: [...document.querySelectorAll("header button, footer button")].map((button) => button.disabled),
+      detailsOpen: document.querySelector("#details").classList.contains("open")
     }));
     expect(editorView.state).toBe("failed");
     expect(editorView.preview).toContain("No verified pixels");
     expect(editorView.warningsHidden).toBe(false);
     expect(editorView.warningText).toContain("Boom - capture failed for test");
     expect(editorView.disabled.every(Boolean)).toBe(true);
+    // With no pixels to show, the details panel opens so the failure is explained.
+    expect(editorView.detailsOpen).toBe(true);
     expect(run.errors).toEqual([]);
   } finally {
     await closeExactExtension(run);

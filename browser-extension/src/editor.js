@@ -3,6 +3,7 @@ import { exportJpeg, exportPdf, exportPng, exportWebp } from "./exporters.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { saveBlob } from "./downloads.js";
 import { ICONS } from "./icons.js";
+import { LUCIDE } from "./lucide.js";
 import {
   DEFAULT_STYLE, PALETTE, TileSource, annotationBounds, drawAnnotations, drawMark, effectKey, buildEffect,
   flattenEdits, hasEdits, hitTest, newId, normalizeEdits, normalizeRect, outputSize, stepRadius, textMetrics,
@@ -25,7 +26,8 @@ const textEditor = document.querySelector("#text-editor");
 const contextBar = document.querySelector("#context");
 const subbar = document.querySelector("#subbar");
 const details = document.querySelector("#details");
-const headerButtons = () => [...document.querySelectorAll("header button")];
+// Every control that edits or exports: all of them go dark when there are no pixels.
+const actionButtons = () => [...document.querySelectorAll("header button, .subrow button, footer button")];
 const exportButtons = [...document.querySelectorAll(".actions button")];
 
 let record;
@@ -37,12 +39,17 @@ const objectUrls = [];
 // ---- icons and tooltips ----------------------------------------------------
 
 function paintIcons(root = document) {
-  for (const node of root.querySelectorAll("[data-icon]")) {
+  for (const node of root.querySelectorAll("[data-icon], [data-lucide]")) {
     if (node.dataset.painted) continue;
-    const svg = ICONS[node.dataset.icon];
+    const svg = node.dataset.lucide ? LUCIDE[node.dataset.lucide] : ICONS[node.dataset.icon];
     if (!svg) continue;
-    const label = node.textContent.trim();
-    node.innerHTML = svg + (label ? `<span>${label}</span>` : "");
+    // Keep any child (the rail's warning dot) and wrap the visible label so busy states
+    // can rewrite the words without wiping the icon.
+    const label = [...node.childNodes].filter((child) => child.nodeType === Node.TEXT_NODE).map((child) => child.textContent).join("").trim();
+    const extras = [...node.children];
+    node.textContent = "";
+    node.insertAdjacentHTML("afterbegin", svg + (label ? `<span class="label">${label}</span>` : ""));
+    node.append(...extras);
     node.dataset.painted = "1";
   }
 }
@@ -59,8 +66,18 @@ document.addEventListener("pointerover", (event) => {
     const rect = target.getBoundingClientRect();
     tooltip.classList.add("show");
     const width = tooltip.offsetWidth;
-    tooltip.style.left = `${Math.max(6, Math.min(innerWidth - width - 6, rect.left + rect.width / 2 - width / 2))}px`;
-    tooltip.style.top = `${rect.bottom + 6}px`;
+    const height = tooltip.offsetHeight;
+    if (target.dataset.tipSide === "left") {
+      // Rail tooltips fly out to the left so they clear the rail, as on the desktop.
+      tooltip.style.left = `${Math.max(6, rect.left - width - 8)}px`;
+      tooltip.style.top = `${Math.max(6, rect.top + rect.height / 2 - height / 2)}px`;
+    } else if (target.closest(".bottombar")) {
+      tooltip.style.left = `${Math.max(6, Math.min(innerWidth - width - 6, rect.left + rect.width / 2 - width / 2))}px`;
+      tooltip.style.top = `${rect.top - height - 6}px`;
+    } else {
+      tooltip.style.left = `${Math.max(6, Math.min(innerWidth - width - 6, rect.left + rect.width / 2 - width / 2))}px`;
+      tooltip.style.top = `${rect.bottom + 6}px`;
+    }
     tooltipWarmUntil = Date.now() + 600;
   };
   // Wait once, then show neighbours at once — the desktop app's tooltip timing.
@@ -73,7 +90,7 @@ document.addEventListener("pointerout", (event) => {
     tooltipWarmUntil = Date.now() + 600;
   }
 });
-document.addEventListener("pointerdown", () => tooltip.classList.remove("show"), true);
+document.addEventListener("pointerdown", () => { clearTimeout(tooltipTimer); tooltip.classList.remove("show"); }, true);
 
 function showToast(message) {
   toast.textContent = message;
@@ -132,8 +149,9 @@ function renderReport() {
       li.textContent = item;
       list.append(li);
     }
-    // Problems are worth seeing; a clean capture keeps the canvas wide.
-    details.classList.remove("collapsed");
+    // Problems are worth seeing, but the panel stays tucked away: a dot on the rail
+    // button says there is something to read.
+    document.querySelector("#toggle-details .dot").hidden = false;
   }
 }
 
@@ -1265,11 +1283,12 @@ function fileName(extension) {
 
 async function runExport(button, label, extension, exporter, saveOptions = {}) {
   exportButtons.forEach((item) => { item.disabled = true; });
-  const original = button.textContent;
+  const text = button.querySelector(".label") || button;
+  const original = text.textContent;
   try {
-    button.textContent = `${label} 0%`;
-    const flat = await effective((progress) => { button.textContent = `${label} ${Math.round(progress * 30)}%`; });
-    const blob = await exporter(flat.record, flat.tiles, (progress) => { button.textContent = `${label} ${Math.round(30 + progress * 70)}%`; });
+    text.textContent = `${label} 0%`;
+    const flat = await effective((progress) => { text.textContent = `${label} ${Math.round(progress * 30)}%`; });
+    const blob = await exporter(flat.record, flat.tiles, (progress) => { text.textContent = `${label} ${Math.round(30 + progress * 70)}%`; });
     await saveBlob(blob, fileName(extension), settings, saveOptions);
     const size = blob.size >= 1024 * 1024 ? `${(blob.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(blob.size / 1024))} KB`;
     showToast(`${label} saved (${size}).`);
@@ -1278,7 +1297,7 @@ async function runExport(button, label, extension, exporter, saveOptions = {}) {
     showToast(error.message);
     return null;
   } finally {
-    button.textContent = original;
+    text.textContent = original;
     exportButtons.forEach((item) => { item.disabled = false; });
   }
 }
@@ -1297,9 +1316,8 @@ document.querySelector("#save-pdf").addEventListener("click", async (event) => {
 
 async function copyToClipboard() {
   const button = document.querySelector("#copy-clipboard");
-  const original = button.textContent;
   try {
-    button.textContent = "Copying…";
+    button.classList.add("busy");
     // ClipboardItem accepts a Promise<Blob>, which keeps the user activation alive
     // while the PNG is still being encoded.
     const blob = effective().then((flat) => exportPng(flat.record, flat.tiles));
@@ -1310,7 +1328,7 @@ async function copyToClipboard() {
     showToast(`Copy failed: ${error.message}. Very large captures can exceed the clipboard limit — use Save PNG instead.`);
     return false;
   } finally {
-    button.textContent = original;
+    button.classList.remove("busy");
   }
 }
 
@@ -1318,12 +1336,11 @@ document.querySelector("#copy-clipboard").addEventListener("click", copyToClipbo
 
 document.querySelector("#print-capture").addEventListener("click", async (event) => {
   const button = event.currentTarget;
-  const original = button.textContent;
   try {
     // Print the assembled image, not the tiles — tiles overlap by design.
-    button.textContent = "Preparing…";
+    button.classList.add("busy");
     const flat = await effective();
-    const blob = await exportPng(flat.record, flat.tiles, (progress) => { button.textContent = `Preparing ${Math.round(progress * 100)}%`; });
+    const blob = await exportPng(flat.record, flat.tiles);
     const url = URL.createObjectURL(blob);
     objectUrls.push(url);
     let image = document.querySelector("#print-image");
@@ -1338,17 +1355,16 @@ document.querySelector("#print-capture").addEventListener("click", async (event)
   } catch (error) {
     showToast(`Print failed: ${error.message}`);
   } finally {
-    button.textContent = original;
+    button.classList.remove("busy");
   }
 });
 
 // Desktop hand-off: save a PNG, then ask WinShot to open that file in its own editor.
 document.querySelector("#open-desktop").addEventListener("click", async (event) => {
   const button = event.currentTarget;
-  const original = button.textContent;
   exportButtons.forEach((item) => { item.disabled = true; });
   try {
-    button.textContent = "Saving…";
+    button.classList.add("busy");
     const flat = await effective();
     const blob = await exportPng(flat.record, flat.tiles);
     const item = await saveBlob(blob, fileName("png"), settings, { wait: true, saveAs: false });
@@ -1359,7 +1375,7 @@ document.querySelector("#open-desktop").addEventListener("click", async (event) 
   } catch (error) {
     showToast(`Could not hand off to WinShot: ${error.message}`);
   } finally {
-    button.textContent = original;
+    button.classList.remove("busy");
     exportButtons.forEach((item) => { item.disabled = false; });
   }
 });
@@ -1376,6 +1392,7 @@ const pdfNodes = {
 
 function showPdfSettings() {
   for (const [key, node] of Object.entries(pdfNodes)) node.value = settings.pdf[key];
+  document.querySelector(".custom-size").hidden = pdfNodes.pageSize.value !== "custom";
 }
 
 function readPdfSettings() {
@@ -1412,10 +1429,20 @@ document.querySelector("#zoom-out").addEventListener("click", () => { fitted = f
 document.querySelector("#zoom-label").addEventListener("click", () => {
   if (fitted && Math.abs(zoom - 1) > 0.01) { fitted = false; setZoom(1); } else fit();
 });
-document.querySelector("#toggle-details").addEventListener("click", () => {
-  details.classList.toggle("collapsed");
-  requestRender();
-});
+// Capture details live in a panel that slides out of the right rail and back.
+function setDetailsOpen(open) {
+  details.classList.toggle("open", open);
+  details.setAttribute("aria-hidden", String(!open));
+  details.inert = !open;
+  const toggle = document.querySelector("#toggle-details");
+  toggle.classList.toggle("active", open);
+  toggle.setAttribute("aria-expanded", String(open));
+  toggle.querySelector("svg")?.remove();
+  toggle.insertAdjacentHTML("afterbegin", LUCIDE[open ? "panel-right-close" : "panel-right-open"]);
+}
+document.querySelector("#toggle-details").addEventListener("click", () => setDetailsOpen(!details.classList.contains("open")));
+document.querySelector("#close-details").addEventListener("click", () => setDetailsOpen(false));
+document.querySelector("#zoom-fit").addEventListener("click", () => fit());
 
 addEventListener("pagehide", () => {
   persistEdits().catch(() => {});
@@ -1452,12 +1479,12 @@ try {
   renderReport();
   const px = record.report.dimensionsPx;
   if (!px || !tiles.length) {
-    headerButtons().forEach((button) => { button.disabled = true; });
+    actionButtons().forEach((button) => { button.disabled = true; });
     preview.textContent = "No verified pixels are available for export.";
     preview.classList.add("message");
-    details.classList.remove("collapsed");
+    setDetailsOpen(true);
   } else {
-    if (!record.report.warnings?.length && !record.error) details.classList.add("collapsed");
+    setDetailsOpen(false);
     edits = normalizeEdits(record.edits, px);
     source = new TileSource(tiles);
     preview.append(spacer);
@@ -1472,8 +1499,8 @@ try {
   state.textContent = "failed";
   state.className = "pill failed";
   addReport("Error", error.message);
-  headerButtons().forEach((button) => { button.disabled = true; });
-  details.classList.remove("collapsed");
+  actionButtons().forEach((button) => { button.disabled = true; });
+  setDetailsOpen(true);
 }
 
 // Test hook: lets the end-to-end suite drive the editor model without synthetic pointer
