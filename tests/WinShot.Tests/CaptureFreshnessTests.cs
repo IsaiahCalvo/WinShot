@@ -117,62 +117,44 @@ public class CaptureFreshnessTests
     /// to take it the moment its alpha-0 surfaces went up, then grab the frame: the menu was
     /// closed by the time the picture was taken. Here a plain window stands in for the menu,
     /// the warm grab misses and the deferred grab is held open, and the selector must leave
-    /// focus where it was until the frame is in hand.
+    /// the active window alone until the frame is in hand.
+    ///
+    /// The selector is parked first, as the app does at start-up: a parked selector's open is
+    /// an alpha flip, never a Show. Activation is read per thread (GetActiveWindow), because a
+    /// CI runner's test process is not allowed the foreground at all.
     /// </summary>
     [Fact]
-    public void ADeferredOpenLeavesFocusAloneUntilItsFrameLands()
+    public void ADeferredOpenLeavesTheActiveWindowAloneUntilItsFrameLands()
     {
         RunSta(() =>
         {
-            Func<SD.Bitmap?> warm = SelectorFreeze.WarmGrab;
-            Func<SD.Bitmap> deferred = SelectorFreeze.DeferredGrab;
             using var release = new ManualResetEventSlim(false);
-            SD.Rectangle vs = CaptureService.VirtualScreen;
-            SelectorFreeze.WarmGrab = () => null;
-            SelectorFreeze.DeferredGrab = () =>
-            {
-                release.Wait(TimeSpan.FromSeconds(10));
-                var frame = new SD.Bitmap(vs.Width, vs.Height);
-                using (var g = SD.Graphics.FromImage(frame))
-                    g.Clear(SD.Color.FromArgb(120, 140, 160));
-                return frame;
-            };
-
-            using var menu = new WF.Form
-            {
-                Text = "menu stand-in",
-                StartPosition = WF.FormStartPosition.Manual,
-                Bounds = new SD.Rectangle(vs.X + 40, vs.Y + 40, 240, 160),
-                ShowInTaskbar = false,
-            };
-            var selector = new FastRegionSelectorDialog(
-                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+            using var seams = new GrabSeams(release);
+            using var menu = MenuStandIn();
+            FastRegionSelectorDialog selector = ParkedSelector();
             try
             {
                 menu.Show();
-                SelectorForeground.Restore(menu);
-                Pump(() => GetForegroundWindow() == menu.Handle, 1000);
+                menu.Activate();
+                Assert.True(Pump(() => GetActiveWindow() == menu.Handle, 1000), "the stand-in never became active");
 
                 Task<WF.DialogResult> session = selector.ShowAsync();
 
                 // Well past where the old code had already activated the selector.
                 Pump(() => false, 250);
-                Assert.NotEqual(selector.Handle, GetForegroundWindow());
-                Assert.False(selector.ContainsFocus, "the selector took focus before its frame was grabbed");
+                Assert.True(GetActiveWindow() == menu.Handle,
+                    $"the selector took the active window before its frame was grabbed (active {Describe(GetActiveWindow(), menu, selector)})");
 
                 release.Set();
-                bool focused = Pump(() => GetForegroundWindow() == selector.Handle, 3000);
-                Assert.True(focused, "the selector never took focus once its frame landed");
+                Assert.True(Pump(() => GetActiveWindow() == selector.Handle, 3000),
+                    $"the selector never became active once its frame landed (active {Describe(GetActiveWindow(), menu, selector)})");
 
                 Complete(selector, WF.DialogResult.Cancel);
-                Pump(() => session.IsCompleted, 2000);
-                Assert.True(session.IsCompleted);
+                Assert.True(Pump(() => session.IsCompleted, 2000));
             }
             finally
             {
                 release.Set();
-                SelectorFreeze.WarmGrab = warm;
-                SelectorFreeze.DeferredGrab = deferred;
                 selector.Dispose();
             }
         });
@@ -183,31 +165,26 @@ public class CaptureFreshnessTests
     /// path for seconds) must not leave the keyboard going to another window.
     /// </summary>
     [Fact]
-    public void AStalledGrabStillHandsTheSelectorFocusSoon()
+    public void AStalledGrabStillMakesTheSelectorActiveSoon()
     {
         RunSta(() =>
         {
-            Func<SD.Bitmap?> warm = SelectorFreeze.WarmGrab;
-            Func<SD.Bitmap> deferred = SelectorFreeze.DeferredGrab;
             using var release = new ManualResetEventSlim(false);
-            SD.Rectangle vs = CaptureService.VirtualScreen;
-            SelectorFreeze.WarmGrab = () => null;
-            SelectorFreeze.DeferredGrab = () =>
-            {
-                release.Wait(TimeSpan.FromSeconds(10));
-                return new SD.Bitmap(vs.Width, vs.Height);
-            };
-
-            var selector = new FastRegionSelectorDialog(
-                () => Task.FromResult(new List<WindowInfo>()), settings: null);
+            using var seams = new GrabSeams(release);
+            using var menu = MenuStandIn();
+            FastRegionSelectorDialog selector = ParkedSelector();
             try
             {
+                menu.Show();
+                menu.Activate();
+                Pump(() => GetActiveWindow() == menu.Handle, 1000);
+
                 var clock = Stopwatch.StartNew();
                 Task<WF.DialogResult> session = selector.ShowAsync();
-                bool focused = Pump(() => GetForegroundWindow() == selector.Handle, 3000);
-                Assert.True(focused, "a stalled grab kept focus away from the selector");
+                Assert.True(Pump(() => GetActiveWindow() == selector.Handle, 3000),
+                    $"a stalled grab kept the selector from becoming active (active {Describe(GetActiveWindow(), menu, selector)})");
                 Assert.True(clock.ElapsedMilliseconds < SelectorFreeze.HoldFocusMaxMs + 1500,
-                    $"focus arrived after {clock.ElapsedMilliseconds} ms");
+                    $"the selector became active after {clock.ElapsedMilliseconds} ms");
 
                 Complete(selector, WF.DialogResult.Cancel);
                 release.Set();
@@ -216,12 +193,67 @@ public class CaptureFreshnessTests
             finally
             {
                 release.Set();
-                SelectorFreeze.WarmGrab = warm;
-                SelectorFreeze.DeferredGrab = deferred;
                 selector.Dispose();
             }
         });
     }
+
+    /// <summary>Points both grabs at a cold device and a deferred grab held on an event.</summary>
+    private sealed class GrabSeams : IDisposable
+    {
+        private readonly Func<SD.Bitmap?> _warm = SelectorFreeze.WarmGrab;
+        private readonly Func<SD.Bitmap> _deferred = SelectorFreeze.DeferredGrab;
+
+        public GrabSeams(ManualResetEventSlim release)
+        {
+            SD.Rectangle vs = CaptureService.VirtualScreen;
+            SelectorFreeze.WarmGrab = () => null;
+            SelectorFreeze.DeferredGrab = () =>
+            {
+                release.Wait(TimeSpan.FromSeconds(10));
+                var frame = new SD.Bitmap(vs.Width, vs.Height);
+                using (var g = SD.Graphics.FromImage(frame))
+                    g.Clear(SD.Color.FromArgb(120, 140, 160));
+                return frame;
+            };
+        }
+
+        public void Dispose()
+        {
+            SelectorFreeze.WarmGrab = _warm;
+            SelectorFreeze.DeferredGrab = _deferred;
+        }
+    }
+
+    private static WF.Form MenuStandIn()
+    {
+        SD.Rectangle vs = CaptureService.VirtualScreen;
+        return new WF.Form
+        {
+            Text = "menu stand-in",
+            StartPosition = WF.FormStartPosition.Manual,
+            Bounds = new SD.Rectangle(vs.X + 40, vs.Y + 40, 240, 160),
+            ShowInTaskbar = false,
+        };
+    }
+
+    /// <summary>A selector parked the way App leaves one at start-up, rented back.</summary>
+    private static FastRegionSelectorDialog ParkedSelector()
+    {
+        var selector = new FastRegionSelectorDialog(
+            () => Task.FromResult(new List<WindowInfo>()), settings: null);
+        FastRegionSelectorDialog.Return(selector);
+        var rented = FastRegionSelectorDialog.Rent(() => Task.FromResult(new List<WindowInfo>()), settings: null);
+        Assert.Same(selector, rented);
+        Pump(() => false, 50);
+        return rented;
+    }
+
+    private static string Describe(IntPtr hwnd, WF.Form menu, WF.Form selector) =>
+        hwnd == menu.Handle ? "menu stand-in"
+        : hwnd == selector.Handle ? "selector"
+        : hwnd == IntPtr.Zero ? "none"
+        : $"0x{hwnd.ToInt64():X}";
 
     private static void Complete(FastRegionSelectorDialog selector, WF.DialogResult result) =>
         typeof(FastRegionSelectorDialog)
@@ -257,5 +289,5 @@ public class CaptureFreshnessTests
             throw new Xunit.Sdk.XunitException(failure.ToString());
     }
 
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetActiveWindow();
 }

@@ -512,7 +512,9 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         if (!_holdFocus)
             return;
         _holdFocus = false;
-        if (!IsDisposed && Visible)
+        // A session cancelled before its frame landed leaves the surfaces parked: taking
+        // focus then would hand the keyboard to an invisible window.
+        if (!IsDisposed && Visible && !_sessionEnded)
             TakeFocus();
     }
 
