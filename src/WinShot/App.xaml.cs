@@ -1426,8 +1426,13 @@ public partial class App : Application
                     HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
                     break;
                 case AllInOneAction.Ocr:
-                    using (captured) await RunOcrToClipboard(captured!);
+                {
+                    // The result toast comes up over the selection, on its own monitor.
+                    SD.Rectangle where = ToScreenRect(regionPx);
+                    var anchor = new SD.Point(where.X + where.Width / 2, where.Y + where.Height / 2);
+                    using (captured) await RunOcrToClipboard(captured!, anchor);
                     break;
+                }
                 case AllInOneAction.Record:
                     Recording.ToggleFlowWithRegion(regionPx);
                     break;

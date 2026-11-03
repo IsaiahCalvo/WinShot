@@ -431,6 +431,52 @@ public class FixCheckRenderHarness
                 Invoke(editor, "UndoAsync", null); Pump(4);
                 log.AppendLine($"13 undone {Widths()}");
 
+                // 14. OCR reads every kind of selection: a big 32bppRgb capture whose alpha
+                // bytes are 0 (what a BitBlt leaves), light text on a dark theme, and a tight
+                // crop whose words touch the edge.
+                SD.Bitmap TextBitmap(int w, int h, SD.Color ground, SD.Color ink, float pt, float x, float y, string text)
+                {
+                    var b = new SD.Bitmap(w, h, SD.Imaging.PixelFormat.Format32bppArgb);
+                    using var g = SD.Graphics.FromImage(b);
+                    g.Clear(ground);
+                    g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                    using var f = new SD.Font("Segoe UI", pt, SD.GraphicsUnit.Pixel);
+                    using var br = new SD.SolidBrush(ink);
+                    g.DrawString(text, f, br, x, y);
+                    return b;
+                }
+                SD.Bitmap ZeroAlphaRgb(SD.Bitmap src)
+                {
+                    var dst = new SD.Bitmap(src.Width, src.Height, SD.Imaging.PixelFormat.Format32bppRgb);
+                    var r = new SD.Rectangle(0, 0, src.Width, src.Height);
+                    var sd = src.LockBits(r, SD.Imaging.ImageLockMode.ReadOnly, SD.Imaging.PixelFormat.Format32bppArgb);
+                    var buf = new byte[sd.Stride * src.Height];
+                    System.Runtime.InteropServices.Marshal.Copy(sd.Scan0, buf, 0, buf.Length);
+                    src.UnlockBits(sd);
+                    for (int i = 3; i < buf.Length; i += 4) buf[i] = 0;
+                    var dd = dst.LockBits(r, SD.Imaging.ImageLockMode.WriteOnly, SD.Imaging.PixelFormat.Format32bppRgb);
+                    System.Runtime.InteropServices.Marshal.Copy(buf, 0, dd.Scan0, buf.Length);
+                    dst.UnlockBits(dd);
+                    return dst;
+                }
+                string Read(SD.Bitmap b)
+                {
+                    try
+                    {
+                        var r = WinShot.Ocr.OcrService.ExtractAsync(b, true);
+                        while (!r.IsCompleted) Pump(2);
+                        return r.Result.Text.Replace("\n", " | ");
+                    }
+                    catch (Exception ex) { return "ERR " + ex.GetType().Name + ": " + ex.Message; }
+                }
+                using (var big = TextBitmap(1900, 260, SD.Color.White, SD.Color.Black, 22, 40, 100, "Quarterly revenue grew 12 percent in October"))
+                using (var bigRgb = ZeroAlphaRgb(big))
+                    log.AppendLine($"14a big zero-alpha rgb: '{Read(bigRgb)}'");
+                using (var dark = TextBitmap(320, 48, SD.Color.FromArgb(30, 31, 34), SD.Color.FromArgb(200, 204, 210), 13, 8, 14, "Light text on a dark theme"))
+                    log.AppendLine($"14b light on dark: '{Read(dark)}'");
+                using (var tight = TextBitmap(150, 17, SD.Color.White, SD.Color.FromArgb(40, 40, 40), 13, -2, -1, "Tight crop words"))
+                    log.AppendLine($"14c tight crop: '{Read(tight)}'");
+
                 editor.Close();
                 Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
