@@ -168,7 +168,8 @@ public partial class App : Application
         // Every pin in the app gets a pencil chip, including the ones App does not build
         // itself (the recording completion card raises its own), so the editor handoff is
         // registered once here rather than at each construction site.
-        FastPinWindow.DefaultEditHandler = OpenEditorFromPin;
+        FastPinWindow.DefaultEditHandler = image => OpenEditorFromPin(image, null);
+        FastPinWindow.DefaultEditHandlerAt = (image, where) => OpenEditorFromPin(image, where);
         // The recognizer is cached per language, so pushing the choice here is enough:
         // the next capture rebuilds the engine, and a settings save never pays for it.
         _settings.Changed += () => OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
@@ -1903,13 +1904,9 @@ public partial class App : Application
         try
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
-            if (showSuccess)
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    NotifyAction(
-                        NotifiedAction.Copy, "Copied", "The capture is on the clipboard.",
-                        trayBeat: true);
-                });
+            // No "Copied" toast on success: Isaiah asked for it gone (2026-11-03). A failed
+            // copy still says so below.
+            _ = showSuccess;
         }
         catch (Exception ex)
         {
@@ -2603,9 +2600,11 @@ public partial class App : Application
 
     /// <summary>The pin's pencil chip: the handoff Annotate already performs from the card,
     /// with the pin left on screen and the editor given its own copy.</summary>
-    private void OpenEditorFromPin(SD.Bitmap image)
+    private void OpenEditorFromPin(SD.Bitmap image, SD.Rectangle? pinBounds)
     {
         var win = EditorWindow.CreateForCapture(image, _settings, _history);
+        // On the pin's own monitor, grown out of the pin, as the card's Annotate does.
+        if (pinBounds is SD.Rectangle where) win.GrowFrom(where);
         TrackFirstRender(win, "editor window");
         win.Show();
     }

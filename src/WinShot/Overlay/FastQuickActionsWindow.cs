@@ -3263,18 +3263,8 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             if (!keepOpen)
             {
-                // Same reason Save announces itself: this path closes the card, so without
-                // a toast the entire interaction is a card flying off screen. Ctrl+C now
-                // reaches the card on hover alone, which makes silence worse — the
-                // clipboard changed under someone who was aiming at the app underneath.
-                ShowCardToast(
-                    "Copied",
-                    // A sentence either way. The filename on its own read as a fragment
-                    // beside every other body this card raises.
-                    _mediaFilePath is not null
-                        ? $"{Path.GetFileName(_mediaFilePath)} is on the clipboard."
-                        : "The capture is on the clipboard.",
-                    Core.ToastSeverity.Success);
+                // No "Copied" toast: Isaiah found it ugly and asked for it gone (2026-11-03).
+                // The card leaving is the confirmation; failures still raise a toast.
                 Close();
                 return;
             }

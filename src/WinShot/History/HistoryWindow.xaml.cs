@@ -1337,11 +1337,7 @@ public partial class HistoryWindow : Window
             return;
         }
 
-        // Same confirmation the single-item copy raises, worded for files.
-        App.Toast(
-            "Copied",
-            selected.Count == 1 ? "1 file is on the clipboard." : $"{selected.Count} files are on the clipboard.",
-            severity: ToastSeverity.Success);
+        // No "Copied" toast (Isaiah 2026-11-03); a failure above still says so.
     }
 
     private void OnPinSelected(object sender, RoutedEventArgs e)
@@ -1640,7 +1636,7 @@ public partial class HistoryWindow : Window
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership: true);
             // A History tile has nothing that changes when a copy lands, so both outcomes
             // used to look identical: the row sat there either way and only the log knew.
-            App.Toast("Copied", "The capture is on the clipboard.", severity: ToastSeverity.Success);
+            // No "Copied" toast (Isaiah 2026-11-03).
         }
         catch (Exception ex)
         {

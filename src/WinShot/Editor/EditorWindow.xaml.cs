@@ -310,7 +310,6 @@ public partial class EditorWindow : Window
         WireSelectionQuickBar();
         WireBrushAdjust();
         WireSurveyRow();
-        WirePinnedDock();
         Viewport.LostMouseCapture += (_, _) =>
         {
             // A brush drag that loses the mouse changes nothing (Survey: a cancelled pointer).
@@ -389,6 +388,10 @@ public partial class EditorWindow : Window
         };
         UpdateCursor();
         DarkTitleBar.Apply(this);
+        // Place the window before it is first shown: grown out of its origin on the origin's
+        // monitor, or with no origin centred on the monitor the pointer is on. Without this
+        // the editor always opened on the primary display (Isaiah 2026-11-03).
+        SourceInitialized += (_, _) => { if (!_prewarm) BeginGrowFromOrigin(); };
     }
 
     /// <summary>
@@ -1480,7 +1483,6 @@ public partial class EditorWindow : Window
         EditorFormatHost.Visibility = Show(formatRow);
         EditorGroupBar.Visibility = Show(formatRow);
         SyncSurveyRow();
-        if (_pinDock is not null) Dispatcher.BeginInvoke(PlacePinDock, DispatcherPriority.Loaded);
         Dispatcher.BeginInvoke(PackFormatOverflow, DispatcherPriority.Loaded);
     }
 
@@ -2765,11 +2767,14 @@ public partial class EditorWindow : Window
     /// </summary>
     private void BeginGrowFromOrigin()
     {
-        if (_origin is not SD.Rectangle origin) return;
-        _origin = null;
-
         IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
+        if (_origin is not SD.Rectangle origin)
+        {
+            PlaceOnPointerMonitor(hwnd);
+            return;
+        }
+        _origin = null;
 
         double scale = RecordingMonitorDpi.ScaleFor(origin);
         SD.Rectangle work = System.Windows.Forms.Screen.FromRectangle(origin).WorkingArea;
@@ -2818,6 +2823,22 @@ public partial class EditorWindow : Window
             _growMotion = null;
             RestoreMinimums();
         });
+    }
+
+    /// <summary>
+    /// No origin (History, the tray, the CLI): open centred on the monitor the pointer is on,
+    /// at the same landing size the grow would use there, which is where the user is working.
+    /// </summary>
+    private void PlaceOnPointerMonitor(IntPtr hwnd)
+    {
+        if (WindowStartupLocation == WindowStartupLocation.Manual) return; // caller placed it
+        var screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
+        SD.Rectangle work = screen.WorkingArea;
+        double scale = RecordingMonitorDpi.ScaleFor(work);
+        SD.Rectangle to = EditorGrowLayout.Target(work, DesiredWindowDip(), scale, new Size(MinWidth, MinHeight));
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        PlaceWindow(hwnd, to);
+        ClampMinimumsTo(to.Width / scale, to.Height / scale);
     }
 
     /// <summary>
