@@ -13,7 +13,7 @@ namespace WinShot.SettingsUi;
 /// </summary>
 public sealed class HotkeyBox : TextBox
 {
-    private const string Prompt = "Press shortcut...";
+    private const string Prompt = "Press a shortcut…";
 
     /// <summary>The last value the user actually committed, restored if they cancel.</summary>
     private string _committed = "";
@@ -40,7 +40,7 @@ public sealed class HotkeyBox : TextBox
         EndCapture();
         base.OnLostKeyboardFocus(e);
         // Left while still prompting or mid-chord: keep whatever was there before.
-        if (Text == Prompt || Text.EndsWith("...", StringComparison.Ordinal))
+        if (Text == Prompt || Text.EndsWith("…", StringComparison.Ordinal))
             Text = _committed;
     }
 
@@ -68,7 +68,7 @@ public sealed class HotkeyBox : TextBox
         {
             // Show the modifiers held so far while we wait for the main key.
             string held = Describe(Keyboard.Modifiers);
-            Text = held.Length > 0 ? held + "+..." : Prompt;
+            Text = held.Length > 0 ? held + "+…" : Prompt;
             return;
         }
 

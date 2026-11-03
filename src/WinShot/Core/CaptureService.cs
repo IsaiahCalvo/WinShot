@@ -85,7 +85,37 @@ public static class CaptureService
             return null;
         }
 
-        Log.Info($"Perf freeze source: warm=dxgi {sw.ElapsedMilliseconds} ms size={screenRect.Width}x{screenRect.Height}");
+        long grabMs = sw.ElapsedMilliseconds;
+        (Rectangle Screen, double Share)? stale = null;
+        try
+        {
+            stale = FreezeFrameCheck.FindStaleScreen(
+                warm!,
+                screenRect,
+                System.Windows.Forms.Screen.AllScreens.Select(s => s.Bounds),
+                row => CaptureScreenRegionWithBitBlt(row, includeLayeredWindows: true));
+        }
+        catch (Exception ex)
+        {
+            // The check is a guard, not the capture: if it cannot run, trust the frame.
+            Log.Error("Could not check the warm freeze frame (non-fatal)", ex);
+        }
+
+        if (stale is { } found)
+        {
+            Log.Info(
+                $"Perf freeze source: warm=stale screen={found.Screen} differs={found.Share:P0} " +
+                $"({sw.ElapsedMilliseconds} ms) — rebuilding duplication, opening deferred");
+            warm!.Dispose();
+            // The gate was released a moment ago, so this rarely waits; the deferred grab
+            // that follows must not find the stale device again.
+            DesktopDuplicationCapture.Rebuild(screenRect, waitMs: 50);
+            return null;
+        }
+
+        Log.Info(
+            $"Perf freeze source: warm=dxgi {grabMs} ms check={sw.ElapsedMilliseconds - grabMs} ms " +
+            $"size={screenRect.Width}x{screenRect.Height}");
         return warm;
     }
 
@@ -120,7 +150,10 @@ public static class CaptureService
         try
         {
             var blit = Stopwatch.StartNew();
-            Bitmap bitmap = CaptureScreenRegionWithBitBlt(screenRect, includeLayeredWindows: false);
+            // Layered windows included: menus, tooltips and the Start menu's shadow are
+            // layered, and the selector asked for this frame to keep them. Its own surfaces
+            // are layered too, but sit at alpha 0 until this frame lands, so they add nothing.
+            Bitmap bitmap = CaptureScreenRegionWithBitBlt(screenRect, includeLayeredWindows: true);
             Log.Info(
                 $"Perf freeze source: deferred=bitblt {blit.ElapsedMilliseconds} ms " +
                 $"(dxgi={duplicationMs} total={total.ElapsedMilliseconds}) size={screenRect.Width}x{screenRect.Height}");
@@ -142,6 +175,17 @@ public static class CaptureService
         Rectangle screenRect = VirtualScreen;
         if (ShouldUseDesktopDuplication(screenRect))
             DesktopDuplicationCapture.Prewarm(screenRect);
+    }
+
+    /// <summary>
+    /// Rebuilds the duplication devices after Windows may have taken them away, rather than
+    /// re-reading the old ones. Fire-and-forget, like <see cref="PrewarmFreezeSource"/>.
+    /// </summary>
+    public static void RebuildFreezeSource()
+    {
+        Rectangle screenRect = VirtualScreen;
+        if (ShouldUseDesktopDuplication(screenRect))
+            DesktopDuplicationCapture.Rebuild(screenRect);
     }
 
     /// <summary>Captures a rectangle given in physical screen coordinates.</summary>

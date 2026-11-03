@@ -78,6 +78,8 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     private SelectorOptions _options;
     private SelectorMode _mode = SelectorMode.Area;
     private bool _paneHover;
+    // True while a deferred open waits for its frame before taking focus.
+    private bool _holdFocus;
     /// <summary>Mode-specific instruction pill (scrolling capture). Fades out once the
     /// user starts dragging: by then it has been read or it never will be.</summary>
     private double _instructionAlpha;
@@ -151,7 +153,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     // independent of whether idle hover WM_MOUSEMOVE reaches the overlay (it doesn't reliably
     // across multiple monitors / when the overlay isn't the foreground window). Runs ONLY while
     // shown — started in ShowAsync, stopped in Complete — so it adds no idle background work.
-    private readonly WF.Timer _followTimer;
+    private readonly WinShot.Core.FrameTimer _followTimer;
     private bool _lastCtrlDown;
     // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
     // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
@@ -220,7 +222,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
 
-        _followTimer = new WF.Timer { Interval = WinShot.Core.Motion.FrameIntervalMs };
+        _followTimer = new WinShot.Core.FrameTimer();
         _followTimer.Tick += OnFollowTick;
 
         // Window-list load is kicked from ShowAsync, not the Shown event: Shown fires only
@@ -412,6 +414,10 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         SelectorFreeze.Unpark(this, _panes, entry);
         long panesMs = sw.ElapsedMilliseconds;
 
+        // A deferred open leaves the desktop live under alpha-0 surfaces until its frame is
+        // in hand. Taking focus now would close the Start menu or an open menu first, so the
+        // frame would come back without it; focus waits for the grab (see HoldFocusMaxMs).
+        _holdFocus = SelectorFreeze.HoldsFocusUntilFrozen(entry);
         Show();
         FadeInstructionIn();
         StartWindowLoad();
@@ -427,9 +433,8 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         }
         long paneShowMs = sw.ElapsedMilliseconds - panesMs - showMs;
 
-        Activate();
-        Focus();
-        SelectorForeground.Restore(this);
+        if (!_holdFocus)
+            TakeFocus();
         if (sw.ElapsedMilliseconds > 100)
         {
             Log.Info(
@@ -494,6 +499,27 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
     /// snapshot is discarded; if the capture failed the surfaces stay transparent and the
     /// session runs without a freeze.
     /// </summary>
+    private void TakeFocus()
+    {
+        Activate();
+        Focus();
+        SelectorForeground.Restore(this);
+    }
+
+    /// <summary>Ends a deferred open's focus hold and takes focus, once.</summary>
+    private void ReleaseFocusHold()
+    {
+        if (!_holdFocus)
+            return;
+        _holdFocus = false;
+        // A session cancelled before its frame landed leaves the surfaces parked: taking
+        // focus then would hand the keyboard to an invisible window.
+        if (!IsDisposed && Visible && !_sessionEnded)
+            TakeFocus();
+    }
+
+    protected override bool ShowWithoutActivation => _holdFocus;
+
     private async Task FreezeWhileShownAsync(TaskCompletionSource<WF.DialogResult> session)
     {
         // Capture into a LOCAL. The selector is pooled, so a cancelled session's capture
@@ -505,18 +531,26 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
         SD.Bitmap? snapshot = null;
         try
         {
-            snapshot = await Task.Run(CaptureService.CaptureFreezeFrame);
+            Task<SD.Bitmap> grab = Task.Run(SelectorFreeze.DeferredGrab);
+            if (await Task.WhenAny(grab, Task.Delay(SelectorFreeze.HoldFocusMaxMs)) != grab &&
+                _completion == session && !IsDisposed)
+                ReleaseFocusHold();
+            snapshot = await grab;
         }
         catch (Exception ex)
         {
             Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
         }
 
-        if (_completion != session || IsDisposed)
+        // _sessionEnded too: Complete keeps the same _completion, so a frame that lands after
+        // a cancel used to pass this check and fade the parked surfaces up to the freeze.
+        if (_completion != session || IsDisposed || _sessionEnded)
         {
             snapshot?.Dispose(); // stale: touch nothing shared
             return;
         }
+
+        ReleaseFocusHold();
 
         DisposeFrozen();
         _frozen = snapshot;
@@ -743,6 +777,10 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
             // Disposing mid-animation must give the high-resolution clock back.
             StopHintEntrance();
             StopPillHover();
+            _freezeFade?.Dispose();
+            _freezeFade = null;
+            _instructionFade?.Dispose();
+            _instructionFade = null;
             DisposePanes();
             DisposeFrozen();
             _hoverWashTween?.Dispose();
@@ -3889,7 +3927,7 @@ public sealed partial class FastRegionSelectorDialog : WF.Form
                         var tickRect = new SD.Rectangle(
                             local.Left, local.Bottom - (int)Math.Round(16 * s), local.Width, (int)Math.Round(12 * s));
                         WF.TextRenderer.DrawText(
-                            g, "", checkFont, tickRect,
+                            g, "\uE73E", checkFont, tickRect,
                             DarkControlPalette.Mix(ThemePalette.WindowBg, SD.Color.White, on), Centre);
                     }
                     break;

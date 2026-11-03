@@ -21,6 +21,12 @@ public sealed class FastSelfTimerWindow : WF.Form
     private IDisposable? _second;
     private double _secondFraction;
     private int _remaining;
+    private IntPtr _keyHook;
+    private HookProc? _keyHookProc;
+
+    /// <summary>True once Escape stopped the countdown; the capture it was counting to is
+    /// not taken.</summary>
+    public bool Cancelled { get; private set; }
 
     // Scales the badge (and its pixel-unit digits) to the cursor monitor, so it
     // reads the same physical size on 100% and 150% displays.
@@ -75,20 +81,65 @@ public sealed class FastSelfTimerWindow : WF.Form
     protected override bool ShowWithoutActivation => true;
 
 
-    public static Task RunAsync(int seconds)
+    /// <summary>Counts down, then completes with true; completes with false if Escape
+    /// cancelled it, so the caller skips the capture.</summary>
+    public static Task<bool> RunAsync(int seconds)
     {
         if (!SelfTimerOptions.ShouldRunDelay(seconds))
-            return Task.CompletedTask;
+            return Task.FromResult(true);
 
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var win = new FastSelfTimerWindow(SelfTimerOptions.ClampDelaySeconds(seconds));
         win.Closed += async (_, _) =>
         {
-            await Task.Delay(120).ConfigureAwait(false);
-            tcs.TrySetResult();
+            bool elapsed = !win.Cancelled;
+            // The pause lets the badge leave the screen before the shot; a cancel has no
+            // shot to keep it out of.
+            if (elapsed)
+                await Task.Delay(120).ConfigureAwait(false);
+            tcs.TrySetResult(elapsed);
         };
         win.Show();
         return tcs.Task;
+    }
+
+    /// <summary>
+    /// Escape cancels. The badge never takes focus (the whole point of a timer is to set up
+    /// the screen underneath it), so the key is watched with a low-level hook that lives
+    /// exactly as long as the countdown. Only Escape is claimed; every other key passes.
+    /// Before this a started timer could not be stopped at all.
+    /// </summary>
+    private void InstallEscapeHook()
+    {
+        if (_keyHook != IntPtr.Zero || Cancelled || IsDisposed) return;
+        _keyHookProc = OnKeyHook;
+        _keyHook = SetWindowsHookExW(WhKeyboardLl, _keyHookProc, GetModuleHandleW(null), 0);
+    }
+
+    private void RemoveEscapeHook()
+    {
+        if (_keyHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_keyHook);
+        _keyHook = IntPtr.Zero;
+    }
+
+    private IntPtr OnKeyHook(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && (wParam == WmKeyDown || wParam == WmSysKeyDown)
+            && Marshal.PtrToStructure<KbdllHookStruct>(lParam).vkCode == (uint)WF.Keys.Escape)
+        {
+            // Closing inside the hook would tear the window down under the hook chain.
+            BeginInvoke(new Action(CancelCountdown));
+            return new IntPtr(1);
+        }
+        return CallNextHookEx(_keyHook, nCode, wParam, lParam);
+    }
+
+    internal void CancelCountdown()
+    {
+        if (IsDisposed || Cancelled) return;
+        Cancelled = true;
+        Close();
     }
 
     protected override void OnShown(EventArgs e)
@@ -97,6 +148,7 @@ public sealed class FastSelfTimerWindow : WF.Form
         UpdateWindowRegion();
         MakeClickThrough();
         PositionCenterScreen();
+        InstallEscapeHook();
         _timer.Start();
         RunSecond();
     }
@@ -149,6 +201,7 @@ public sealed class FastSelfTimerWindow : WF.Form
 
     private void StopClocks()
     {
+        RemoveEscapeHook();
         _second?.Dispose();
         _second = null;
         _timer.Stop();
@@ -207,6 +260,34 @@ public sealed class FastSelfTimerWindow : WF.Form
     private const int WsExTransparent = 0x00000020;
     private const int WsExToolWindow = 0x00000080;
     private const int WsExNoActivate = 0x08000000;
+
+    private const int WhKeyboardLl = 13;
+    private static readonly IntPtr WmKeyDown = new(0x0100);
+    private static readonly IntPtr WmSysKeyDown = new(0x0104);
+
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KbdllHookStruct
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookExW(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(string? lpModuleName);
 
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateEllipticRgn(int left, int top, int right, int bottom);

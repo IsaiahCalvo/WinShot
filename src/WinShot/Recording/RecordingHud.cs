@@ -311,11 +311,11 @@ public static class RecordingHudLayout
     /// <summary>Glyph for a toggle cell, from the one icon family the app uses.</summary>
     public static string GlyphFor(RecordingHudCell cell) => cell switch
     {
-        RecordingHudCell.Microphone => "",
-        RecordingHudCell.SystemAudio => "",
-        RecordingHudCell.Webcam => "",
-        RecordingHudCell.Clicks => "",
-        RecordingHudCell.Keystrokes => "",
+        RecordingHudCell.Microphone => "\uE720",
+        RecordingHudCell.SystemAudio => "\uE767",
+        RecordingHudCell.Webcam => "\uE714",
+        RecordingHudCell.Clicks => "\uE7C9",
+        RecordingHudCell.Keystrokes => "\uE765",
         _ => "",
     };
 

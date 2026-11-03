@@ -98,9 +98,22 @@ public class HistoryRenderHarness
                 // The states a grid full of cards never shows: a filter that matched nothing, and
                 // a save folder that could not be read. Both are new in this track and neither is
                 // reachable from the idle render, so they get their own frames to scan.
-                ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipGif")).IsChecked = true;
+                // Search: a query that keeps some tiles, then one that keeps none.
+                window.HandleKey(System.Windows.Input.Key.Escape, System.Windows.Input.ModifierKeys.None);
+                var search = (TextBox)window.FindName("SearchBox");
+                search.Text = "video";
+                PumpUntil(() => list.Items.Count > 0 && list.Items.Count < Math.Min(fixtureCount, HistoryIncrementalCollection.DefaultPageSize));
+                SettleReflow(list);
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-search.png"));
+                search.Text = "invoice march";
+                PumpUntil(() => list.Items.Count == 0);
+                SettleEmptyState(window);
+                Render(window, Path.Combine(outputDir, $"{outputPrefix}-search-empty.png"));
+                search.Clear();
                 Pump();
-                window.UpdateLayout();
+
+                ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("ChipGif")).IsChecked = true;
+                SettleEmptyState(window);
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-empty-filtered.png"));
 
                 typeof(HistoryWindow)
@@ -109,8 +122,7 @@ public class HistoryRenderHarness
                 typeof(HistoryWindow)
                     .GetMethod("UpdateEmptyState", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(window, null);
-                Pump();
-                window.UpdateLayout();
+                SettleEmptyState(window);
                 Render(window, Path.Combine(outputDir, $"{outputPrefix}-error.png"));
 
                 window.Close();
@@ -190,8 +202,32 @@ public class HistoryRenderHarness
     {
         int width = (int)Math.Ceiling(window.ActualWidth);
         int height = (int)Math.Ceiling(window.ActualHeight);
+        Visual target = window;
+        if (width < 1 || height < 1)
+        {
+            // On the CI runner the window can come back from Show() never sized (ActualWidth 0),
+            // and RenderTargetBitmap threw on a zero width before anything was learned. Lay the
+            // content out at the window's own size instead and paint it over the window's
+            // background, so the frame still shows the layout being audited.
+            Console.WriteLine($"HISTORY window unsized: visible={window.IsVisible} state={window.WindowState} " +
+                $"size={window.Width}x{window.Height} actual={window.ActualWidth}x{window.ActualHeight}; laying out content");
+            width = (int)Math.Ceiling(double.IsNaN(window.Width) ? 1200 : window.Width);
+            height = (int)Math.Ceiling(double.IsNaN(window.Height) ? 760 : window.Height);
+            var content = (FrameworkElement)window.Content;
+            content.Measure(new Size(width, height));
+            content.Arrange(new Rect(0, 0, width, height));
+            content.UpdateLayout();
+            var plate = new DrawingVisual();
+            using (DrawingContext dc = plate.RenderOpen())
+            {
+                dc.DrawRectangle(window.Background ?? Brushes.Black, null, new Rect(0, 0, width, height));
+                dc.DrawRectangle(new VisualBrush(content) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top },
+                    null, new Rect(0, 0, width, height));
+            }
+            target = plate;
+        }
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(window);
+        bitmap.Render(target);
 
         var corner = new byte[4];
         bitmap.CopyPixels(new Int32Rect(1, 1, 1, 1), corner, 4, 0);
@@ -204,6 +240,43 @@ public class HistoryRenderHarness
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    /// <summary>
+    /// The empty-state panel fades in over Motion.SwapMs, and a frame grabbed right after the
+    /// grid empties caught it at opacity ~0: the "nothing matches" and error frames came out
+    /// as a blank window. Wait for the fade to land before the picture is taken.
+    /// </summary>
+    private static void SettleEmptyState(HistoryWindow window)
+    {
+        var panel = (FrameworkElement)window.FindName("EmptyState");
+        PumpUntil(() => panel.Visibility == Visibility.Visible && panel.Opacity >= 0.99);
+        window.UpdateLayout();
+    }
+
+    /// <summary>
+    /// Filtering slides the surviving cards to their new slots over the glide step; a frame
+    /// taken straight after the count changes shows them part-way down the grid.
+    /// </summary>
+    private static void SettleReflow(ListBox list)
+    {
+        list.UpdateLayout();
+        ReflowWrapPanel? panel = FindChild<ReflowWrapPanel>(list);
+        if (panel is not null)
+            PumpUntil(() => !panel.IsReflowing);
+        list.UpdateLayout();
+    }
+
+    private static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindChild<T>(child) is T deeper) return deeper;
+        }
+
+        return null;
     }
 
     private static void PumpUntil(Func<bool> condition)

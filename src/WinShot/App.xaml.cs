@@ -168,7 +168,8 @@ public partial class App : Application
         // Every pin in the app gets a pencil chip, including the ones App does not build
         // itself (the recording completion card raises its own), so the editor handoff is
         // registered once here rather than at each construction site.
-        FastPinWindow.DefaultEditHandler = OpenEditorFromPin;
+        FastPinWindow.DefaultEditHandler = image => OpenEditorFromPin(image, null);
+        FastPinWindow.DefaultEditHandlerAt = (image, where) => OpenEditorFromPin(image, where);
         // The recognizer is cached per language, so pushing the choice here is enough:
         // the next capture rebuilds the engine, and a settings save never pays for it.
         _settings.Changed += () => OcrService.PreferredLanguage = _settings.Current.OcrLanguage;
@@ -205,6 +206,14 @@ public partial class App : Application
             }
             catch (Exception ex) { Log.Error("Selector prewarm failed (non-fatal)", ex); }
         }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        // The editor's first open paid ~750 ms more than every later one (XAML, theme,
+        // templates, text). Pay it here, at idle, after the selector is warm.
+        Dispatcher.BeginInvoke(() =>
+        {
+            try { Editor.EditorWindow.Prewarm(_settings, _history); }
+            catch (Exception ex) { Log.Error("Editor prewarm failed (non-fatal)", ex); }
+        }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        KeepFreezeSourceWarm();
         // Electron apps keep renderer accessibility enabled while this mutex exists —
         // required for Alt-hover element detection to see their full element tree.
         WinShot.Capture.MsaaElementDetector.HoldScreenReaderMutex();
@@ -317,8 +326,86 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// The selector opens already frozen only when the Desktop Duplication device is warm.
+    /// It no longer ages out, but Windows still takes it away: a display change, the lock
+    /// screen or a UAC prompt, and sleep all lose the duplication, and the next capture then
+    /// paid the cold open. Each of those re-arms it a moment after Windows settles.
+    /// </summary>
+    private void KeepFreezeSourceWarm()
+    {
+        try
+        {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnFreezeSourceLost;
+            Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
+            Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Could not watch for display and session changes (non-fatal)", ex);
+        }
+    }
+
+    private void StopKeepingFreezeSourceWarm()
+    {
+        try
+        {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnFreezeSourceLost;
+            Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
+            Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        }
+        catch
+        {
+            // Exiting anyway.
+        }
+    }
+
+    private void OnFreezeSourceLost(object? sender, EventArgs e) => RewarmFreezeSourceSoon();
+
+    private void OnSessionSwitch(object? sender, Microsoft.Win32.SessionSwitchEventArgs e)
+    {
+        if (e.Reason is Microsoft.Win32.SessionSwitchReason.SessionUnlock
+            or Microsoft.Win32.SessionSwitchReason.ConsoleConnect
+            or Microsoft.Win32.SessionSwitchReason.RemoteConnect)
+            RewarmFreezeSourceSoon();
+    }
+
+    private void OnPowerModeChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume)
+            RewarmFreezeSourceSoon();
+    }
+
+    private int _rewarmPending;
+
+    /// <summary>Re-arms the freeze source after Windows has had a couple of seconds to
+    /// finish the change (monitors re-enumerate, the desktop comes back). Collapses a burst
+    /// of events into one, and never runs while a recording holds the outputs.</summary>
+    private void RewarmFreezeSourceSoon()
+    {
+        if (Interlocked.Exchange(ref _rewarmPending, 1) == 1)
+            return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(2000).ConfigureAwait(false);
+                Interlocked.Exchange(ref _rewarmPending, 0);
+                if (_recording is { IsRecording: true })
+                    return;
+                CaptureService.RebuildFreezeSource();
+            }
+            catch (Exception ex)
+            {
+                Interlocked.Exchange(ref _rewarmPending, 0);
+                Log.Error("Re-warming the freeze source failed (non-fatal)", ex);
+            }
+        });
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
+        StopKeepingFreezeSourceWarm();
         // Persist in-memory settings (e.g. FileNamer's counter) without re-triggering hotkey registration.
         _settings.Changed -= RegisterHotkeys;
         // A second instance shuts down before Load() ever runs — nothing to persist there.
@@ -353,63 +440,20 @@ public partial class App : Application
             Text = "WinShot",
         };
 
-        var s = _settings.Current;
-        var menu = new WF.ContextMenuStrip
-        {
-            Renderer = new DarkDropDown.DarkMenuRenderer(),
-            // A fixed left gutter for the capture verbs. The housekeeping group at the
-            // bottom deliberately gets no glyphs, which demotes it without another separator.
-            ShowImageMargin = true,
-        };
-        // Non-clickable header showing the running version — always visible at a glance.
-        var versionHeader = new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false };
-        menu.Items.Add(versionHeader);
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Capture region", s.HotkeyCaptureRegion, () => QueueCaptureCommand("capture-area"), ""));
-        menu.Items.Add(MenuItem("Capture window", s.HotkeyCaptureWindow, () => QueueCaptureCommand("capture-window"), ""));
-        menu.Items.Add(MenuItem("Capture window with background", null, () => QueueCaptureCommand("capture-window-background"), ""));
-        menu.Items.Add(MenuItem("Capture fullscreen", s.HotkeyCaptureFullscreen, () => QueueCaptureCommand("capture-fullscreen"), ""));
-        menu.Items.Add(MenuItem("Capture fullscreen (self-timer)", s.HotkeySelfTimer, () => QueueCaptureCommand("self-timer"), ""));
-        menu.Items.Add(MenuItem("Capture region (self-timer)", null, () => QueueCaptureCommand("self-timer-region"), ""));
-        menu.Items.Add(MenuItem("Capture display…", null, () => QueueCaptureCommand("capture-display"), ""));
-        menu.Items.Add(MenuItem("Open clipboard image", s.HotkeyLoadClipboard, LoadClipboardImageFlow, ""));
-        menu.Items.Add(MenuItem("Capture previous region", s.HotkeyCapturePrevious, () => QueueCaptureCommand("capture-previous"), ""));
-        menu.Items.Add(MenuItem("All-in-one…", s.HotkeyAllInOne, () => QueueCaptureCommand("all-in-one"), ""));
-        menu.Items.Add(MenuItem("Measure on screen", s.HotkeyMeasure, () => QueueCaptureCommand("measure"), ""));
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Record screen", s.HotkeyRecord, RecordFlow, "\uE714"));
-        menu.Items.Add(MenuItem("Record display…", null, RecordDisplayFlow, "\uE7F4"));
-        menu.Items.Add(MenuItem("Capture text (OCR)", s.HotkeyOcr, () => QueueCaptureCommand("ocr"), "\uE8D2"));
-        menu.Items.Add(MenuItem("Scrolling capture", s.HotkeyScrolling, () => QueueCaptureCommand("scrolling"), "\uE8CB"));
-        menu.Items.Add(MenuItem("Horizontal scrolling capture", null, () => QueueCaptureCommand("scroll-horizontal"), "\uE8AB"));
-        menu.Items.Add(MenuItem("Scrolling capture (upward)", null, () => QueueCaptureCommand("scroll-up"), "\uE70E"));
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("Open image…", null, OpenImageFileFlow, "\uE8E5"));
-        menu.Items.Add(MenuItem("Pin to the screen…", null, PinFromFileFlow, "\uE718"));
-        menu.Items.Add(MenuItem("Restore recently closed", null, RestoreLastFlow, "\uE7A7"));
-        _desktopIconsMenuItem = MenuItem("Hide desktop icons", null, ToggleDesktopIcons, "\uE8B7");
-        menu.Items.Add(_desktopIconsMenuItem);
-        _recentsMenuItem = new WF.ToolStripMenuItem("Recent captures");
-        _recentsMenuItem.DropDownOpening += (_, _) => PopulateRecentCaptures();
-        menu.Items.Add(_recentsMenuItem);
-        menu.Items.Add(new WF.ToolStripSeparator());
-        menu.Items.Add(MenuItem("History…", s.HotkeyHistory, OpenHistory));
-        menu.Items.Add(MenuItem("Settings…", null, OpenSettings));
-        menu.Items.Add(MenuItem("Pin last screenshot", s.HotkeyPinLast, PinLastFlow));
-        menu.Items.Add(MenuItem("Toggle pins visibility", s.HotkeyPinToggleVisibility, TogglePinsFlow));
-        menu.Items.Add(MenuItem("Close all pins", s.HotkeyPinCloseAll, ClosePinsFlow));
-        menu.Items.Add(MenuItem("Unlock pinned windows", null, FastPinWindow.UnlockAllPins));
-        menu.Items.Add(new WF.ToolStripSeparator());
-        // Dynamic "Update available" item — hidden until a check finds a newer release.
-        _updateMenuItem = MenuItem("Install update", null, () => _ = InstallPendingUpdateAsync());
-        _updateMenuItem.Visible = false;
-        menu.Items.Add(_updateMenuItem);
-        menu.Items.Add(MenuItem("Check for updates…", null, () => _ = CheckForUpdatesFlowAsync()));
-        menu.Items.Add(MenuItem("About WinShot…", null, OpenAbout));
-        menu.Items.Add(MenuItem("Exit", null, Shutdown));
+        TrayMenuParts parts = BuildTrayMenu(_settings.Current, TrayAction);
+        var menu = parts.Menu;
+        _desktopIconsMenuItem = parts.DesktopIcons;
+        _recentsMenuItem = parts.Recents;
+        // Filled when the tray menu opens, not when the submenu does: a row with no items has
+        // no arrow and never opens, so waiting for DropDownOpening left it empty for good.
+        menu.Opening += (_, _) => PopulateRecentCaptures();
+        _updateMenuItem = parts.Update;
         // The desktop-icon row's checked state is only true while WinShot is holding them
         // hidden, and a capture guard can change that behind the menu's back.
         menu.Opening += (_, _) => RefreshDesktopIconsMenuItem();
+        // Start decoding the Recent captures thumbnails while the pointer is still on its
+        // way down the menu, so the submenu usually opens with them already there.
+        menu.Opening += (_, _) => WarmRecentThumbnails();
         // Re-rasterized on every open, not once: the tray menu follows the pointer, and a
         // 100 % raster opening on the 150 % monitor is the whole defect.
         ScaleMenuGlyphs(menu);
@@ -526,30 +570,27 @@ public partial class App : Application
 
     /// <summary>The last few captures, with their own thumbnails in the icon gutter that is
     /// now there anyway.</summary>
+    /// <remarks>
+    /// The submenu opens at once and the thumbnails fill in. It used to decode six
+    /// full-size captures on the UI thread every time the pointer crossed "Recent captures",
+    /// which froze the whole tray menu for the better part of a second on 4K shots. They are
+    /// now decoded off-thread (started as soon as the tray menu itself opens, so they are
+    /// usually ready by the time the submenu is reached) and kept until the file changes.
+    /// </remarks>
     private void PopulateRecentCaptures()
     {
         if (_recentsMenuItem is null) return;
-        foreach (WF.ToolStripItem item in _recentsMenuItem.DropDownItems)
-            item.Image?.Dispose();
+        // The images belong to the thumbnail cache, not to the rows.
         _recentsMenuItem.DropDownItems.Clear();
 
-        List<string> recent;
-        try
-        {
-            recent = _history.GetItems().Take(RecentCaptureCount).ToList();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Reading recent captures for the tray menu failed", ex);
-            recent = [];
-        }
-
+        List<string> recent = ReadRecentCaptures();
         if (recent.Count == 0)
         {
             _recentsMenuItem.DropDownItems.Add(new WF.ToolStripMenuItem("No captures yet") { Enabled = false });
             return;
         }
 
+        int size = MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96);
         foreach (string path in recent)
         {
             string file = path;
@@ -557,23 +598,140 @@ public partial class App : Application
             {
                 // Same gutter as the Segoe glyphs above it, so it has to be the same size at
                 // the same DPI — a fixed 16 px thumbnail sits small in a 24 px gutter at 150%.
-                Image = TryLoadThumbnail(file, MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96)),
+                Image = CachedRecentThumbnail(file, size),
+                Tag = new RecentCaptureRow(file),
             };
             item.Click += (_, _) => EditFromHistory(file);
             _recentsMenuItem.DropDownItems.Add(item);
+        }
+        WarmRecentThumbnails(recent, size);
+    }
+
+    /// <summary>Marks a recent-capture row, so a late thumbnail finds its row. A tag of its
+    /// own type keeps ScaleMenuGlyphs (which reads string tags as glyphs) away from it.</summary>
+    private sealed record RecentCaptureRow(string Path);
+
+    private List<string> ReadRecentCaptures()
+    {
+        try
+        {
+            return _history.GetItems().Take(RecentCaptureCount).ToList();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Reading recent captures for the tray menu failed", ex);
+            return [];
         }
     }
 
     private const int RecentCaptureCount = 6;
 
+    private readonly Dictionary<(string Path, int Size), (DateTime Stamp, SD.Image Image)> _recentThumbnails = new();
+    private bool _recentThumbnailsLoading;
+
+    private SD.Image? CachedRecentThumbnail(string path, int size)
+    {
+        if (!_recentThumbnails.TryGetValue((path, size), out var entry))
+            return null;
+        if (entry.Stamp == SafeLastWrite(path))
+            return entry.Image;
+        _recentThumbnails.Remove((path, size));
+        entry.Image.Dispose();
+        return null;
+    }
+
+    /// <summary>Decodes whichever of <paramref name="recent"/> has no thumbnail yet, off the UI
+    /// thread, then hands each to its row if the submenu is still showing it.</summary>
+    private async void WarmRecentThumbnails(List<string>? recent = null, int? size = null)
+    {
+        if (_recentThumbnailsLoading || _recentsMenuItem is null)
+            return;
+        recent ??= ReadRecentCaptures();
+        int px = size ?? MenuGlyphPixels(_recentsMenuItem.Owner?.DeviceDpi ?? 96);
+
+        // Drop what fell off the list, so the cache never outgrows the menu.
+        var keep = new HashSet<string>(recent, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _recentThumbnails.Keys.Where(k => k.Size != px || !keep.Contains(k.Path)).ToList())
+        {
+            _recentThumbnails[key].Image.Dispose();
+            _recentThumbnails.Remove(key);
+        }
+
+        List<string> missing = recent
+            .Where(path => !HistoryService.IsVideo(path) && CachedRecentThumbnail(path, px) is null)
+            .ToList();
+        if (missing.Count == 0)
+            return;
+
+        _recentThumbnailsLoading = true;
+        try
+        {
+            var loaded = await Task.Run(() => missing
+                .AsParallel()
+                .Select(path => (Path: path, Stamp: SafeLastWrite(path), Image: TryLoadThumbnail(path, px)))
+                .ToList());
+            foreach (var (path, stamp, image) in loaded)
+            {
+                if (image is null)
+                    continue;
+                if (_recentThumbnails.ContainsKey((path, px)))
+                {
+                    image.Dispose();
+                    continue;
+                }
+                _recentThumbnails[(path, px)] = (stamp, image);
+                if (_recentsMenuItem is null)
+                    continue;
+                foreach (WF.ToolStripItem row in _recentsMenuItem.DropDownItems)
+                {
+                    if (row.Tag is RecentCaptureRow r &&
+                        string.Equals(r.Path, path, StringComparison.OrdinalIgnoreCase))
+                        row.Image = image;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Loading tray menu thumbnails failed", ex);
+        }
+        finally
+        {
+            _recentThumbnailsLoading = false;
+        }
+    }
+
+    private static DateTime SafeLastWrite(string path)
+    {
+        try { return File.GetLastWriteTimeUtc(path); }
+        catch { return DateTime.MinValue; }
+    }
+
+    /// <summary>
+    /// A <paramref name="size"/>-pixel square with the capture fitted inside it. Read from a
+    /// copy in memory so the file is never held open (History can rename or delete it while
+    /// the menu is up), and fitted rather than stretched: GetThumbnailImage(size, size)
+    /// squashed every wide capture into a square.
+    /// </summary>
     private static SD.Image? TryLoadThumbnail(string path, int size)
     {
         try
         {
-            if (!File.Exists(path) || Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+            if (!File.Exists(path))
                 return null;
-            using var source = new SD.Bitmap(path);
-            return source.GetThumbnailImage(size, size, null, IntPtr.Zero);
+            using var stream = new MemoryStream(File.ReadAllBytes(path));
+            using var source = SD.Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: false);
+            double scale = Math.Min(size / (double)Math.Max(1, source.Width), size / (double)Math.Max(1, source.Height));
+            int w = Math.Max(1, (int)Math.Round(source.Width * scale));
+            int h = Math.Max(1, (int)Math.Round(source.Height * scale));
+            var thumb = new SD.Bitmap(size, size, SD.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = SD.Graphics.FromImage(thumb))
+            {
+                g.Clear(SD.Color.Transparent);
+                g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = SD.Drawing2D.PixelOffsetMode.Half;
+                g.DrawImage(source, new SD.Rectangle((size - w) / 2, (size - h) / 2, w, h));
+            }
+            return thumb;
         }
         catch (Exception ex)
         {
@@ -633,6 +791,107 @@ public partial class App : Application
 
     /// <param name="glyph">A Segoe Fluent codepoint for the capture verbs. Housekeeping rows
     /// pass none on purpose: an empty gutter is what visually demotes them.</param>
+    /// <summary>The tray menu rows that change after the menu is built.</summary>
+    internal sealed record TrayMenuParts(
+        WF.ContextMenuStrip Menu,
+        WF.ToolStripMenuItem DesktopIcons,
+        WF.ToolStripMenuItem Recents,
+        WF.ToolStripMenuItem Update);
+
+    /// <summary>
+    /// The tray menu, laid out the way CleanShot X lays out its menu-bar menu: the everyday
+    /// verbs at the top level, the rarer variants one level down. It used to be 32 flat rows,
+    /// which at 150 % on a 1080p screen is taller than the work area, so WinForms put scroll
+    /// arrows on it and the bottom of the list (History, Settings, Exit) was off screen.
+    /// Static, with each row's action looked up by name, so the render audit can draw this
+    /// menu rather than a stand-in.
+    /// </summary>
+    internal static TrayMenuParts BuildTrayMenu(Settings s, Func<string, Action> act)
+    {
+        var menu = new WF.ContextMenuStrip
+        {
+            Renderer = new DarkDropDown.DarkMenuRenderer(),
+            // A fixed left gutter for the capture verbs. The housekeeping group at the
+            // bottom deliberately gets no glyphs, which demotes it without another separator.
+            ShowImageMargin = true,
+        };
+        WF.ToolStripMenuItem Row(string text, string? shortcut, string id, string? glyph = null) =>
+            MenuItem(text, shortcut, act(id), glyph);
+
+        // Non-clickable header showing the running version — always visible at a glance.
+        menu.Items.Add(new WF.ToolStripMenuItem(AppInfo.VersionLabel) { Enabled = false });
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("Capture region", s.HotkeyCaptureRegion, "capture-area", "\uE7C5"));
+        menu.Items.Add(Row("Capture window", s.HotkeyCaptureWindow, "capture-window", "\uE737"));
+        menu.Items.Add(Row("Capture fullscreen", s.HotkeyCaptureFullscreen, "capture-fullscreen", "\uE740"));
+        menu.Items.Add(Row("Capture previous region", s.HotkeyCapturePrevious, "capture-previous", "\uE72C"));
+        menu.Items.Add(Row("Capture fullscreen (self-timer)", s.HotkeySelfTimer, "self-timer", "\uE916"));
+        menu.Items.Add(Row("All-in-one…", s.HotkeyAllInOne, "all-in-one", "\uE71D"));
+        menu.Items.Add(Row("Measure on screen", s.HotkeyMeasure, "measure", "\uED5E"));
+        var more = new WF.ToolStripMenuItem("More ways to capture") { Tag = "\uE712" };
+        more.DropDownItems.Add(Row("Capture window with background", null, "capture-window-background", "\uE790"));
+        more.DropDownItems.Add(Row("Capture display…", null, "capture-display", "\uE7F4"));
+        more.DropDownItems.Add(Row("Capture region (self-timer)", null, "self-timer-region", "\uE916"));
+        more.DropDownItems.Add(Row("Horizontal scrolling capture", null, "scroll-horizontal", "\uE8AB"));
+        more.DropDownItems.Add(Row("Scrolling capture (upward)", null, "scroll-up", "\uE70E"));
+        more.DropDownItems.Add(Row("Open clipboard image", s.HotkeyLoadClipboard, "clipboard", "\uE77F"));
+        menu.Items.Add(more);
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("Record screen", s.HotkeyRecord, "record", "\uE714"));
+        menu.Items.Add(Row("Record display…", null, "record-display", "\uE7F4"));
+        menu.Items.Add(Row("Capture text (OCR)", s.HotkeyOcr, "ocr", "\uE8D2"));
+        menu.Items.Add(Row("Scrolling capture", s.HotkeyScrolling, "scrolling", "\uE8CB"));
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("Open image…", null, "open-image", "\uE8E5"));
+        menu.Items.Add(Row("Restore recently closed", null, "restore", "\uE7A7"));
+        var desktopIcons = Row("Hide desktop icons", null, "desktop-icons", "\uE8B7");
+        menu.Items.Add(desktopIcons);
+        var pins = new WF.ToolStripMenuItem("Pins") { Tag = "\uE718" };
+        pins.DropDownItems.Add(Row("Pin an image…", null, "pin-file"));
+        pins.DropDownItems.Add(Row("Pin last screenshot", s.HotkeyPinLast, "pin-last"));
+        pins.DropDownItems.Add(Row("Toggle pins visibility", s.HotkeyPinToggleVisibility, "pins-toggle"));
+        pins.DropDownItems.Add(Row("Close all pins", s.HotkeyPinCloseAll, "pins-close"));
+        pins.DropDownItems.Add(Row("Unlock pinned windows", null, "pins-unlock"));
+        menu.Items.Add(pins);
+        var recents = new WF.ToolStripMenuItem("Recent captures") { Tag = "\uE81C" };
+        menu.Items.Add(recents);
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(Row("History…", s.HotkeyHistory, "history"));
+        menu.Items.Add(Row("Settings…", null, "settings"));
+        menu.Items.Add(new WF.ToolStripSeparator());
+        // Dynamic "Update available" item — hidden until a check finds a newer release.
+        var update = Row("Install update", null, "install-update");
+        update.Visible = false;
+        menu.Items.Add(update);
+        menu.Items.Add(Row("Check for updates…", null, "check-updates"));
+        menu.Items.Add(Row("About WinShot…", null, "about"));
+        menu.Items.Add(Row("Exit", null, "exit"));
+        return new TrayMenuParts(menu, desktopIcons, recents, update);
+    }
+
+    /// <summary>What each tray row does; any name not listed is a capture command.</summary>
+    private Action TrayAction(string id) => id switch
+    {
+        "record" => () => RecordFlow(),
+        "record-display" => () => RecordDisplayFlow(),
+        "clipboard" => () => LoadClipboardImageFlow(),
+        "open-image" => () => OpenImageFileFlow(),
+        "pin-file" => () => PinFromFileFlow(),
+        "restore" => () => RestoreLastFlow(),
+        "desktop-icons" => () => ToggleDesktopIcons(),
+        "history" => () => OpenHistory(),
+        "settings" => () => OpenSettings(),
+        "pin-last" => () => PinLastFlow(),
+        "pins-toggle" => () => TogglePinsFlow(),
+        "pins-close" => () => ClosePinsFlow(),
+        "pins-unlock" => () => FastPinWindow.UnlockAllPins(),
+        "install-update" => () => _ = InstallPendingUpdateAsync(),
+        "check-updates" => () => _ = CheckForUpdatesFlowAsync(),
+        "about" => () => OpenAbout(),
+        "exit" => () => Shutdown(),
+        _ => () => QueueCaptureCommand(id),
+    };
+
     private static WF.ToolStripMenuItem MenuItem(
         string text, string? shortcut, Action onClick, string? glyph = null)
     {
@@ -658,12 +917,21 @@ public partial class App : Application
     private static void ScaleMenuGlyphs(WF.ContextMenuStrip menu)
     {
         int dpi = menu.DeviceDpi <= 0 ? 96 : menu.DeviceDpi;
+        ScaleMenuGlyphs(menu, dpi);
+    }
+
+    /// <summary>Submenus open on the same monitor as the menu they hang off, so they take its
+    /// DPI rather than their own, which is not known until they are shown.</summary>
+    internal static void ScaleMenuGlyphs(WF.ToolStrip strip, int dpi)
+    {
         int size = MenuGlyphPixels(dpi);
-        menu.ImageScalingSize = new SD.Size(size, size);
-        foreach (WF.ToolStripItem item in menu.Items)
+        strip.ImageScalingSize = new SD.Size(size, size);
+        foreach (WF.ToolStripItem item in strip.Items)
         {
             if (item.Tag is string glyph && glyph.Length > 0)
                 item.Image = RenderMenuGlyph(glyph, dpi);
+            if (item is WF.ToolStripMenuItem { HasDropDownItems: true } parent)
+                ScaleMenuGlyphs(parent.DropDown, dpi);
         }
     }
 
@@ -881,7 +1149,7 @@ public partial class App : Application
         }
     }
 
-    private static bool IsCaptureCommand(string cmd) => cmd is
+    internal static bool IsCaptureCommand(string cmd) => cmd is
         "capture-area" or "capture-window" or "capture-fullscreen" or "capture-display" or "capture-previous" or
         "capture-window-background" or
         "all-in-one" or "ocr" or "measure" or "scrolling" or "scroll-horizontal" or "scroll-up" or
@@ -906,7 +1174,8 @@ public partial class App : Application
         _delayedCountdownActive = true;
         try
         {
-            await FastSelfTimerWindow.RunAsync(options.DelaySeconds);
+            if (!await FastSelfTimerWindow.RunAsync(options.DelaySeconds))
+                return;
         }
         catch (Exception ex)
         {
@@ -1008,7 +1277,7 @@ public partial class App : Application
 
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(region, null, autoStart: auto, autoStop: stop, paneScoped: paneScoped);
             if (stitched is not null)
-                HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling, region);
+                await HandleCapture(stitched, save ? PostCaptureAction.Save : null, HistoryCaptureKind.Scrolling, region);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
@@ -1139,8 +1408,9 @@ public partial class App : Application
                     if (frozenCrop is null)
                     {
                         await WaitForOverlayDismissAsync();
-                        if (SelfTimerOptions.ShouldRunDelay(delaySeconds))
-                            await FastSelfTimerWindow.RunAsync(delaySeconds);
+                        if (SelfTimerOptions.ShouldRunDelay(delaySeconds)
+                            && !await FastSelfTimerWindow.RunAsync(delaySeconds))
+                            return;
                         frozenCrop = await CaptureSelectedRegionAsync(region, "capture-area");
                     }
                     // selector.Mode, not the mode we ASKED for: Space flips Area<->Window
@@ -1175,7 +1445,7 @@ public partial class App : Application
                     // SelectedRegionPx is virtual-screen relative; the editor's target rect is
                     // in real screen coordinates, which differ by the virtual origin on any
                     // layout with a monitor above or left of the primary.
-                    HandleCapture(frozenCrop, postCaptureActionOverride,
+                    await HandleCapture(frozenCrop, postCaptureActionOverride,
                         originScreenRect: ToScreenRect(region));
                 }
             }
@@ -1267,7 +1537,7 @@ public partial class App : Application
                         await WaitForOverlayDismissAsync();
                         frozenCrop = await CaptureSelectedRegionAsync(region, "measure");
                     }
-                    HandleCapture(frozenCrop);
+                    await HandleCapture(frozenCrop);
                 }
             }
             finally
@@ -1291,7 +1561,7 @@ public partial class App : Application
                     ToastSeverity.Info, holdLong: true);
                 return;
             }
-            HandleCapture(image, PostCaptureAction.Edit);
+            await HandleCapture(image, PostCaptureAction.Edit);
         });
 
     private void CaptureFullscreenFlow() => RunCaptureFlow(
@@ -1300,17 +1570,18 @@ public partial class App : Application
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("capture-fullscreen screen grab", sw);
-            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
+            await HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureFullscreenTimerFlow() => RunCaptureFlow(
         "Self-timer capture failed", "Capture failed", async () =>
         {
-            await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
+            if (!await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds))
+                return;
             var sw = Stopwatch.StartNew();
             var capture = await RunCaptureWorkAsync(CaptureDesktopRespectingSettings);
             LogPerf("self-timer screen grab", sw);
-            HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
+            await HandleCapture(capture, originScreenRect: CaptureService.VirtualScreen);
         });
 
     private void CaptureDisplayFlow() => RunCaptureFlow(
@@ -1323,7 +1594,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-display screen grab", sw);
-                HandleCapture(capture, originScreenRect: r);
+                await HandleCapture(capture, originScreenRect: r);
             }
         });
 
@@ -1335,7 +1606,7 @@ public partial class App : Application
                 var sw = Stopwatch.StartNew();
                 var capture = await RunCaptureWorkAsync(() => CaptureScreenRegionRespectingSettings(r));
                 LogPerf("capture-previous screen grab", sw);
-                HandleCapture(capture, originScreenRect: r);
+                await HandleCapture(capture, originScreenRect: r);
             }
             else
                 // Info, not Error: nothing went wrong, a prerequisite is simply not met yet —
@@ -1411,15 +1682,20 @@ public partial class App : Application
             switch (action)
             {
                 case AllInOneAction.Capture:
-                    HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
+                    await HandleCapture(captured!, originScreenRect: ToScreenRect(regionPx));
                     break;
                 case AllInOneAction.Timer:
-                    await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds);
-                    HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
+                    if (await FastSelfTimerWindow.RunAsync(_settings.Current.SelfTimerSeconds))
+                        await HandleCapture(await CaptureSelectedRegionAsync(regionPx, "all-in-one timer"));
                     break;
                 case AllInOneAction.Ocr:
-                    using (captured) await RunOcrToClipboard(captured!);
+                {
+                    // The result toast comes up over the selection, on its own monitor.
+                    SD.Rectangle where = ToScreenRect(regionPx);
+                    var anchor = new SD.Point(where.X + where.Width / 2, where.Y + where.Height / 2);
+                    using (captured) await RunOcrToClipboard(captured!, anchor);
                     break;
+                }
                 case AllInOneAction.Record:
                     Recording.ToggleFlowWithRegion(regionPx);
                     break;
@@ -1428,7 +1704,7 @@ public partial class App : Application
                     region.Offset(CaptureService.VirtualScreen.X, CaptureService.VirtualScreen.Y);
                     var (stitched, cancelled) = await ScrollingStatusWindow.Run(region);
                     if (stitched is not null)
-                        HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: region);
+                        await HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: region);
                     else if (!cancelled)
                         ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
                     break;
@@ -1535,7 +1811,16 @@ public partial class App : Application
 
     /// <summary>Every captured bitmap funnels through here: optional downscale, then the
     /// after-capture set (history included).</summary>
-    private void HandleCapture(
+    /// <remarks>
+    /// The two optional pixel passes (HiDPI downscale and the standing screenshot backdrop)
+    /// run on a worker thread. A backdrop with a shadow over a 4K capture is a few hundred
+    /// milliseconds of GDI+, and running it inline froze the UI thread between the selector
+    /// closing and the card appearing, which read as capture lag and stalled any motion in
+    /// flight. The window-capture backdrop already moved off-thread for the same reason.
+    /// With both passes off (the defaults) nothing awaits, so the whole set still runs
+    /// before this returns.
+    /// </remarks>
+    private async Task HandleCapture(
         SD.Bitmap bmp,
         string? postCaptureActionOverride = null,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
@@ -1551,35 +1836,20 @@ public partial class App : Application
         // delays the capture or the surface that follows it.
         CaptureSound.Play(_settings.Current);
 
-        if (_settings.Current.DownscaleHiDpi)
-        {
-            if (HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out int w, out int h))
-            {
-                try
-                {
-                    var scaled = BitmapEffects.Resize(bmp, w, h);
-                    bmp.Dispose();
-                    bmp = scaled;
-                }
-                catch (Exception ex) { Log.Error("HiDPI downscale failed", ex); }
-            }
-        }
-
-        // The standing "frame every shot like this" preference, applied after the downscale
-        // so the padding is measured against the pixels that ship. None (the default) does
-        // nothing, and a backdrop that fails to compose returns null rather than a capture.
-        //
+        Settings current = _settings.Current;
+        bool downscale = current.DownscaleHiDpi &&
+            HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, SystemDpiScale, out _, out _);
         // AppliesTo, not IsEnabled: the "Capture window with background" override is on its
         // way to the interactive composer, which frames the shot itself.
-        if (ScreenshotBackdrop.AppliesTo(_settings.Current.ScreenshotBackground, postCaptureActionOverride) &&
-            ScreenshotBackdrop.Compose(
-                bmp,
-                _settings.Current.ScreenshotBackground,
-                _settings.Current.ScreenshotBackgroundColor,
-                _settings.Current.ScreenshotBackgroundShadow) is SD.Bitmap framed)
+        bool backdrop = ScreenshotBackdrop.AppliesTo(current.ScreenshotBackground, postCaptureActionOverride);
+        if (downscale || backdrop)
         {
-            bmp.Dispose();
-            bmp = framed;
+            SD.Bitmap source = bmp;
+            double dpiScale = SystemDpiScale;
+            string? mode = current.ScreenshotBackground;
+            string? color = current.ScreenshotBackgroundColor;
+            bool shadow = current.ScreenshotBackgroundShadow;
+            bmp = await RunCaptureWorkAsync(() => PrepareCapturePixels(source, downscale, dpiScale, backdrop, mode, color, shadow));
         }
 
         // "Add background" has no matrix cell — it only ever arrives as a per-invocation
@@ -1608,6 +1878,34 @@ public partial class App : Application
             actions = actions with { Overlay = true };
 
         RunPostCaptureSet(bmp, actions, historyKind, originScreenRect);
+    }
+
+    /// <summary>The optional pixel passes, in order: downscale first, so the backdrop's
+    /// padding is measured against the pixels that ship. Runs on a worker thread and owns
+    /// <paramref name="bmp"/>; a pass that fails leaves the previous pixels in place.</summary>
+    private static SD.Bitmap PrepareCapturePixels(
+        SD.Bitmap bmp, bool downscale, double dpiScale,
+        bool backdrop, string? mode, string? color, bool shadow)
+    {
+        if (downscale && HiDpiDownscale.TryGetTargetSize(bmp.Width, bmp.Height, dpiScale, out int w, out int h))
+        {
+            try
+            {
+                var scaled = BitmapEffects.Resize(bmp, w, h);
+                bmp.Dispose();
+                bmp = scaled;
+            }
+            catch (Exception ex) { Log.Error("HiDPI downscale failed", ex); }
+        }
+
+        // None does nothing, and a backdrop that fails to compose returns null rather than
+        // a capture.
+        if (backdrop && ScreenshotBackdrop.Compose(bmp, mode, color, shadow) is SD.Bitmap framed)
+        {
+            bmp.Dispose();
+            bmp = framed;
+        }
+        return bmp;
     }
 
     /// <summary>
@@ -1752,8 +2050,13 @@ public partial class App : Application
         string? postCaptureActionOverride = null,
         HistoryCaptureKind historyKind = HistoryCaptureKind.Regular,
         SD.Rectangle? originScreenRect = null,
-        PostCaptureSet? actionsOverride = null) =>
-        HandleCapture(bmp, postCaptureActionOverride, historyKind, originScreenRect, actionsOverride);
+        PostCaptureSet? actionsOverride = null)
+    {
+        // With the optional pixel passes off this finishes synchronously; surface its fault.
+        Task handled = HandleCapture(bmp, postCaptureActionOverride, historyKind, originScreenRect, actionsOverride);
+        if (handled.IsCompleted)
+            handled.GetAwaiter().GetResult();
+    }
 
     internal void SetHistoryForTest(HistoryService history) => _history = history;
 
@@ -1827,6 +2130,10 @@ public partial class App : Application
     /// says a recording is live and one click on it ends the recording.</summary>
     private void OnRecordingActiveChanged(bool recording)
     {
+        // A take releases the duplication device (the recorder needs the outputs); build it
+        // again once the take is over, so the next screenshot still opens frozen.
+        if (!recording)
+            RewarmFreezeSourceSoon();
         if (_tray is null)
             return;
         _tray.Icon = recording ? TrayIconFactory.CreateRecording() : TrayIconFactory.Create();
@@ -1896,13 +2203,9 @@ public partial class App : Application
         try
         {
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership, includePng);
-            if (showSuccess)
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    NotifyAction(
-                        NotifiedAction.Copy, "Copied", "The capture is on the clipboard.",
-                        trayBeat: true);
-                });
+            // No "Copied" toast on success: Isaiah asked for it gone (2026-11-03). A failed
+            // copy still says so below.
+            _ = showSuccess;
         }
         catch (Exception ex)
         {
@@ -1963,6 +2266,12 @@ public partial class App : Application
     {
         try
         {
+            // The clipboard first and alongside history, never behind it. History encodes a
+            // PNG and writes it to disk, which on a large capture is hundreds of ms, and the
+            // copy used to wait for all of it: select, press Ctrl+V straight away, and the
+            // OLD clipboard pasted. Both clone under CloneBitmap's lock on bmp, so running
+            // them together is safe.
+            Task copy = autoCopy ? QueueAutoClipboardCopy(bmp) : Task.CompletedTask;
             string? sourceApp = _captureSourceApp;
             string? historyPath = await Task.Run(() =>
             {
@@ -1983,8 +2292,7 @@ public partial class App : Application
             // bmp, and the copy's clone happens on its own STA thread — completing the
             // gate with the copy still in flight let a quickly-dismissed overlay dispose
             // bmp under the clone (auto-copy silently died + armed the 8s suppression).
-            if (autoCopy)
-                await QueueAutoClipboardCopy(bmp).ConfigureAwait(false);
+            await copy.ConfigureAwait(false);
 
             captureWorkCompletion.TrySetResult(null);
         }
@@ -2137,7 +2445,12 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, "ocr selector");
             try
             {
-                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
+                // The same selector as Capture region, element and window hover included, so
+                // a click reads the paragraph, panel or window under the pointer. It used to
+                // open a bare drag-only selector: nothing lit up under the pointer, a click
+                // did nothing, and it felt like a different tool.
+                if (await selector.ShowAsync(FastRegionSelectorDialog.SelectorMode.Area, elementHover: true) == WF.DialogResult.OK &&
+                    selector.SelectedRegionPx is SD.Rectangle region)
                 {
                     // Screen center of the selection, so the confirmation HUD pops over it.
                     var vs = CaptureService.VirtualScreen;
@@ -2406,7 +2719,7 @@ public partial class App : Application
             // run that came back with nothing to show for it is a failure worth a red card.
             var (stitched, cancelled) = await ScrollingStatusWindow.Run(refined, direction, paneScoped: paneClick, reverse: reverse);
             if (stitched is not null)
-                HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: refined);
+                await HandleCapture(stitched, historyKind: HistoryCaptureKind.Scrolling, originScreenRect: refined);
             else if (!cancelled)
                 ShowBalloon("Scrolling capture", "Nothing captured.", ToastSeverity.Error);
         });
@@ -2596,9 +2909,11 @@ public partial class App : Application
 
     /// <summary>The pin's pencil chip: the handoff Annotate already performs from the card,
     /// with the pin left on screen and the editor given its own copy.</summary>
-    private void OpenEditorFromPin(SD.Bitmap image)
+    private void OpenEditorFromPin(SD.Bitmap image, SD.Rectangle? pinBounds)
     {
         var win = EditorWindow.CreateForCapture(image, _settings, _history);
+        // On the pin's own monitor, grown out of the pin, as the card's Annotate does.
+        if (pinBounds is SD.Rectangle where) win.GrowFrom(where);
         TrackFirstRender(win, "editor window");
         win.Show();
     }

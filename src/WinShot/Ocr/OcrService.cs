@@ -186,6 +186,8 @@ public static class OcrService
             string text = string.Empty;
             var lines = new List<string>();
             double scale = InitialOcrScale(bmp.Width, bmp.Height);
+            double firstScale = scale;
+            BgraSnapshot? firstSnapshot = null;
             while (true)
             {
                 double snapScale = scale;
@@ -193,17 +195,16 @@ public static class OcrService
                     ? snapshot
                     : await Task.Run(() => SnapshotAtScale(bmp, snapScale));
                 snapshotMs += Math.Abs(snapScale - fitScale) < 0.01 ? 0 : step.ElapsedMilliseconds;
+                firstSnapshot ??= ocrSnapshot;
 
                 step.Restart();
-                using (SoftwareBitmap softwareBitmap = ToSoftwareBitmap(ocrSnapshot))
-                {
-                    softwareBitmapMs += step.ElapsedMilliseconds;
-                    step.Restart();
-                    OcrResult result = await engine.RecognizeAsync(softwareBitmap);
-                    recognizeMs += step.ElapsedMilliseconds;
-                    lines = result.Lines.Select(l => l.Text).ToList();
-                    text = OcrTextFormatter.Format(lines, joinLines);
-                }
+                int pad = OcrPad(bmp.Width, bmp.Height, snapScale);
+                BgraSnapshot input = await Task.Run(() => Padded(ocrSnapshot, pad, enhance: false));
+                softwareBitmapMs += step.ElapsedMilliseconds;
+                step.Restart();
+                lines = await RecognizeLinesAsync(engine, input);
+                recognizeMs += step.ElapsedMilliseconds;
+                text = OcrTextFormatter.Format(lines, joinLines);
 
                 if (!string.IsNullOrWhiteSpace(text))
                     break;
@@ -211,6 +212,18 @@ public static class OcrService
                     break;
                 scale = next;
                 step.Restart();
+            }
+
+            // Nothing yet: one more look at the first pass's image in high-contrast grey,
+            // light-on-dark turned to dark-on-light, before answering "no text".
+            if (string.IsNullOrWhiteSpace(text) && firstSnapshot is { } plain)
+            {
+                step.Restart();
+                int pad = OcrPad(bmp.Width, bmp.Height, firstScale);
+                BgraSnapshot enhanced = await Task.Run(() => Padded(plain, pad, enhance: true));
+                lines = await RecognizeLinesAsync(engine, enhanced);
+                recognizeMs += step.ElapsedMilliseconds;
+                text = OcrTextFormatter.Format(lines, joinLines);
             }
 
             var fastBarcode = await fastBarcodeTask;
@@ -278,7 +291,9 @@ public static class OcrService
 
         double scale = InitialOcrScale(bmp.Width, bmp.Height);
         BgraSnapshot snapshot = await Task.Run(() => SnapshotAtScale(bmp, scale));
-        using SoftwareBitmap softwareBitmap = ToSoftwareBitmap(snapshot);
+        int pad = OcrPad(bmp.Width, bmp.Height, scale);
+        BgraSnapshot input = Padded(snapshot, pad, enhance: false);
+        using SoftwareBitmap softwareBitmap = ToSoftwareBitmap(input);
         OcrResult result = await engine.RecognizeAsync(softwareBitmap);
 
         var boxes = new List<SD.Rectangle>();
@@ -288,7 +303,7 @@ public static class OcrService
             foreach (OcrWord word in line.Words)
             {
                 SD.Rectangle box = ScaleWordBox(
-                    word.BoundingRect.X, word.BoundingRect.Y,
+                    word.BoundingRect.X - pad, word.BoundingRect.Y - pad,
                     word.BoundingRect.Width, word.BoundingRect.Height,
                     scale, image);
                 if (box.Width > 0 && box.Height > 0)
@@ -567,6 +582,12 @@ public static class OcrService
                         rowBytes);
                 }
 
+                MakeOpaque(pixels, bmp.PixelFormat switch
+                {
+                    SDI.PixelFormat.Format32bppRgb => AlphaKind.Ignored,
+                    SDI.PixelFormat.Format32bppPArgb => AlphaKind.Premultiplied,
+                    _ => AlphaKind.Straight,
+                });
                 return new BgraSnapshot(pixels, bmp.Width, bmp.Height);
             }
             finally
@@ -588,6 +609,124 @@ public static class OcrService
     }
 
     private sealed record BgraSnapshot(byte[] Pixels, int Width, int Height);
+
+    internal enum AlphaKind { Ignored, Straight, Premultiplied }
+
+    /// <summary>
+    /// Every pixel opaque, see-through ones laid over white. The engine is handed the bytes as
+    /// PREMULTIPLIED Bgra8, so a 32bppRgb capture (whose fourth byte is undefined, and 0 after
+    /// a BitBlt) read as fully transparent and came back with no text. That only happened on
+    /// the passes that skip the resample (a big selection), which is why OCR worked on some
+    /// selections and not others (Isaiah 2026-11-03: "it needs to be 100%").
+    /// </summary>
+    internal static void MakeOpaque(byte[] bgra, AlphaKind kind)
+    {
+        for (int i = 0; i + 3 < bgra.Length; i += 4)
+        {
+            int a = bgra[i + 3];
+            if (kind == AlphaKind.Ignored || a == 255) { bgra[i + 3] = 255; continue; }
+            int white = 255 - a;
+            for (int c = 0; c < 3; c++)
+            {
+                int v = kind == AlphaKind.Premultiplied
+                    ? bgra[i + c] + white
+                    : (bgra[i + c] * a + 255 * white + 127) / 255;
+                bgra[i + c] = (byte)Math.Min(255, v);
+            }
+            bgra[i + 3] = 255;
+        }
+    }
+
+    /// <summary>
+    /// The average colour around the image's edge, which is its background in nearly every
+    /// selection of screen text.
+    /// </summary>
+    internal static (byte B, byte G, byte R) EdgeColour(byte[] bgra, int width, int height)
+    {
+        long b = 0, g = 0, r = 0, n = 0;
+        void Add(int x, int y)
+        {
+            int i = (y * width + x) * 4;
+            b += bgra[i]; g += bgra[i + 1]; r += bgra[i + 2]; n++;
+        }
+        for (int x = 0; x < width; x++) { Add(x, 0); Add(x, height - 1); }
+        for (int y = 1; y < height - 1; y++) { Add(0, y); Add(width - 1, y); }
+        if (n == 0) return (255, 255, 255);
+        return ((byte)(b / n), (byte)(g / n), (byte)(r / n));
+    }
+
+    /// <summary>
+    /// The image with a margin of its own background colour on every side. Windows OCR
+    /// regularly drops a word that touches the edge of a tight selection; a margin gives
+    /// every glyph room on all sides.
+    /// </summary>
+    internal static byte[] Pad(byte[] bgra, int width, int height, int pad, out int newWidth, out int newHeight)
+    {
+        var (eb, eg, er) = EdgeColour(bgra, width, height);
+        newWidth = width + pad * 2;
+        newHeight = height + pad * 2;
+        var output = new byte[newWidth * newHeight * 4];
+        for (int i = 0; i < output.Length; i += 4)
+        {
+            output[i] = eb; output[i + 1] = eg; output[i + 2] = er; output[i + 3] = 255;
+        }
+        for (int y = 0; y < height; y++)
+            Buffer.BlockCopy(bgra, y * width * 4, output, ((y + pad) * newWidth + pad) * 4, width * 4);
+        return output;
+    }
+
+    /// <summary>
+    /// A second look for an image the plain pass read nothing from: grey, stretched to full
+    /// contrast, and turned to dark text on a light ground when the background is dark
+    /// (light text on a dark theme is the case the engine misses most).
+    /// </summary>
+    internal static byte[] Enhance(byte[] bgra, int width, int height)
+    {
+        var (eb, eg, er) = EdgeColour(bgra, width, height);
+        bool darkGround = (er * 299 + eg * 587 + eb * 114) / 1000 < 128;
+        var grey = new byte[width * height];
+        int lo = 255, hi = 0;
+        for (int p = 0, i = 0; p < grey.Length; p++, i += 4)
+        {
+            int v = (bgra[i + 2] * 299 + bgra[i + 1] * 587 + bgra[i] * 114) / 1000;
+            if (darkGround) v = 255 - v;
+            grey[p] = (byte)v;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        int span = Math.Max(1, hi - lo);
+        var output = new byte[bgra.Length];
+        for (int p = 0, i = 0; p < grey.Length; p++, i += 4)
+        {
+            byte v = (byte)Math.Clamp((grey[p] - lo) * 255 / span, 0, 255);
+            output[i] = v; output[i + 1] = v; output[i + 2] = v; output[i + 3] = 255;
+        }
+        return output;
+    }
+
+    /// <summary>The margin, in OCR pixels, put around a pass: about one tall glyph.</summary>
+    internal static int OcrPad(int width, int height, double scale)
+    {
+        int pad = (int)Math.Round(Math.Clamp(0.04 * Math.Max(width, height) * scale, 16, 48));
+        // Never push the padded image past the engine's dimension cap.
+        int room = (int)((OcrEngine.MaxImageDimension - Math.Max(width, height) * scale) / 2);
+        return Math.Max(0, Math.Min(pad, room));
+    }
+
+    private static BgraSnapshot Padded(BgraSnapshot s, int pad, bool enhance)
+    {
+        byte[] pixels = enhance ? Enhance(s.Pixels, s.Width, s.Height) : s.Pixels;
+        if (pad <= 0) return enhance ? new BgraSnapshot(pixels, s.Width, s.Height) : s;
+        byte[] padded = Pad(pixels, s.Width, s.Height, pad, out int w, out int h);
+        return new BgraSnapshot(padded, w, h);
+    }
+
+    private static async Task<List<string>> RecognizeLinesAsync(OcrEngine engine, BgraSnapshot snapshot)
+    {
+        using SoftwareBitmap softwareBitmap = ToSoftwareBitmap(snapshot);
+        OcrResult result = await engine.RecognizeAsync(softwareBitmap);
+        return result.Lines.Select(l => l.Text).ToList();
+    }
 }
 
 /// <summary>

@@ -1,0 +1,4 @@
+# Frames to print into the render-evidence log (paths under render-out).
+# "path" prints the whole frame; "path x y w h [cols]" crops that box first.
+out\dark-idle.png
+out\dark-hover.png

@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using WinShot.Core;
 using WinShot.History;
+using WinShot.Recording;
 using SD = System.Drawing;
 using WF = System.Windows.Forms;
 using W = System.Windows;
@@ -53,8 +54,8 @@ public sealed class FastQuickActionsWindow : WF.Form
     private SD.Rectangle _placedWorkingArea;
     private IDisposable? _enterMotion;
     private bool _enterMotionRunning;
-    private WF.Timer? _exitMotionTimer;
-    private WF.Timer? _stackMotionTimer;
+    private FrameTimer? _exitMotionTimer;
+    private FrameTimer? _stackMotionTimer;
     private IDisposable? _exitMotionClock;
     private IDisposable? _stackMotionClock;
     private WF.Timer? _autoCloseTimer;
@@ -82,7 +83,7 @@ public sealed class FastQuickActionsWindow : WF.Form
     private string? _flashMessage;
     private bool _flashIsFailure;
     private double _flashAmount;
-    private WF.Timer? _flashTimer;
+    private FrameTimer? _flashTimer;
     private IDisposable? _flashTimerScope;
     private SD.Point _flashCursor;
     private bool _hovering;
@@ -907,7 +908,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         // Windows' default ~15.6 ms tick this ran at ~32 fps and coalesced. Hold and fade
         // timings are unchanged — only the smoothness.
         _flashTimerScope ??= Motion.Acquire();
-        _flashTimer = new WF.Timer { Interval = Motion.FrameIntervalMs };
+        _flashTimer = new FrameTimer();
         long start = Environment.TickCount64;
         int hold = StatusHoldMs(message);
         _flashTimer.Tick += (_, _) =>
@@ -1020,7 +1021,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         if (_flashMessage is null)
             return;
 
-        using (var scrim = new SD.SolidBrush(_visuals.HoverTint))
+        using (var scrim = new SD.SolidBrush(_visuals.StatusTint))
         using (var cardPath = GdiPaths.RoundedRect(_cardRect, _cornerRadius))
             g.FillPath(scrim, cardPath);
 
@@ -1231,6 +1232,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
             using var attributes = new ImageAttributes();
             attributes.SetColorMatrix(new ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0d, 1d) });
+            // Same reason as CreateBlurred: without it the edge pixels fade toward clear.
+            attributes.SetWrapMode(WrapMode.TileFlipXY);
             GraphicsState state = g.Save();
             try
             {
@@ -1628,7 +1631,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         double startingOpacity = Opacity;
         long started = Stopwatch.GetTimestamp();
 
-        _exitMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _exitMotionTimer = new FrameTimer();
         _exitMotionClock = WinShot.Core.Motion.Acquire();
         _exitMotionTimer.Tick += (_, _) =>
         {
@@ -1717,7 +1720,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         }
 
         SD.Point start = Location;
-        _stackMotionTimer = new WF.Timer { Interval = QuickAccessOverlayMotion.FrameIntervalMs };
+        _stackMotionTimer = new FrameTimer();
         _stackMotionClock = WinShot.Core.Motion.Acquire();
         _stackMotionTimer.Tick += (_, _) =>
         {
@@ -1790,6 +1793,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         };
         _overflowMenu.Opening += (_, _) =>
         {
+            ScaleOverflowMenu();
             // Visible, not merely open: a card held off screen by the editor is not part of
             // the stack these rows act on, so advertising them over it reads as a lie.
             bool stacked = StackedCards().Length > 1;
@@ -1826,9 +1830,17 @@ public sealed class FastQuickActionsWindow : WF.Form
     private void ShowOverflowMenu()
     {
         SetHovering(true);
+        ScaleOverflowMenu();
         _overflowMenu.Show(OverflowMenuOrigin(_overflowMenu.GetPreferredSize(SD.Size.Empty)),
             WF.ToolStripDropDownDirection.BelowRight);
     }
+
+    /// <summary>Sizes the menu for the monitor the card is on, where it opens. Before this it
+    /// kept 100% rows and glyphs on every display.</summary>
+    private void ScaleOverflowMenu() =>
+        _overflowMenu.ApplyScale(RecordingMonitorDpi.ScaleFor(IsHandleCreated
+            ? RectangleToScreen(_cardRect)
+            : new SD.Rectangle(Left + _cardRect.X, Top + _cardRect.Y, _cardRect.Width, _cardRect.Height)));
 
     private SD.Point OverflowMenuOrigin(SD.Size menuSize) =>
         QuickActionsMenu.MenuOrigin(
@@ -2870,16 +2882,24 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     /// <summary>Cheap frosted blur: downscale to ~1/12 then upscale with bilinear smoothing.</summary>
-    private static SD.Bitmap CreateBlurred(SD.Bitmap src)
+    /// <remarks>
+    /// Both passes mirror the image at its edges. GDI+ blends a resampled image's outer pixels
+    /// with transparent by default, and blown back up twelve times that half-pixel became a
+    /// band about six pixels wide that let the dark card fill through, so hovering drew a
+    /// heavy dark border around the capture that the sharp card does not have.
+    /// </remarks>
+    internal static SD.Bitmap CreateBlurred(SD.Bitmap src)
     {
         int dw = Math.Max(1, src.Width / 12);
         int dh = Math.Max(1, src.Height / 12);
+        using var mirror = new ImageAttributes();
+        mirror.SetWrapMode(WrapMode.TileFlipXY);
         using var small = new SD.Bitmap(dw, dh, PixelFormat.Format32bppPArgb);
         using (var g = SD.Graphics.FromImage(small))
         {
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(src, new SD.Rectangle(0, 0, dw, dh));
+            g.DrawImage(src, new SD.Rectangle(0, 0, dw, dh), 0, 0, src.Width, src.Height, SD.GraphicsUnit.Pixel, mirror);
         }
 
         var blurred = new SD.Bitmap(src.Width, src.Height, PixelFormat.Format32bppPArgb);
@@ -2887,7 +2907,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(small, new SD.Rectangle(0, 0, src.Width, src.Height));
+            g.DrawImage(small, new SD.Rectangle(0, 0, src.Width, src.Height), 0, 0, dw, dh, SD.GraphicsUnit.Pixel, mirror);
         }
         return blurred;
     }
@@ -3263,18 +3283,8 @@ public sealed class FastQuickActionsWindow : WF.Form
 
             if (!keepOpen)
             {
-                // Same reason Save announces itself: this path closes the card, so without
-                // a toast the entire interaction is a card flying off screen. Ctrl+C now
-                // reaches the card on hover alone, which makes silence worse — the
-                // clipboard changed under someone who was aiming at the app underneath.
-                ShowCardToast(
-                    "Copied",
-                    // A sentence either way. The filename on its own read as a fragment
-                    // beside every other body this card raises.
-                    _mediaFilePath is not null
-                        ? $"{Path.GetFileName(_mediaFilePath)} is on the clipboard."
-                        : "The capture is on the clipboard.",
-                    Core.ToastSeverity.Success);
+                // No "Copied" toast: Isaiah found it ugly and asked for it gone (2026-11-03).
+                // The card leaving is the confirmation; failures still raise a toast.
                 Close();
                 return;
             }

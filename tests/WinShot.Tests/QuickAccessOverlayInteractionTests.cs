@@ -269,6 +269,57 @@ public class QuickAccessOverlayInteractionTests
     }
 
     [Fact]
+    public void MenuGrowsWithTheDisplayScale()
+    {
+        // At 200% the rows used to keep their 100% height, glyph and insets around text
+        // twice the size, so the labels sat against the row edges and looked cut off.
+        RunSta(() =>
+        {
+            using var bitmap = new SD.Bitmap(1200, 760);
+            using var overlay = new FastQuickActionsWindow(bitmap, new SettingsService());
+            var menu = (QuickActionsContextMenu)typeof(FastQuickActionsWindow)
+                .GetField("_overflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            var scaleMenu = typeof(FastQuickActionsWindow)
+                .GetMethod("ScaleOverflowMenu", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            // The type is sized in pixels from the start. A point font follows the system DPI
+            // instead of the menu's scale, which CI at 96 DPI cannot see but a 150% PC did:
+            // the "100%" menu came out with 150% text.
+            Assert.Equal(SD.GraphicsUnit.Pixel, menu.Font.Unit);
+            Assert.Equal(ThemePalette.PxForPt(ThemePalette.PinnedMenuRowPt, 1d), (int)menu.Font.Size);
+
+            var previous = WinShot.Recording.RecordingMonitorDpi.ScaleSource;
+            try
+            {
+                WinShot.Recording.RecordingMonitorDpi.ScaleSource = _ => 1d;
+                scaleMenu.Invoke(overlay, null);
+                var row = menu.Items.OfType<QuickActionMenuItem>().First();
+                int height1 = row.OwnSize().Height;
+                int left1 = row.TextLeft;
+                int width1 = menu.RowWidth;
+
+                WinShot.Recording.RecordingMonitorDpi.ScaleSource = _ => 2d;
+                scaleMenu.Invoke(overlay, null);
+                Assert.Equal(2d, menu.UiScale);
+                Assert.Equal(ThemePalette.PxForPt(ThemePalette.PinnedMenuRowPt, 2d), (int)menu.Font.Size);
+                int height2 = row.OwnSize().Height;
+                Assert.InRange(height2, (height1 * 2) - 2, (height1 * 2) + 2);
+                Assert.Equal(left1 * 2, row.TextLeft);
+                Assert.InRange(menu.RowWidth, (int)(width1 * 1.8), (int)(width1 * 2.2));
+
+                // Submenus follow the menu they hang off.
+                foreach (var parent in menu.Items.OfType<QuickActionMenuItem>().Where(i => i.HasDropDownItems))
+                    Assert.Equal(2d, ((QuickActionsContextMenu)parent.DropDown).UiScale);
+            }
+            finally
+            {
+                WinShot.Recording.RecordingMonitorDpi.ScaleSource = previous;
+            }
+        });
+    }
+
+    [Fact]
     public void HoverHighlightInsetsEquallyFromBothMenuEdges()
     {
         RunSta(() =>

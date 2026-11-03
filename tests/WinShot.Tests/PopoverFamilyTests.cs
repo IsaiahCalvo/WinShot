@@ -142,7 +142,7 @@ public class PopoverFamilyTests
         {
             string text = File.ReadAllText(f);
             foreach (Match m in Regex.Matches(text,
-                         @"<(?<type>RadioButton|ToggleButton|Button)\b(?<attrs>[^>]*StaticResource StripToolButton[^>]*)>(?<body>.*?)</\k<type>>",
+                         @"<(?<type>RadioButton|ToggleButton|Button)\b(?<attrs>[^>]*StaticResource StripToolButton[^>]*)(?<!/)>(?<body>.*?)</\k<type>>",
                          RegexOptions.Singleline))
             {
                 if (!Regex.IsMatch(m.Groups["body"].Value, @"<TextBlock\b[^>]*Text=""[^""]{2,}")) continue;

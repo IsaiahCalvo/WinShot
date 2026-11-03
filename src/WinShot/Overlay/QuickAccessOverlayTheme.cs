@@ -14,7 +14,14 @@ internal readonly record struct QuickAccessOverlayVisuals(
     /// <summary>Faint hairline around the card. A capture of a dark window on a dark
     /// desktop is otherwise its own background, and the card has no visible edge at all.</summary>
     SD.Color CardEdge,
+    /// <summary>Wash over the frosted capture while the pointer is on the card. Kept light:
+    /// the blur already hides the detail, and a heavy wash made the whole card read as dark.</summary>
     SD.Color HoverTint,
+    /// <summary>Wash behind a status message. Heavier than <see cref="HoverTint"/> because the
+    /// message is bare text on the capture, with no button face of its own under it.</summary>
+    SD.Color StatusTint,
+    /// <summary>Button face. In the dark theme it is dark glass, so the white glyph keeps its
+    /// contrast over a bright capture now that the hover wash is light.</summary>
     SD.Color ControlFace,
     SD.Color ControlHover,
     SD.Color ControlPressed,
@@ -43,6 +50,7 @@ internal static class QuickAccessOverlayThemePalette
             CardFill: SD.Color.FromArgb(0xEE, 0xF4, 0xFF),
             CardEdge: SD.Color.FromArgb(38, 17, 24, 32),
             HoverTint: SD.Color.FromArgb(107, 236, 243, 252),
+            StatusTint: SD.Color.FromArgb(107, 236, 243, 252),
             ControlFace: SD.Color.FromArgb(204, 255, 255, 255),
             ControlHover: SD.Color.FromArgb(245, 255, 255, 255),
             ControlPressed: SD.Color.FromArgb(224, 239, 243, 248),
@@ -59,10 +67,11 @@ internal static class QuickAccessOverlayThemePalette
         _ => new(
             CardFill: ThemePalette.WindowBg,
             CardEdge: SD.Color.FromArgb(46, 255, 255, 255),
-            HoverTint: SD.Color.FromArgb(140, 15, 18, 25),
-            ControlFace: SD.Color.FromArgb(22, 255, 255, 255),
-            ControlHover: SD.Color.FromArgb(36, 255, 255, 255),
-            ControlPressed: SD.Color.FromArgb(50, 255, 255, 255),
+            HoverTint: SD.Color.FromArgb(64, 15, 18, 25),
+            StatusTint: SD.Color.FromArgb(140, 15, 18, 25),
+            ControlFace: SD.Color.FromArgb(150, 24, 26, 32),
+            ControlHover: SD.Color.FromArgb(175, 40, 43, 50),
+            ControlPressed: SD.Color.FromArgb(195, 56, 60, 68),
             ControlBorder: SD.Color.FromArgb(36, 255, 255, 255),
             ControlShadow: SD.Color.FromArgb(61, 0, 0, 0),
             Glyph: SD.Color.FromArgb(0xF7, 0xF9, 0xFC),

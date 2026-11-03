@@ -20,9 +20,15 @@ internal sealed class RectangleTween
 {
     private static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(WinShot.Core.Motion.GlideDurationMs);
 
-    /// <summary>One animation frame, the budget <see cref="Update()"/> advances on.</summary>
-    private static readonly long FrameTicks =
-        TimeSpan.FromMilliseconds(WinShot.Core.Motion.FrameIntervalMs).Ticks;
+    /// <summary>
+    /// How long one paint round may last: every surface painting inside it draws the same
+    /// rectangle. A round across monitors spans 1-3 ms. This used to be the 8 ms timer
+    /// interval, which on a 144 Hz panel (6.9 ms frames, now that frames follow the display)
+    /// held the answer across two frames and ran the glide at 72 fps.
+    /// </summary>
+    internal const int PaintRoundMs = 4;
+
+    private static readonly long FrameTicks = TimeSpan.FromMilliseconds(PaintRoundMs).Ticks;
 
     /// <summary>How far past the target an eased amount may carry the rect. Comfortably above
     /// EaseOutBack's ~1.10 peak and low enough that nonsense stays on screen.</summary>

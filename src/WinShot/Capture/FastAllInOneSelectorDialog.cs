@@ -78,7 +78,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     /// Mirrors <see cref="FastRegionSelectorDialog"/>'s guard of the same name.
     /// </summary>
     private bool _sessionEnded;
-    private readonly WF.Timer _followTimer;
+    private readonly WinShot.Core.FrameTimer _followTimer;
     private bool _lastCtrlDown;
     // Session-effective loupe visibility: seeded from the "Show magnifier" setting each
     // ShowAsync, flipped by tapping Alt. The latch swallows key-repeat while Alt is held.
@@ -101,7 +101,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SetStyle(PaintStyles, true);
         Bounds = _monitorBounds;
 
-        _followTimer = new WF.Timer { Interval = WinShot.Core.Motion.FrameIntervalMs };
+        _followTimer = new WinShot.Core.FrameTimer();
         _followTimer.Tick += OnFollowTick;
 
         // Post-show init runs from ShowAsync, not the Shown event: Shown fires only on a
@@ -207,6 +207,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             PrewarmDimmedSlices();
         SelectorFreeze.Unpark(this, _panes, entry);
 
+        // Focus waits for a deferred frame, so the Start menu or an open menu is still on
+        // screen when it is grabbed — see SelectorFreeze.HoldFocusMaxMs.
+        _holdFocus = SelectorFreeze.HoldsFocusUntilFrozen(entry);
         Show();
         foreach (var pane in _panes)
             pane.Show();
@@ -224,15 +227,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 if (_completion != session || IsDisposed) return;
                 TryRestoreLastRegion();
-                Activate();
-                Focus();
-                SelectorForeground.Restore(this);
+                if (!_holdFocus)
+                    TakeFocus();
             }));
         }));
 
-        Activate();
-        Focus();
-        SelectorForeground.Restore(this);
+        if (!_holdFocus)
+            TakeFocus();
         _lastCtrlDown = false;
         _magnifierOn = _options.ShowMagnifier;
         _altLatched = false;
@@ -251,18 +252,26 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SD.Bitmap? snapshot = null;
         try
         {
-            snapshot = await Task.Run(CaptureService.CaptureFreezeFrame);
+            Task<SD.Bitmap> grab = Task.Run(SelectorFreeze.DeferredGrab);
+            if (await Task.WhenAny(grab, Task.Delay(SelectorFreeze.HoldFocusMaxMs)) != grab &&
+                _completion == session && !IsDisposed)
+                ReleaseFocusHold();
+            snapshot = await grab;
         }
         catch (Exception ex)
         {
             Log.Error("Screen-freeze capture failed; selecting over a plain dim instead", ex);
         }
 
-        if (_completion != session || IsDisposed)
+        // _sessionEnded too: Complete keeps the same _completion, so a frame that lands after
+        // a cancel used to pass this check and fade the parked surfaces up to the freeze.
+        if (_completion != session || IsDisposed || _sessionEnded)
         {
             snapshot?.Dispose(); // stale: touch nothing shared
             return;
         }
+
+        ReleaseFocusHold();
 
         DisposeFrozen();
         _frozen = snapshot;
@@ -283,6 +292,30 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         PrewarmDimmedSlices();
         _freezeFade = SelectorFreeze.FadeToFrozen(this, _panes);
     }
+
+    private void TakeFocus()
+    {
+        Activate();
+        Focus();
+        SelectorForeground.Restore(this);
+    }
+
+    /// <summary>Ends a deferred open's focus hold and takes focus, once.</summary>
+    private void ReleaseFocusHold()
+    {
+        if (!_holdFocus)
+            return;
+        _holdFocus = false;
+        // A session cancelled before its frame landed leaves the surfaces parked: taking
+        // focus then would hand the keyboard to an invisible window.
+        if (!IsDisposed && Visible && !_sessionEnded)
+            TakeFocus();
+    }
+
+    // True while a deferred open waits for its frame before taking focus.
+    private bool _holdFocus;
+
+    protected override bool ShowWithoutActivation => _holdFocus;
 
     /// <summary>Bakes every surface's dimmed frozen slice — see the region selector's copy.</summary>
     private void PrewarmDimmedSlices()
@@ -509,6 +542,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
     {
         if (disposing)
         {
+            // Disposing mid-ramp must give the high-resolution clock back.
+            _freezeFade?.Dispose();
+            _freezeFade = null;
             DisposePanes();
             DisposeFrozen();
             _handleTween?.Dispose();
@@ -1608,16 +1644,16 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
 
             // Mode buttons — icon (or "Aa" for OCR) over a small caption, in reference order.
             // Fullscreen confirms immediately; the rest select a mode that drives SelectedAction.
-            _buttons.Add(new BarButton("Region", "", 0, AllInOneAction.Capture, isMode: true));
-            _buttons.Add(new BarButton("Fullscreen", "", -1, AllInOneAction.Capture, isMode: false));
-            _buttons.Add(new BarButton("Window", "", 1, AllInOneAction.Capture, isMode: true));
-            _buttons.Add(new BarButton("Scrolling", "", 2, AllInOneAction.Scroll, isMode: true));
-            _buttons.Add(new BarButton("Timer", "", 3, AllInOneAction.Timer, isMode: true));
+            _buttons.Add(new BarButton("Region", "\uEF20", 0, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Fullscreen", "\uE7F4", -1, AllInOneAction.Capture, isMode: false));
+            _buttons.Add(new BarButton("Window", "\uE7C4", 1, AllInOneAction.Capture, isMode: true));
+            _buttons.Add(new BarButton("Scrolling", "\uE74B", 2, AllInOneAction.Scroll, isMode: true));
+            _buttons.Add(new BarButton("Timer", "\uE916", 3, AllInOneAction.Timer, isMode: true));
             _buttons.Add(new BarButton("OCR", "Aa", 4, AllInOneAction.Ocr, isMode: true) { IsTextGlyph = true });
-            _buttons.Add(new BarButton("Recording", "", 5, AllInOneAction.Record, isMode: true));
+            _buttons.Add(new BarButton("Recording", "\uE714", 5, AllInOneAction.Record, isMode: true));
             // Not a mode: measuring is not something you do to a rectangle, so this one
             // leaves All-In-One the way Fullscreen does, and the measure overlay takes over.
-            _buttons.Add(new BarButton("Measure", "", -1, AllInOneAction.Measure, isMode: false));
+            _buttons.Add(new BarButton("Measure", "\uED5E", -1, AllInOneAction.Measure, isMode: false));
 
             _widthBox = SizeBox();
             _heightBox = SizeBox();
@@ -2071,7 +2107,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
             // U+E7A8, not the crop glyph: with Region selected and a ratio chosen the bar was
             // showing two identical accent-filled crop icons a few cells apart.
-            SelectorChrome.DrawCenteredText(g, "", _glyphFont, ratioGlyphRect,
+            SelectorChrome.DrawCenteredText(g, "\uE7A8", _glyphFont, ratioGlyphRect,
                 ratioChosen
                     ? WinShot.Core.ThemePalette.Over(
                         SD.Color.FromArgb((int)Math.Round(255 * badgeFade), SD.Color.White), GlyphColor)
@@ -2096,7 +2132,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             }
             // Same text path as the two cells beside it, so the three glyphs sit on one
             // baseline: GDI and GDI+ centre a glyph a pixel apart.
-            SelectorChrome.DrawCenteredText(g, "", _glyphFont, _expandRect, GlyphColor);
+            SelectorChrome.DrawCenteredText(g, "\uE740", _glyphFont, _expandRect, GlyphColor);
 
             // Confirm button: commits the pending region, dimmed while there is nothing to
             // commit. No caret — there is no menu behind this button.
@@ -2117,7 +2153,7 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             // alpha byte away -- so this fade, the one thing that says whether there is
             // anything to commit, painted the glyph at full strength in both states and the
             // unavailable look never reached the screen.
-            SelectorChrome.DrawCenteredText(g, "", _glyphFont, cropGlyphRect,
+            SelectorChrome.DrawCenteredText(g, "\uE73E", _glyphFont, cropGlyphRect,
                 SD.Color.FromArgb(cropAlpha, GlyphColor));
         }
 

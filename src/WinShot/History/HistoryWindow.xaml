@@ -87,6 +87,52 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- The recessed field in the chrome band: the same material, border, hover layer and
+             focus ring as DarkTextBox, with a magnifier and a "Search" hint inside it. -->
+        <Style x:Key="HistorySearchBox" TargetType="TextBox" BasedOn="{StaticResource DarkTextBox}">
+            <Setter Property="FontSize" Value="{StaticResource TextBody}"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="0,0,8,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bg" Background="{StaticResource SurfaceAltBrush}"
+                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                CornerRadius="{StaticResource RadiusInput}">
+                            <Grid>
+                                <Border x:Name="Hover" Opacity="0" CornerRadius="{StaticResource RadiusInputInner}"
+                                        Background="{StaticResource ElevatedBrush}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ContentControl Content="{StaticResource SurveyIcon.Magnifier}"
+                                                    Margin="9,0,6,0" VerticalAlignment="Center" Focusable="False" IsTabStop="False"
+                                                    Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock x:Name="Hint" Grid.Column="1" Text="Search" IsHitTestVisible="False"
+                                               VerticalAlignment="Center" Margin="2,0,0,0" Visibility="Collapsed"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="{TemplateBinding FontSize}"/>
+                                    <ScrollViewer x:Name="PART_ContentHost" Grid.Column="1" Margin="{TemplateBinding Padding}"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Text" Value="">
+                                <Setter TargetName="Hint" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -161,13 +207,25 @@
              editor's top bar and its group sub-row already do. -->
         <Border x:Name="CategoryRow" Grid.Row="0" Background="{StaticResource ToolbarBgBrush}" Padding="16,12,16,10">
             <Grid>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center">
                     <RadioButton x:Name="ChipAll" Content="All" IsChecked="True" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipImages" Content="Screenshots" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipScrolling" Content="Scrolling" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipVideo" Content="Videos" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                     <RadioButton x:Name="ChipGif" Content="GIFs" Style="{StaticResource FilterChip}" Checked="OnFilterChanged"/>
                 </StackPanel>
+                <!-- Search sits in the right-hand column so the chips stay centred on the
+                     window; it narrows before it ever pushes into them. -->
+                <TextBox x:Name="SearchBox" Grid.Column="2" Style="{StaticResource HistorySearchBox}"
+                         HorizontalAlignment="Right" MaxWidth="240" MinWidth="96" Width="240" Margin="12,0,0,0"
+                         VerticalAlignment="Center" TextChanged="OnSearchChanged"
+                         AutomationProperties.Name="Search history"
+                         AutomationProperties.HelpText="Filters by file name, app, date or kind. Ctrl+F to focus, Escape to clear."/>
             </Grid>
         </Border>
 

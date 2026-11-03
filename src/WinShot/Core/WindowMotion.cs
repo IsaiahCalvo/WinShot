@@ -34,7 +34,9 @@ internal static class WindowMotion
 
         root.Opacity = 0;
         scale.ScaleX = scale.ScaleY = 0.92;
-        root.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, duration) { EasingFunction = ease });
+        var fadeIn = new DoubleAnimation(1, duration) { EasingFunction = ease };
+        CacheWhileMoving(root, fadeIn);
+        root.BeginAnimation(UIElement.OpacityProperty, fadeIn);
         var grow = new DoubleAnimation(1, duration) { EasingFunction = ease };
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
@@ -62,6 +64,7 @@ internal static class WindowMotion
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
 
         var fade = new DoubleAnimation(0, duration) { EasingFunction = ease };
+        CacheWhileMoving(root, fade);
         fade.Completed += (_, _) => onDone();
         root.BeginAnimation(UIElement.OpacityProperty, fade);
     }
@@ -89,6 +92,31 @@ internal static class WindowMotion
         element.BeginAnimation(UIElement.OpacityProperty, null);
         element.Opacity = 1;
     }
+
+    /// <summary>
+    /// Scaling a whole window's tree re-tessellates every glyph and path on every frame,
+    /// which is where a big window like Settings dropped frames on its way in. Cached as a
+    /// bitmap for the length of the move, the GPU just scales one texture. The cache is
+    /// dropped the moment the move finishes, so the resting window is drawn crisp as before.
+    /// A shell that already carries its own cache is left alone.
+    /// </summary>
+    private static void CacheWhileMoving(FrameworkElement root, Timeline driver)
+    {
+        if (root.CacheMode is CacheMode existing && !OurCaches.TryGetValue(existing, out _))
+            return;
+        // At rest scale on the device's own pixel grid, so there is no blur at 1.0.
+        var cache = new BitmapCache { RenderAtScale = 1, SnapsToDevicePixels = true };
+        OurCaches.Add(cache, cache);
+        root.CacheMode = cache;
+        driver.Completed += (_, _) =>
+        {
+            if (ReferenceEquals(root.CacheMode, cache))
+                root.ClearValue(UIElement.CacheModeProperty);
+        };
+    }
+
+    /// <summary>The caches this class put on, so a later move may replace them.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CacheMode, object> OurCaches = new();
 
     private static Duration DurationFrom(FrameworkElement host, string key, int fallbackMs) =>
         host.TryFindResource(key) as Duration? ?? new Duration(TimeSpan.FromMilliseconds(fallbackMs));

@@ -39,6 +39,8 @@ public partial class HistoryWindow : Window
     private ObservableCollection<HistoryItem> _items => _paging.VisibleItems;
     private CancellationTokenSource? _loadCts;
     private string _filter = "all";
+    private string _query = string.Empty;
+    private System.Windows.Threading.DispatcherTimer? _searchDelay;
     private string _sort = "date";
     private bool _sortDescending = true;
     private bool _selectionMode;
@@ -107,6 +109,9 @@ public partial class HistoryWindow : Window
             StopWatcher();
             // History is going away; a preview left fading has nothing to fade in front of.
             _preview?.CloseNow();
+            // Full-size neighbours decoded for Quick Look are only worth their memory while
+            // History is open to step through them.
+            FastQuickPreviewWindow.ClearPrefetch();
             _windowFade?.Dispose();
             _windowFade = null;
             _emptyStateFade?.Dispose();
@@ -121,6 +126,16 @@ public partial class HistoryWindow : Window
             MemoryCleanup.Request();
         };
         DarkTitleBar.Apply(this);
+        // FadeIn ramps Window.Opacity, and on a window without AllowsTransparency WPF composes
+        // that over the HWND's clear colour, which is black. So the grid rose out of black
+        // under a title bar that was already its finished grey. Clearing to the window's own
+        // background makes the fade read as the content arriving on the window, not a flash.
+        SourceInitialized += (_, _) =>
+        {
+            if (System.Windows.PresentationSource.FromVisual(this) is System.Windows.Interop.HwndSource source
+                && Background is System.Windows.Media.SolidColorBrush brush)
+                source.CompositionTarget.BackgroundColor = brush.Color;
+        };
     }
 
     /// <summary>Opens the history window, or activates the instance that is already open.</summary>
@@ -340,10 +355,41 @@ public partial class HistoryWindow : Window
     /// with explicit modifiers instead of the machine's real keyboard state.</summary>
     internal bool HandleKey(Key key, ModifierKeys modifiers)
     {
+        if (SearchBox.IsKeyboardFocusWithin)
+            return HandleSearchKey(key);
+
         switch (key)
         {
+            case Key.F when modifiers == ModifierKeys.Control:
+                FocusSearch();
+                return true;
             case Key.Escape:
+                // Escape backs out one level, the way Explorer and Finder do: out of selection
+                // mode first, and only then out of History. Closing the window from the middle
+                // of a batch threw away the selection along with it.
+                if (_selectionMode)
+                {
+                    SetSelectionMode(false);
+                    return true;
+                }
+                if (SearchBox.Text.Length > 0)
+                {
+                    // A search narrows the grid the way selection mode does, so it is one more
+                    // level to back out of before Escape closes History.
+                    SearchBox.Clear();
+                    return true;
+                }
                 Dismiss();
+                return true;
+            case Key.A when modifiers == ModifierKeys.Control:
+                // Ctrl+A is the select-all gesture everywhere else on Windows; in the single-select
+                // grid it did nothing at all. It switches to selection mode and takes every tile.
+                if (_items.Count == 0)
+                    return false;
+                SetSelectionMode(true);
+                ItemsList.SelectAll();
+                _selectionAnchor = _items.FirstOrDefault();
+                UpdateSelectionState();
                 return true;
             // Rotate, Rename, Print and Open-with live only on the tile's context menu, and
             // that menu hangs off the card INSIDE the item template. ContextMenuService walks
@@ -993,7 +1039,7 @@ public partial class HistoryWindow : Window
             return;
         }
 
-        HistoryEmptyState state = HistoryEmptyState.For(_filter, _settings.Current.HistoryEnabled, _loadError);
+        HistoryEmptyState state = HistoryEmptyState.For(_filter, _settings.Current.HistoryEnabled, _loadError, _query);
         // A drawn mark now, not a code point: the state names the resource and the window
         // fetches it. x:Shared="False" on every SurveyIcon means each fetch is its own visual.
         EmptyStateGlyph.Child = new System.Windows.Controls.ContentControl
@@ -1093,7 +1139,94 @@ public partial class HistoryWindow : Window
         "video" => item.IsVideo,
         "gif" => item.IsGif,
         _ => true,
-    };
+    } && HistorySearch.Matches(
+        _query,
+        item.FileName,
+        item.SourceApp,
+        item.Caption,
+        HistorySearch.KindWords(item.IsImage, item.IsVideo, item.IsGif, item.IsScrollingCapture));
+
+    // ---- Search ----
+
+    /// <summary>Filters as you type, a beat after the last key so a fast typist does not
+    /// re-sort the grid once per letter.</summary>
+    private void OnSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!IsInitialized) return;
+        _searchDelay ??= CreateSearchDelay();
+        _searchDelay.Stop();
+        if (SearchBox.Text.Length == 0)
+        {
+            // Clearing is instant: there is nothing to wait for, and the grid coming back at
+            // once is what tells you the search is gone.
+            ApplySearch();
+            return;
+        }
+        _searchDelay.Start();
+    }
+
+    private System.Windows.Threading.DispatcherTimer CreateSearchDelay()
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromMilliseconds(140),
+            System.Windows.Threading.DispatcherPriority.Input,
+            (_, _) => { _searchDelay?.Stop(); ApplySearch(); },
+            Dispatcher);
+        timer.Stop();
+        return timer;
+    }
+
+    private void ApplySearch()
+    {
+        string query = SearchBox.Text.Trim();
+        if (query == _query) return;
+        _query = query;
+        ApplyFilter();
+    }
+
+    /// <summary>Ctrl+F, the find key everywhere else on Windows.</summary>
+    private void FocusSearch()
+    {
+        SearchBox.Focus();
+        Keyboard.Focus(SearchBox);
+        SearchBox.SelectAll();
+    }
+
+    /// <summary>Keys while the search box has focus. It keeps its own editing keys; Escape
+    /// clears it and then hands focus back to the grid, Down and Enter go to the results.</summary>
+    private bool HandleSearchKey(Key key)
+    {
+        switch (key)
+        {
+            case Key.Escape:
+                if (SearchBox.Text.Length > 0)
+                    SearchBox.Clear();
+                else
+                    FocusGrid();
+                return true;
+            case Key.Down:
+            case Key.Enter:
+                if (_items.Count == 0)
+                    return key == Key.Enter;
+                FocusGrid();
+                return true;
+            default:
+                // Space, Delete, Ctrl+C and the rest act on captures from the grid; typed into
+                // the search box they are text, and must not preview, delete or copy a tile.
+                return false;
+        }
+    }
+
+    private void FocusGrid()
+    {
+        if (ItemsList.SelectedItem is null && _items.Count > 0)
+            ItemsList.SelectedIndex = 0;
+        if (ItemsList.SelectedItem is { } selected
+            && ItemsList.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem container)
+            container.Focus();
+        else
+            ItemsList.Focus();
+    }
 
     private IComparer<HistoryItem> CurrentComparer() => Comparer<HistoryItem>.Create((left, right) =>
     {
@@ -1201,7 +1334,9 @@ public partial class HistoryWindow : Window
         // The successor is about to appear in the same spot: the outgoing window has to be
         // gone in this call, not 220 ms of exit fade later, or the two overlap.
         _preview?.CloseNow();
-        var preview = new FastQuickPreviewWindow(target.FilePath);
+        var preview = new FastQuickPreviewWindow(
+            target.FilePath,
+            System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle));
         PerfLog.TrackFirstShown(preview, "history quick preview");
         _preview = preview;
         _previewOpen = true;
@@ -1216,6 +1351,13 @@ public partial class HistoryWindow : Window
         preview.Show();
         // Keep keyboard focus on History so Left/Right stepping continues to work.
         Activate();
+
+        // Decode the neighbours now, so the next arrow press opens without a beat.
+        int index = _items.IndexOf(target);
+        if (index > 0)
+            FastQuickPreviewWindow.Prefetch(_items[index - 1].FilePath);
+        if (index >= 0 && index + 1 < _items.Count)
+            FastQuickPreviewWindow.Prefetch(_items[index + 1].FilePath);
     }
 
     private void ClosePreview()
@@ -1337,11 +1479,7 @@ public partial class HistoryWindow : Window
             return;
         }
 
-        // Same confirmation the single-item copy raises, worded for files.
-        App.Toast(
-            "Copied",
-            selected.Count == 1 ? "1 file is on the clipboard." : $"{selected.Count} files are on the clipboard.",
-            severity: ToastSeverity.Success);
+        // No "Copied" toast (Isaiah 2026-11-03); a failure above still says so.
     }
 
     private void OnPinSelected(object sender, RoutedEventArgs e)
@@ -1640,7 +1778,7 @@ public partial class HistoryWindow : Window
             await CaptureService.CopyToClipboardAsync(bmp, takeOwnership: true);
             // A History tile has nothing that changes when a copy lands, so both outcomes
             // used to look identical: the row sat there either way and only the log knew.
-            App.Toast("Copied", "The capture is on the clipboard.", severity: ToastSeverity.Success);
+            // No "Copied" toast (Isaiah 2026-11-03).
         }
         catch (Exception ex)
         {

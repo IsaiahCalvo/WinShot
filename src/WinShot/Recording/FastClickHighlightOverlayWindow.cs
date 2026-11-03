@@ -16,7 +16,7 @@ public sealed class FastClickHighlightOverlayWindow : AlphaOverlayWindow, IRecor
     private readonly HookProc _hookProc;
     private readonly bool _installHook;
     private readonly List<Ring> _rings = new(MaxConcurrentRings);
-    private readonly WF.Timer _timer = new() { Interval = WinShot.Core.Motion.FrameIntervalMs };
+    private readonly WinShot.Core.FrameTimer _timer = new();
     private IDisposable? _motionClock;
     private readonly double _scale;
     private IntPtr _hook;

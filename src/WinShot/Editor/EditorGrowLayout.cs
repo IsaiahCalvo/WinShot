@@ -61,6 +61,20 @@ internal static class EditorGrowLayout
     }
 
     /// <summary>
+    /// The window size that wraps a capture, CleanShot style: the capture at 100 % plus the
+    /// fit insets around it plus the editor's chrome (toolbars, rail, bottom bar). A small
+    /// capture then opens in a small window instead of floating in a big empty frame, and a
+    /// big one asks for more room than the screen has and is capped by <see cref="Target"/>
+    /// (which also applies the window's minimum), so it still fits by shrinking.
+    /// </summary>
+    public static Size DesiredForCapture(double captureWidth, double captureHeight, Size fitInset, Size chrome)
+    {
+        double w = double.IsFinite(captureWidth) && captureWidth > 0 ? captureWidth : 0;
+        double h = double.IsFinite(captureHeight) && captureHeight > 0 ? captureHeight : 0;
+        return new Size(w + fitInset.Width + chrome.Width, h + fitInset.Height + chrome.Height);
+    }
+
+    /// <summary>
     /// The rect the tween starts from. A degenerate origin is floored to 1x1 rather than
     /// rejected: the size is written every frame and a zero-width window is not a window,
     /// so a card that reported a collapsed rect must still produce a runnable tween.

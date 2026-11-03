@@ -21,6 +21,9 @@ public sealed class FastQuickPreviewWindow : WF.Form
     /// for the monitor a window is born on, so every logical measurement here is scaled by
     /// hand like every other WinForms surface in the app.</summary>
     private readonly double _scale;
+    /// <summary>The monitor it opens on: History's, so a Space press with the pointer parked on
+    /// another screen still previews over the window being browsed.</summary>
+    private readonly WF.Screen _screen;
     private SD.Image? _image;
     private bool _closing;
     private bool _exiting;
@@ -29,13 +32,13 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private int S(int logical) => Recording.RecordingMonitorDpi.Px(logical, _scale);
 
-    public FastQuickPreviewWindow(string filePath)
+    public FastQuickPreviewWindow(string filePath, WF.Screen? screen = null)
     {
         _filePath = filePath;
-        _scale = Recording.RecordingMonitorDpi.ScaleFor(
-            WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
+        _screen = screen ?? WF.Screen.FromPoint(WF.Cursor.Position);
+        _scale = Recording.RecordingMonitorDpi.ScaleFor(_screen.Bounds);
         _looksLikeImage = PreviewableExtensions.Contains(Path.GetExtension(filePath).ToLowerInvariant());
-        _image = _looksLikeImage ? TryLoadImage(filePath) : null;
+        _image = _looksLikeImage ? TakePrefetched(filePath) ?? TryLoadImage(filePath) : null;
 
         AutoScaleMode = WF.AutoScaleMode.None;
         BackColor = Back;
@@ -163,7 +166,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private SD.Size CalculateSize()
     {
-        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        SD.Rectangle area = _screen.WorkingArea;
 
         if (_image is not null)
         {
@@ -182,7 +185,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
     private void DrawFallback(SD.Graphics g, SD.Rectangle content)
     {
         string fileName = string.IsNullOrWhiteSpace(_filePath) ? "Preview" : Path.GetFileName(_filePath);
-        string message = _looksLikeImage ? "Preview unavailable" : "Press Open to play";
+        string message = _looksLikeImage ? "Preview unavailable" : "Press Enter to play";
         // Pixel-unit fonts, not point: a GraphicsUnit.Point font drawn with TextRenderer
         // resolves against a different monitor's DPI than the one this card is on, which is
         // exactly the mismatch ThemePalette.UiFontPx exists to avoid.
@@ -201,7 +204,7 @@ public sealed class FastQuickPreviewWindow : WF.Form
 
     private void CenterOnScreen()
     {
-        SD.Rectangle area = WF.Screen.FromPoint(WF.Cursor.Position).WorkingArea;
+        SD.Rectangle area = _screen.WorkingArea;
         Location = new SD.Point(
             area.Left + Math.Max(0, (area.Width - Width) / 2),
             area.Top + Math.Max(0, (area.Height - Height) / 2));
@@ -236,6 +239,88 @@ public sealed class FastQuickPreviewWindow : WF.Form
     {
         _exiting = true;
         Close();
+    }
+
+    // ---- Neighbour prefetch ----
+    //
+    // Arrowing through History rebuilds this window on every step, and each step decoded a
+    // full-size capture on the UI thread before anything could appear: a 4K PNG is a
+    // noticeable beat per press, which is the opposite of Quick Look. History asks for the
+    // captures either side of the one on screen; they decode on the thread pool and the
+    // next window takes the ready image instead of decoding it again.
+
+    private const int PrefetchCapacity = 4;
+    private static readonly object PrefetchGate = new();
+    private static readonly Dictionary<string, (DateTime Stamp, Task<SD.Image?> Image)> Prefetched = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Queue<string> PrefetchOrder = new();
+
+    /// <summary>Starts decoding <paramref name="path"/> in the background, if it is an image
+    /// and is not already decoding. Cheap to call for paths that are never opened: the
+    /// oldest entries fall out once there are more than a handful.</summary>
+    internal static void Prefetch(string path)
+    {
+        if (!PreviewableExtensions.Contains(Path.GetExtension(path).ToLowerInvariant()))
+            return;
+        lock (PrefetchGate)
+        {
+            DateTime stamp = LastWrite(path);
+            if (Prefetched.TryGetValue(path, out var existing) && existing.Stamp == stamp)
+                return;
+            if (Prefetched.Remove(path, out var outdated))
+                DisposeWhenDone(outdated.Image);
+            Prefetched[path] = (stamp, Task.Run(() => TryLoadImage(path)));
+            PrefetchOrder.Enqueue(path);
+            while (PrefetchOrder.Count > PrefetchCapacity)
+            {
+                string old = PrefetchOrder.Dequeue();
+                if (Prefetched.TryGetValue(old, out var stale) && !PrefetchOrder.Contains(old))
+                {
+                    Prefetched.Remove(old);
+                    DisposeWhenDone(stale.Image);
+                }
+            }
+        }
+    }
+
+    /// <summary>Drops every prefetched image, decoded or still decoding.</summary>
+    internal static void ClearPrefetch()
+    {
+        lock (PrefetchGate)
+        {
+            foreach (var entry in Prefetched.Values)
+                DisposeWhenDone(entry.Image);
+            Prefetched.Clear();
+            PrefetchOrder.Clear();
+        }
+    }
+
+    private static void DisposeWhenDone(Task<SD.Image?> image)
+        => _ = image.ContinueWith(static t => { if (t.IsCompletedSuccessfully) t.Result?.Dispose(); }, TaskScheduler.Default);
+
+    private static DateTime LastWrite(string path)
+    {
+        try { return File.GetLastWriteTimeUtc(path); }
+        catch { return DateTime.MinValue; }
+    }
+
+    /// <summary>The prefetched image for <paramref name="path"/> if it has finished decoding;
+    /// ownership passes to the caller. A decode still running is left to finish (and to be
+    /// evicted later) rather than waited on: waiting would block the UI thread just as long.</summary>
+    private static SD.Image? TakePrefetched(string path)
+    {
+        lock (PrefetchGate)
+        {
+            if (!Prefetched.TryGetValue(path, out var entry) || !entry.Image.IsCompletedSuccessfully)
+                return null;
+            Prefetched.Remove(path);
+            // A capture rotated or edited in History since the decode is not the one to show.
+            if (entry.Stamp != LastWrite(path))
+            {
+                entry.Image.Result?.Dispose();
+                return null;
+            }
+            return entry.Image.Result;
+        }
     }
 
     private static SD.Image? TryLoadImage(string path)

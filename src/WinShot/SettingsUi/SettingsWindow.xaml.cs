@@ -337,6 +337,29 @@ public partial class SettingsWindow : Window
         Top = top;
     }
 
+    /// <summary>
+    /// Ctrl+Tab and Ctrl+PageDown step to the next section, with Shift / PageUp going back,
+    /// the way every tabbed settings window on Windows moves. Without it the keyboard had to
+    /// Tab back up to the section list first. A shortcut box keeps the keys, since Ctrl+Tab
+    /// is a combination someone may want to record.
+    /// </summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
+            && e.Key is Key.Tab or Key.PageDown or Key.PageUp
+            && Keyboard.FocusedElement is not HotkeyBox
+            && SectionList is { Items.Count: > 0 } list)
+        {
+            bool back = e.Key == Key.PageUp
+                || (e.Key == Key.Tab && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
+            int count = list.Items.Count;
+            list.SelectedIndex = (Math.Max(0, list.SelectedIndex) + (back ? count - 1 : 1)) % count;
+            e.Handled = true;
+            return;
+        }
+        base.OnPreviewKeyDown(e);
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
@@ -1396,7 +1419,7 @@ public partial class SettingsWindow : Window
 
         Accessible(ShowRecordingControlsCheck, "Show recording controls", "Show the control bar while recording.");
         Accessible(ShowRecordingTimerCheck, "Show recording time", "Show elapsed recording time in the control bar and tray.");
-        Accessible(ScaleHiDpiVideoCheck, "Scale high DPI video", "Scale high DPI recordings down to one times size.");
+        Accessible(ScaleHiDpiVideoCheck, "Scale high DPI video", "Save HiDPI recordings at 100% size instead of the display scale.");
         Accessible(CaptureCursorCheck, "Record cursor", "Include the mouse pointer in recordings.");
         Accessible(ClickHighlightsCheck, "Highlight recording clicks", "Show a visual highlight for mouse clicks.");
         Accessible(KeystrokesCheck, "Show recording keystrokes", "Show pressed keys in recordings.");
@@ -1427,7 +1450,7 @@ public partial class SettingsWindow : Window
         Accessible(GifSizeCombo, "Maximum GIF width", "Choose the largest GIF width; smaller recordings are not enlarged.");
 
         Accessible(FormatCombo, "Screenshot file format", "Choose PNG, JPG, WEBP, or Automatic.");
-        Accessible(HiDpiCheck, "Scale high DPI screenshots", "Scale high DPI screenshots down to one times size.");
+        Accessible(HiDpiCheck, "Scale high DPI screenshots", "Save HiDPI screenshots at 100% size instead of the display scale.");
         Accessible(BackgroundCombo, "Screenshot background", "Place every screenshot on a padded background as it is taken.");
         Accessible(BackgroundColorBox, "Background color", "Enter a hex color such as #1C1C1E.");
         Accessible(BackgroundShadowCheck, "Background drop shadow",

@@ -38,7 +38,10 @@ public partial class EditorWindow : Window
     /// Handle chrome lives in content units, so multiplying a Survey screen-px constant by
     /// this reproduces the same curve once the viewport scales it by <c>_zoom</c>.
     /// </summary>
-    private double HandleScale => Math.Sqrt(Math.Min(1.0 / _zoom, 3.0));
+    // Survey (Drawboard canvas audit 2026-10-13, selectionHandleVisibility.js
+    // getHandleZoomScale): handles keep ONE on-screen size at every zoom, capped only on
+    // extreme zoom-out. The old sqrt curve grew them ~1.4x per zoom doubling.
+    private double HandleScale => Math.Min(1.0 / _zoom, 3.0);
 
     /// <summary>
     /// The annotation currently in Survey's double-click "bbox" edit mode — box frame with
@@ -88,6 +91,12 @@ public partial class EditorWindow : Window
     private void UpdateSelectionHandles()
     {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta)
+        {
+            HideHandles();
+            return;
+        }
+        // A locked mark has no grabbers: it can't be resized or turned until it is unlocked.
+        if (meta.Locked == true)
         {
             HideHandles();
             return;
@@ -223,14 +232,53 @@ public partial class EditorWindow : Window
             PlaceThumb(i, AnnotationRotation.RotatePoint(pts[i], centre, angle), kind, angle);
         }
 
-        double boxCentreX = b.Left + b.Width / 2;
-        var top = new Point(boxCentreX, b.Top - padding);
-        var grip = new Point(boxCentreX, b.Top - padding - spec.RotationOffset);
-        PlaceRotateThumb(
-            AnnotationRotation.RotatePoint(grip, centre, angle),
-            AnnotationRotation.RotatePoint(top, centre, angle));
+        var (grip, gripAnchor) = ResolveRotateGrip(b, padding, spec.RotationOffset, centre, angle);
+        PlaceRotateThumb(grip, gripAnchor);
 
         HandleLayer.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Page-edge rule 1b: true while the rotate button sits BELOW the frame.</summary>
+    private bool _rotateGripBelow;
+
+    /// <summary>
+    /// Where the rotate button goes: <paramref name="offset"/> above the frame's top edge, as
+    /// always, unless the clamped view can never show it there (a mark at the top of the
+    /// image), in which case it moves the same distance below the bottom edge
+    /// (RotateGripPlacement, docs/PAGE-EDGE-RULES.md rule 1b). Returns the button's centre
+    /// and the frame point it hangs from, both turned with the mark. The side is held still
+    /// while the button itself is being dragged, so it never jumps out from under the cursor.
+    /// </summary>
+    private (Point Grip, Point Anchor) ResolveRotateGrip(Rect b, double padding, double offset, Point centre, double angle)
+    {
+        double cx = b.Left + b.Width / 2;
+        Point above = AnnotationRotation.RotatePoint(new Point(cx, b.Top - padding - offset), centre, angle);
+        Point below = AnnotationRotation.RotatePoint(new Point(cx, b.Bottom + padding + offset), centre, angle);
+        if (_activeHandle != RotateHandleIndex)
+        {
+            double radius = RotateHandleScreenPx / 2 * HandleScale;
+            _rotateGripBelow = RotateGripPlacement.ShouldPlaceBelow(above, below, radius, ReachableContent());
+        }
+        return _rotateGripBelow
+            ? (below, AnnotationRotation.RotatePoint(new Point(cx, b.Bottom + padding), centre, angle))
+            : (above, AnnotationRotation.RotatePoint(new Point(cx, b.Top - padding), centre, angle));
+    }
+
+    /// <summary>
+    /// Every image point the clamped view (ClampView) can ever show, less the settings row
+    /// that lies over the top of the canvas while it is on screen.
+    /// </summary>
+    private Rect ReachableContent()
+    {
+        double topInset = 0;
+        if (EditorGroupBar is { IsVisible: true } bar && bar.ActualHeight > 0)
+        {
+            try { topInset = Math.Max(0, bar.TranslatePoint(new Point(0, bar.ActualHeight), Viewport).Y); }
+            catch (InvalidOperationException) { topInset = 0; }
+        }
+        return RotateGripPlacement.ReachableContent(
+            Viewport.ActualWidth, Viewport.ActualHeight, _sourceWidth, _sourceHeight,
+            _zoom, ViewMargin, topInset);
     }
 
     /// <summary>
@@ -255,7 +303,7 @@ public partial class EditorWindow : Window
     /// </summary>
     private HandleSpec AdaptiveHandleSpec(double width, double height)
     {
-        double rawIs = Math.Sqrt(1.0 / _zoom);
+        double rawIs = 1.0 / _zoom;
         const double padding = 2;
         double boxW = Math.Max(0, width) + padding * 2;
         double boxH = Math.Max(0, height) + padding * 2;
@@ -272,7 +320,8 @@ public partial class EditorWindow : Window
         double topHalf = allFit ? hPillH / 2 : cornerR;
         // Already in content units: Survey's metrics carry `is` and the offset is applied
         // straight to the bbox in page units (SVGSelectionOverlay.jsx:76-80).
-        double offset = Math.Max(AnnotationRotation.HandleOffsetScreenPx, 10 * rawIs + topHalf + minGap);
+        // 36 SCREEN px above the frame at every zoom (ROTATION_OFFSET_PX * metrics.scale).
+        double offset = Math.Max(AnnotationRotation.HandleOffsetScreenPx * rawIs, 10 * rawIs + topHalf + minGap);
         return new HandleSpec(allFit, cornersFit, offset);
     }
 
@@ -299,11 +348,8 @@ public partial class EditorWindow : Window
         if (b.Width < 0.5 && b.Height < 0.5) { HideRotateThumb(); return; }
         double angle = AnnotationTransform.AngleOf(fe);
         var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
-        var top = new Point(centre.X, b.Top);
-        var grip = new Point(centre.X, b.Top - AdaptiveHandleSpec(b.Width, b.Height).RotationOffset);
-        PlaceRotateThumb(
-            AnnotationRotation.RotatePoint(grip, centre, angle),
-            AnnotationRotation.RotatePoint(top, centre, angle));
+        var (grip, gripAnchor) = ResolveRotateGrip(b, 0, AdaptiveHandleSpec(b.Width, b.Height).RotationOffset, centre, angle);
+        PlaceRotateThumb(grip, gripAnchor);
     }
 
     /// <summary>
@@ -408,9 +454,9 @@ public partial class EditorWindow : Window
             _rotateStem = new Line { Stroke = new SolidColorBrush(Color.FromRgb(0xD1, 0xD1, 0xD1)) };
             _rotateIcon = new ContentControl
             {
-                // Survey's rotate-icon.svg is stroked #000000, not the Fabric fallback grey.
-                Content = FindResource("SurveyIcon.Rotate"),
-                Foreground = new SolidColorBrush(Colors.Black),
+                // Survey's own grabber glyph, assets/rotate-icon.svg (two arcs, each ending in
+                // an open chevron, stroked #000 at 2 in a 24 box) - not the toolbar's Rotate.
+                Content = RotateGrabberGlyph(),
                 IsHitTestVisible = false,
             };
             HandleLayer.Children.Add(_rotateStem);
@@ -451,12 +497,48 @@ public partial class EditorWindow : Window
         _rotateStem.X2 = centre.X;
         _rotateStem.Y2 = centre.Y;
         _rotateStem.StrokeThickness = 1 * is_;
-        _rotateStem.Visibility = counterDot ? Visibility.Collapsed : Visibility.Visible;
+        // Survey UX 2026-10-02 (owner): no connector line to the box — the grabber floats
+        // on its own (SVGSelectionOverlay.jsx:482-483).
+        _rotateStem.Visibility = Visibility.Collapsed;
 
         _gripContent = centre;
         _gripAnchorContent = anchor;
         if (_activeHandle == RotateHandleIndex || RotationPill?.Visibility == Visibility.Visible)
             PlaceRotationPill();
+    }
+
+    private static Viewbox RotateGrabberGlyph()
+    {
+        var canvas = new Canvas { Width = 24, Height = 24 };
+        foreach (string d in new[]
+        {
+            "M22 12l-3 3-3-3",
+            "M2 12l3-3 3 3",
+            "M19.016 14v-1.95A7.05 7.05 0 0 0 8 6.22",
+            "M16.016 17.845A7.05 7.05 0 0 1 5 12.015V10",
+            "M5 10V9",
+            "M19 15v-1",
+        })
+        {
+            canvas.Children.Add(new Path
+            {
+                Data = Geometry.Parse(d),
+                Stroke = Brushes.Black,
+                StrokeThickness = 2,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+            });
+        }
+        return new Viewbox { Child = canvas, Stretch = Stretch.Uniform };
+    }
+
+    private void OpenRotationBoxFromClick()
+    {
+        if (_closed || RotationPill is null || _rotateThumb is not { Visibility: Visibility.Visible }) return;
+        PlaceRotationPill();
+        RotationInput.Focus();
+        Keyboard.Focus(RotationInput);
     }
 
     private void HideRotateThumb()
@@ -505,8 +587,12 @@ public partial class EditorWindow : Window
         var cursors = new[]
         {
             Cursors.Hand, Cursors.Hand,
-            Cursors.SizeNWSE, Cursors.SizeNESW, Cursors.SizeNWSE, Cursors.SizeNESW,
+            CornerCursor(0, Cursors.SizeNWSE), CornerCursor(1, Cursors.SizeNESW),
+            CornerCursor(2, Cursors.SizeNWSE), CornerCursor(3, Cursors.SizeNESW),
         };
+        Cursor CornerCursor(int corner, Cursor fallback) =>
+            ResizeArrowCursors.For(ResizeArrowCursors.PullAngleOf(corner), VisualTreeHelper.GetDpi(this).DpiScaleX)
+            ?? fallback;
         // Survey turns EVERY handle on the callout red together while the drag is heading
         // for a spot that would be rejected on release (HANDLE_RING_INVALID ef4444).
         var ring = _calloutDragInvalid
@@ -670,6 +756,59 @@ public partial class EditorWindow : Window
         foreach (var t in _handleThumbs) t.Visibility = Visibility.Collapsed;
         HideRotateThumb();
         PaintCloudGlow(null);
+        if (_lockBadge is not null) _lockBadge.Visibility = Visibility.Collapsed;
+    }
+
+    private Canvas? _lockBadge;
+
+    /// <summary>
+    /// Survey's SelectionLockBadge (SVGSelectionOverlay.jsx:527-552): a selected locked mark
+    /// keeps its frame but has no grabbers, and shows a small white disc with a blue lock on
+    /// the frame's top-right corner, so the reason is plain. It is the rotate grip's size
+    /// (radius 10 screen px), takes no clicks, and turns with the mark.
+    /// </summary>
+    private void PlaceLockBadge(Rect? frame, double angle)
+    {
+        if (frame is not Rect b)
+        {
+            if (_lockBadge is not null) _lockBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (_lockBadge is null)
+        {
+            var ring = new SolidColorBrush(AnnotationStyle.SelectionRingColor);
+            ring.Freeze();
+            _lockBadge = new Canvas { Width = 24, Height = 24, IsHitTestVisible = false };
+            _lockBadge.Children.Add(new Ellipse { Width = 24, Height = 24, Fill = Brushes.White, Stroke = ring });
+            var glyph = new Canvas { Width = 24, Height = 24 };
+            glyph.Children.Add(new Path
+            {
+                Data = new RectangleGeometry(new Rect(4, 11, 16, 10), 1.11, 1.11),
+                Stroke = ring, StrokeThickness = 2.2,
+            });
+            glyph.Children.Add(new Path
+            {
+                Data = Geometry.Parse("M8 11V7A4 4 0 0 1 16 7V11"),
+                Stroke = ring, StrokeThickness = 2.2,
+            });
+            _lockBadge.Children.Add(glyph);
+            HandleLayer.Children.Add(_lockBadge);
+        }
+        double r = RotateHandleScreenPx / 2 * HandleScale;
+        var disc = (Ellipse)_lockBadge.Children[0];
+        disc.Width = disc.Height = 2 * r;
+        disc.StrokeThickness = r / 7;
+        // The glyph is 1.25 r wide, drawn from Survey's 24-unit lock icon.
+        double g = r * 1.25;
+        var glyphHost = (Canvas)_lockBadge.Children[1];
+        glyphHost.RenderTransform = new MatrixTransform(g / 24, 0, 0, g / 24, r - g / 2, r - g / 2);
+        _lockBadge.Width = _lockBadge.Height = 2 * r;
+        var centre = new Point(b.Left + b.Width / 2, b.Top + b.Height / 2);
+        Point at = AnnotationRotation.RotatePoint(new Point(b.Right, b.Top), centre, angle);
+        Canvas.SetLeft(_lockBadge, at.X - r);
+        Canvas.SetTop(_lockBadge, at.Y - r);
+        _lockBadge.Visibility = Visibility.Visible;
+        HandleLayer.Visibility = Visibility.Visible;
     }
 
     /// <summary>Index of the handle near a content point, or -1. Endpoint/box share the same thumb list.</summary>
@@ -678,6 +817,18 @@ public partial class EditorWindow : Window
         if (_handleKind == HandleKind.None || HandleLayer.Visibility != Visibility.Visible) return -1;
         int best = -1;
         double bestDist = double.MaxValue;
+        // Survey handleHitPad.js (w63): behind every grabber sits an invisible 20 x 20 SCREEN
+        // px square, shrunk so neighbouring pads tile instead of overlapping, and never
+        // smaller than the 11 px dot. A mouse that misses the dot by a few px still grabs it.
+        var centres = new List<Point>();
+        foreach (var t in _handleThumbs)
+            if (t.Visibility == Visibility.Visible)
+                centres.Add(new Point(Canvas.GetLeft(t) + t.Width / 2, Canvas.GetTop(t) + t.Height / 2));
+        double spacing = double.MaxValue;
+        for (int a = 0; a < centres.Count; a++)
+            for (int b = a + 1; b < centres.Count; b++)
+                spacing = Math.Min(spacing, (centres[a] - centres[b]).Length);
+        double pad = Math.Max(HandleScreenPx * HandleScale, Math.Min(20 * HandleScale, spacing));
         for (int i = 0; i < _handleThumbs.Count; i++)
         {
             var thumb = _handleThumbs[i];
@@ -690,9 +841,10 @@ public partial class EditorWindow : Window
             bool pill = Math.Abs(thumb.Width - thumb.Height) > 1e-6;
             double spin = thumb.RenderTransform is RotateTransform rt ? rt.Angle : 0;
             Vector v = (spin == 0 ? pos : AnnotationRotation.RotatePoint(pos, c, -spin)) - c;
-            bool hit = pill
-                ? Math.Abs(v.X) <= thumb.Width / 2 && Math.Abs(v.Y) <= thumb.Height / 2
-                : v.Length <= thumb.Width / 2;
+            bool hit = (pill
+                    ? Math.Abs(v.X) <= thumb.Width / 2 && Math.Abs(v.Y) <= thumb.Height / 2
+                    : v.Length <= thumb.Width / 2)
+                || (Math.Abs(v.X) <= pad / 2 && Math.Abs(v.Y) <= pad / 2);
             double d = v.Length;
             if (hit && d < bestDist) { bestDist = d; best = i; }
         }
@@ -712,11 +864,18 @@ public partial class EditorWindow : Window
     /// <summary>
     /// Survey getCursorForHandle (svgTransformMath.js:117-141): the 8 box thumbs walk an
     /// 8-entry cursor ring rotated by <c>round(angle / 45) % 8</c>, so the cursor follows the
-    /// annotation's own rotation. 'mtr' is crosshair; endpoint/bend/callout handles grab.
+    /// annotation's own rotation. 'mtr' is the pointing hand; endpoint/bend/callout handles grab.
     /// </summary>
-    private static Cursor CursorForHandle(int index, double angleDegrees)
+    private Cursor CursorForHandle(int index, double angleDegrees)
     {
-        if (index == RotateHandleIndex) return Cursors.Cross;
+        // Survey handleCursors.js ROTATE_HANDLE_CURSOR: the pointing hand (Drawboard).
+        if (index == RotateHandleIndex) return Cursors.Hand;
+        // Survey resizeArrowCursor: the arrow turned to the exact pull direction. The ring of
+        // system cursors below stays as the fallback, as the CSS keyword does in Survey.
+        if (index >= 0 && index < 8
+            && ResizeArrowCursors.For(ResizeArrowCursors.PullAngleOf(index) + angleDegrees,
+                VisualTreeHelper.GetDpi(this).DpiScaleX) is Cursor turned)
+            return turned;
         // WinShot thumb order 0=TL 1=TR 2=BR 3=BL 4=T 5=R 6=B 7=L maps onto Survey's ring
         // indices tl:0 mt:1 tr:2 mr:3 br:4 mb:5 bl:6 ml:7.
         int[] baseIndex = { 0, 2, 4, 6, 1, 3, 5, 7 };
@@ -779,6 +938,7 @@ public partial class EditorWindow : Window
         {
             HandleKind.Endpoints or HandleKind.Vertex => Cursors.Hand,
             HandleKind.Callout => _handleThumbs[handle].Cursor ?? Cursors.Hand,
+            _ when _selection.Count > 1 => CursorForHandle(handle, 0),
             _ when _selected is FrameworkElement { Tag: AnnotationData { Type: AnnotationData.TypeStep } }
                 => Cursors.Hand,
             _ => CursorForHandle(handle, angle),
@@ -789,25 +949,64 @@ public partial class EditorWindow : Window
 
     // ---- resize drag lifecycle ----
 
+    /// <summary>
+    /// Survey useRotateHandleClick: a press on the rotate grabber that never travels past the
+    /// shape-drag threshold (6 px) is a CLICK, which opens the angle box with its number
+    /// selected; only a press that does travel rotates.
+    /// </summary>
+    private Point _rotatePressAt;
+    private bool _rotateTravelled;
+    /// <summary>Degrees between the pointer's bearing and the mark's angle at the press (rule 1b).</summary>
+    private double _rotateGrabOffset;
+    private const double RotateDragThresholdPx = 6;
+
     private void BeginResize(int handle, Point pos)
     {
         _activeHandle = handle;
+        if (handle == RotateHandleIndex)
+        {
+            _rotatePressAt = pos;
+            _rotateTravelled = false;
+        }
         Viewport.CaptureMouse();
+        _edgeStart = null;
+        _edgeLastGood = null;
         if (_adjustingCrop || _handleKind == HandleKind.Crop)
         {
             // Crop adjust: snapshot the pending rect so a cancel/abort can restore it.
             _resizeBefore = null;
             return;
         }
+        if (_selection.Count > 1 && handle is >= 0 and <= RotateHandleIndex && GroupCanResize())
+        {
+            BeginGroupResize(handle, pos);
+            if (_groupResize is not null)
+            {
+                Rect start = GroupBoundsNow();
+                _edgeStart = start.IsEmpty ? null : start;
+                _edgeLastGood = pos;
+            }
+            return;
+        }
         if (_selected is FrameworkElement fe && fe.Tag is AnnotationData meta)
         {
             _resizeBefore = CaptureResizeSnapshot(_selected, meta);
+            _edgeStart = AnnotationCanvas.Children.Contains(fe) ? GetCanvasBounds(fe) : null;
+            _edgeLastGood = pos;
             // Survey freezes originalProps.angle at pointer-down and never re-reads it during
             // the drag (useSVGInteraction.js:4220-4258). Reading it live mixes frames, and the
             // shape walks away under the cursor.
             _resizeAngle = AnnotationTransform.AngleOf(fe);
             _resizeFrame = null;
             _resizePivot = null;
+            // Page-edge rule 1b: a rotate button below the frame is grabbed about 180 degrees
+            // from the mark's own angle. Keep that offset so the turn starts from where the
+            // mark is instead of flipping it over on the first move.
+            _rotateGrabOffset = handle == RotateHandleIndex && _rotateGripBelow
+                && meta.Type != AnnotationData.TypeStep
+                ? AnnotationRotation.Normalize(
+                    AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos) - _resizeAngle)
+                : 0;
             // A counter never carries a RotateTransform (its "rotation" aims the nub), so
             // AngleOf is always 0 for one. Survey resizes it in its OWN rendered frame
             // instead: the canonical nub-up rect at pointerAngle+90 about the bubble centre.
@@ -820,6 +1019,10 @@ public partial class EditorWindow : Window
             }
             _calloutDragStart = null;
             _calloutDragInvalid = false;
+            _snapOthers = null;
+            if (_resizeAngle == 0 && meta.Type is not (AnnotationData.TypeStep
+                    or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter))
+                CollectResizeSnapTargets(fe);
             if (_handleKind == HandleKind.Callout && _selected is CalloutAnnotation dragged)
             {
                 _calloutDragStart = dragged.Layout;
@@ -835,6 +1038,84 @@ public partial class EditorWindow : Window
             DragCropHandle(pos);
             return;
         }
+        bool group = _groupResize is not null;
+        void ApplyAt(Point p)
+        {
+            if (group) DragGroupResize(p); else DragResizeTo(p);
+        }
+        ApplyAt(pos);
+        // Page-edge rule 4: a resize or turn stops at the image edge, the same as a move.
+        // Every branch of DragResizeTo and DragGroupResize works from the frozen pre-drag
+        // snapshot, so applying it again at an earlier pointer spot is exact. A lone callout
+        // keeps its own drop rules; a group is held as one piece by its union box.
+        if (_edgeStart is not Rect start || (!group && _handleKind == HandleKind.Callout)) return;
+        FrameworkElement? fe = _selected as FrameworkElement;
+        if (!group && fe is null) return;
+        bool Within() => group ? GroupWithinEdge(start) : MarkWithinEdge(fe!, start);
+        if (Within())
+        {
+            _edgeLastGood = pos;
+            return;
+        }
+        if (_edgeLastGood is not Point good)
+            return; // started outside what it may use (cannot happen); leave it alone
+        bool Fits(Point p)
+        {
+            ApplyAt(p);
+            return Within();
+        }
+        Point Toward(Point from, Point to)
+        {
+            if (Fits(to)) return to;
+            return from + (to - from) * PageEdgeMove.LastGood(t => Fits(from + (to - from) * t));
+        }
+        // A turn backs off along the pointer's path. A grabber slides: the across-the-edge
+        // part of the move stops and the along-the-edge part still follows the pointer.
+        Point stop;
+        if (_activeHandle == RotateHandleIndex)
+            stop = Toward(good, pos);
+        else
+        {
+            Point acrossX = Toward(good, new Point(pos.X, good.Y));
+            stop = Toward(acrossX, new Point(acrossX.X, pos.Y));
+        }
+        ApplyAt(stop);
+        _edgeLastGood = stop;
+    }
+
+    /// <summary>Page-edge rule 4: the box the mark had when the resize or turn began.</summary>
+    private Rect? _edgeStart;
+    /// <summary>The last pointer spot where the resize or turn stayed inside the edge.</summary>
+    private Point? _edgeLastGood;
+
+    private bool MarkWithinEdge(FrameworkElement fe, Rect start)
+    {
+        fe.UpdateLayout();
+        return PageEdgeMove.WithinAllowance(start, GetCanvasBounds(fe), _source.Width, _source.Height);
+    }
+
+    private bool GroupWithinEdge(Rect start)
+    {
+        Rect now = GroupBoundsNow();
+        return PageEdgeMove.WithinAllowance(start, now, _source.Width, _source.Height);
+    }
+
+    /// <summary>The union of the group members' boxes as they stand now, turns included.</summary>
+    private Rect GroupBoundsNow()
+    {
+        Rect union = Rect.Empty;
+        if (_groupResize is null) return union;
+        foreach (var m in _groupResize)
+        {
+            m.Element.UpdateLayout();
+            Rect b = GetCanvasBounds(m.Element);
+            if (!b.IsEmpty) union = union.IsEmpty ? b : Rect.Union(union, b);
+        }
+        return union;
+    }
+
+    private void DragResizeTo(Point pos)
+    {
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
             return;
 
@@ -910,6 +1191,48 @@ public partial class EditorWindow : Window
             // but does keep growing at the full drag rate past the anchor.
             bool supportsFlip = meta.Type is AnnotationData.TypeRectangle or AnnotationData.TypeEllipse
                 or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter;
+            bool alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+            // Survey canvas audit chunk 2 (Drawboard): the dragged edge(s) of an UPRIGHT mark
+            // pull to other marks' edges within 6 screen px - not with Shift (proportions
+            // win), Alt, a counter, a tilted mark, ink, or a photo's corner.
+            if (angle == 0 && SnappingOn && !alt && !ShapeConstraint.ShiftHeld && _snapOthers is { } snapTo
+                && meta.Type is not (AnnotationData.TypeStep or AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter)
+                && !(meta.Type == AnnotationData.TypeImage && _activeHandle < 4))
+            {
+                double tol = MoveSnapScreenPx / Math.Max(0.01, _zoom);
+                if (_activeHandle is not (4 or 6)) local.X += ObjectSnap.EdgeOffset(local.X, snapTo, axisX: true, tol);
+                if (_activeHandle is not (5 or 7)) local.Y += ObjectSnap.EdgeOffset(local.Y, snapTo, axisX: false, tol);
+            }
+            // Survey canvas audit chunk 3 (Drawboard): Alt grows the mark from its centre -
+            // the opposite side moves out by the same amount. A counter keeps its own rule.
+            if (alt && meta.Type != AnnotationData.TypeStep)
+            {
+                double cx = oldBounds.Left + oldBounds.Width / 2, cy = oldBounds.Top + oldBounds.Height / 2;
+                bool ax = _activeHandle is not (4 or 6), ay = _activeHandle is not (5 or 7);
+                double floor = supportsFlip ? 0.01 : 0.1;
+                double hx = ax ? Math.Max(Math.Abs(local.X - cx), oldBounds.Width / 2 * floor) : oldBounds.Width / 2;
+                double hy = ay ? Math.Max(Math.Abs(local.Y - cy), oldBounds.Height / 2 * floor) : oldBounds.Height / 2;
+                if (ShapeConstraint.ShiftHeld || meta.Type == AnnotationData.TypeImage)
+                {
+                    double kx = oldBounds.Width > 1e-6 ? hx / (oldBounds.Width / 2) : 1;
+                    double ky = oldBounds.Height > 1e-6 ? hy / (oldBounds.Height / 2) : 1;
+                    double k = !ax ? ky : !ay ? kx : (Math.Abs(kx - 1) >= Math.Abs(ky - 1) ? kx : ky);
+                    hx = oldBounds.Width / 2 * k;
+                    hy = oldBounds.Height / 2 * k;
+                }
+                var centred = new Rect(cx - hx, cy - hy, 2 * hx, 2 * hy);
+                // The pointer handed on must sit on the dragged side of the far anchor, so
+                // ink scales without mirroring.
+                Point grow = BoxHandlePoints(centred)[_activeHandle];
+                ApplyBoxResize(fe, meta, centred, grow);
+                if (angle != 0)
+                {
+                    fe.UpdateLayout();
+                    AnnotationTransform.SetAngle(fe, angle);
+                }
+                UpdateSelectionVisual();
+                return;
+            }
             local = FloorScale(oldBounds, _activeHandle, local, meta.Type switch
             {
                 AnnotationData.TypeFreehand or AnnotationData.TypeHighlighter => 0,
@@ -972,11 +1295,31 @@ public partial class EditorWindow : Window
         }
 
         UpdateSelectionVisual();
+        if (_snapOthers is not null && _handleKind == HandleKind.Box) ShowSnapGuides();
+    }
+
+    /// <summary>The other marks' boxes and the image edge, for a resize's edge snap.</summary>
+    private void CollectResizeSnapTargets(FrameworkElement resizing)
+    {
+        _snapOthers = new List<Rect> { new(0, 0, AnnotationCanvas.ActualWidth, AnnotationCanvas.ActualHeight) };
+        foreach (UIElement child in AnnotationCanvas.Children)
+        {
+            if (ReferenceEquals(child, resizing) || child is not FrameworkElement { Tag: AnnotationData } other) continue;
+            if (other.Visibility != Visibility.Visible) continue;
+            Rect b = GetCanvasBounds(child);
+            if (!b.IsEmpty) _snapOthers.Add(b);
+        }
     }
 
     /// <summary>Live rotation from the grip: bearing, grab offset, then the snap rules.</summary>
     private void DragRotate(FrameworkElement fe, Point pos)
     {
+        if (!_rotateTravelled)
+        {
+            // Content units to screen px: the threshold is a distance on screen.
+            if ((pos - _rotatePressAt).Length * _zoom <= RotateDragThresholdPx) return;
+            _rotateTravelled = true;
+        }
         // Counter: aim the pointer at the cursor (Survey's counterRotateDrag). The badge
         // itself never turns, so the number stays upright.
         if (fe is Grid badge && fe.Tag is AnnotationData step && step.Type == AnnotationData.TypeStep)
@@ -993,26 +1336,35 @@ public partial class EditorWindow : Window
             return;
         }
 
-        double bearing = AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos);
-        double angle = AnnotationRotation.ResolveDrag(bearing, ShapeConstraint.ShiftHeld);
+        double bearing = AnnotationRotation.Normalize(
+            AnnotationRotation.AngleFromPointer(RotationCentre(fe), pos) - _rotateGrabOffset);
+        double angle = AnnotationRotation.ResolveDrag(bearing, ShapeConstraint.ShiftHeld,
+            free: (Keyboard.Modifiers & ModifierKeys.Alt) != 0);
         AnnotationTransform.SetAngle(fe, angle);
         if (fe.Tag is AnnotationData meta) meta.Angle = angle;
     }
 
     private void EndResize()
     {
+        if (_activeHandle == RotateHandleIndex && !_rotateTravelled && !_closed && _groupResize is null)
+            Dispatcher.BeginInvoke(OpenRotationBoxFromClick, DispatcherPriority.Input);
         _activeHandle = -1;
         Viewport.ReleaseMouseCapture();
+        if (_groupResize is null) { _snapOthers = null; HideSnapGuides(); }
         // The rate limiter lets a resize skip repaints; the gesture is over, so pay them.
         FlushRedactionRefresh();
         if (_selected is not null) RefreshRedaction(_selected);
         ScheduleHideRotationPill();
-        _justDraggedAt = Environment.TickCount64;
 
         if (_adjustingCrop)
         {
             _adjustingCrop = false;
             UpdateSelectionVisual();
+            return;
+        }
+        if (_groupResize is not null)
+        {
+            EndGroupResize();
             return;
         }
         if (_selected is not FrameworkElement fe || fe.Tag is not AnnotationData meta || _resizeBefore is null)
@@ -1047,6 +1399,7 @@ public partial class EditorWindow : Window
             return;
         }
 
+        _justDraggedAt = Environment.TickCount64; // a real resize or turn, not a click
         UIElement el = _selected;
         Push(new EditorAction(
             undo: () => { ApplyResizeSnapshot(el, before); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
@@ -1059,8 +1412,11 @@ public partial class EditorWindow : Window
     {
         if (_activeHandle < 0) return;
         _activeHandle = -1;
-        if (!_adjustingCrop && _selected is not null && _resizeBefore is { } snap)
+        if (_groupResize is not null) AbortGroupResize();
+        else if (!_adjustingCrop && _selected is not null && _resizeBefore is { } snap)
             ApplyResizeSnapshot(_selected, snap);
+        _snapOthers = null;
+        HideSnapGuides();
         _calloutDragStart = null;
         _calloutDragInvalid = false;
         _adjustingCrop = false;
@@ -1247,7 +1603,9 @@ public partial class EditorWindow : Window
         bool curved = meta.Type == AnnotationData.TypeCurvedArrow && basePts.Length >= 3;
         Point from = Map(basePts[0]);
         Point to = Map(curved ? basePts[2] : basePts[^1]);
-        Point? mid = LineCurve.ParseMid(meta.Mid) is Point m ? Map(m) : null;
+        // From the PRE-DRAG bend: meta.Mid is rewritten every frame, so mapping the live
+        // value would compound the scale on each mouse move.
+        Point? mid = LineCurve.ParseMid(_resizeBefore.Meta.Mid) is Point m ? Map(m) : null;
         stroke.RenderTransform = null;
         if (curved)
         {
@@ -1646,6 +2004,24 @@ public partial class EditorWindow : Window
                 meta.Ty = 0;
                 break;
 
+            case AnnotationData.TypeText when fe is Grid textBox && snap.Meta.Rect is { Length: >= 4 }:
+                // A boxed label: a resize writes its position and size into Canvas.Left/Top and
+                // Width/Height, so undo has to put those back, not just the move offset.
+                fe.RenderTransform = null;
+                Canvas.SetLeft(fe, snap.Bounds.X);
+                Canvas.SetTop(fe, snap.Bounds.Y);
+                fe.Width = snap.Bounds.Width;
+                fe.Height = snap.Bounds.Height;
+                if (textBox.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock boxedTb)
+                    boxedTb.Width = Math.Max(1, fe.Width - 2 * AnnotationFactory.TextPadding);
+                if (snap.FontSize is double boxedFs) SetFontSize(fe, boxedFs);
+                meta.FontSize = snap.FontSize ?? meta.FontSize;
+                meta.Rect = new[] { snap.Bounds.X, snap.Bounds.Y, snap.Bounds.Width, snap.Bounds.Height };
+                meta.Tx = 0;
+                meta.Ty = 0;
+                fe.UpdateLayout();
+                break;
+
             case AnnotationData.TypeText:
                 fe.RenderTransform = new TranslateTransform(snap.Tx, snap.Ty);
                 if (snap.FontSize is double fs) SetFontSize(fe, fs);
@@ -1888,7 +2264,33 @@ public partial class EditorWindow : Window
                 return HitTestResultBehavior.Continue;
             },
             new GeometryHitTestParameters(new EllipseGeometry(pos, r, r)));
-        return found;
+        return found ?? HitTestLineHead(pos, r);
+    }
+
+    /// <summary>
+    /// Survey's line hit band runs the whole way to the tip (SVGAnnotationLayer.jsx:6590-6626),
+    /// so pointing into an open circle or open triangle end still picks the mark. WinShot's
+    /// ink hit test fell through the hollow middle: hovering the circle end did nothing.
+    /// </summary>
+    private UIElement? HitTestLineHead(Point pos, double r)
+    {
+        for (int i = AnnotationCanvas.Children.Count - 1; i >= 0; i--)
+        {
+            if (AnnotationCanvas.Children[i] is not Path { Tag: AnnotationData meta, Data: PathGeometry body } p
+                || meta.Type is not (AnnotationData.TypeArrow or AnnotationData.TypeLine)
+                || body.Figures.Count < 2 || p.Visibility != Visibility.Visible)
+                continue;
+            Point local;
+            try { local = AnnotationCanvas.TranslatePoint(pos, p); }
+            catch (InvalidOperationException) { continue; }
+            for (int f = 1; f < body.Figures.Count; f++)
+            {
+                Rect box = new PathGeometry { Figures = { body.Figures[f].Clone() } }.Bounds;
+                box.Inflate(r, r);
+                if (box.Contains(local)) return p;
+            }
+        }
+        return null;
     }
 
     /// <summary>Walks up to the direct AnnotationCanvas child owning a hit visual; null for non-annotations.</summary>
@@ -1908,6 +2310,7 @@ public partial class EditorWindow : Window
     {
         if (_selected is null || _movingSelection) return;
         var items = SelectionList()
+            .Where(el => !IsLocked(el))
             .Select(el => (Element: el, Index: AnnotationCanvas.Children.IndexOf(el)))
             .Where(t => t.Index >= 0)
             .OrderBy(t => t.Index)
@@ -1942,13 +2345,19 @@ public partial class EditorWindow : Window
     /// no separate ZIndex bookkeeping. Removing then re-inserting only moves the one element, so
     /// undo just puts it back at its old index. No-op (and no undo entry) when already at the edge.
     /// </summary>
-    private void ReorderSelected(ZMove move)
+    private void ReorderSelected(ZMove move) => ReorderCore(move, apply: true);
+
+    /// <summary>
+    /// Does the reorder, or with <paramref name="apply"/> false only says whether it would
+    /// change anything (the mark menu greys out a move that would not, as Survey does).
+    /// </summary>
+    private bool ReorderCore(ZMove move, bool apply)
     {
-        if (_selected is null || _movingSelection) return;
-        if (_selection.Count > 1) { ReorderSelection(move); return; }
+        if (_selected is null || _movingSelection) return false;
+        if (_selection.Count > 1) return ReorderSelection(move, apply);
         var children = AnnotationCanvas.Children;
         int oldIndex = children.IndexOf(_selected);
-        if (oldIndex < 0) return;
+        if (oldIndex < 0) return false;
         int last = children.Count - 1;
         int newIndex = move switch
         {
@@ -1961,12 +2370,14 @@ public partial class EditorWindow : Window
             ZMove.Backward => FirstOverlapping(oldIndex, -1, oldIndex),
             _ => oldIndex,
         };
-        if (newIndex == oldIndex) return; // already at the requested end — nothing to do
+        if (newIndex == oldIndex) return false; // already at the requested end — nothing to do
+        if (!apply) return true;
 
         UIElement el = _selected;
         Push(new EditorAction(
             undo: () => { children.Remove(el); children.Insert(oldIndex, el); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); },
             redo: () => { children.Remove(el); children.Insert(newIndex, el); if (ReferenceEquals(_selected, el)) UpdateSelectionVisual(); }));
+        return true;
     }
 
     /// <summary>Index of the first neighbour in <paramref name="step"/> direction whose bounds overlap.</summary>
@@ -1987,12 +2398,12 @@ public partial class EditorWindow : Window
     /// one atomic step and is NOT overlap-aware — a plain bubble-swap past unselected siblings,
     /// committed as a single undo entry so repeated calls never read stale indices.
     /// </summary>
-    private void ReorderSelection(ZMove move)
+    private bool ReorderSelection(ZMove move, bool apply = true)
     {
         var children = AnnotationCanvas.Children;
         var before = children.Cast<UIElement>().ToArray();
         bool[] sel = before.Select(_selection.Contains).ToArray();
-        if (!sel.Any(s => s) || sel.All(s => s)) return;
+        if (!sel.Any(s => s) || sel.All(s => s)) return false;
 
         var order = new List<UIElement>();
         switch (move)
@@ -2023,7 +2434,8 @@ public partial class EditorWindow : Window
                 break;
             }
         }
-        if (order.SequenceEqual(before)) return;
+        if (order.SequenceEqual(before)) return false;
+        if (!apply) return true;
 
         var after = order.ToArray();
         void Reseat(UIElement[] target)
@@ -2033,6 +2445,7 @@ public partial class EditorWindow : Window
             UpdateSelectionVisual();
         }
         Push(new EditorAction(undo: () => Reseat(before), redo: () => Reseat(after)));
+        return true;
 
         static void Swap(UIElement[] items, bool[] flags, int a, int b)
         {
@@ -2044,13 +2457,14 @@ public partial class EditorWindow : Window
     /// <summary>Right-click an annotation to select it and open the z-order / delete context menu.</summary>
     private void OnViewportRightClick(object sender, MouseButtonEventArgs e)
     {
-        if (_sourceOperationActive) return;
+        if (_sourceOperationActive || IsQuickBarSource(e.OriginalSource)) return;
         var hit = HitTestAnnotation(e.GetPosition(AnnotationCanvas));
         if (hit is null) return;
         // Right-clicking inside a multi-selection keeps it whole, so the menu's z-order
         // items reach the group path (same guard the left-click path uses).
         if (!(_selection.Count > 1 && _selection.Contains(hit))) Select(hit);
         _annotationMenu ??= BuildAnnotationMenu();
+        _markMenuAt = e.GetPosition(AnnotationCanvas);
         _annotationMenu.PlacementTarget = Viewport;
         _annotationMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
         _annotationMenu.IsOpen = true;
@@ -2059,43 +2473,19 @@ public partial class EditorWindow : Window
 
     private ContextMenu? _annotationMenu;
 
-    private ContextMenu BuildAnnotationMenu()
-    {
-        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenu") };
-        var itemStyle = (Style)FindResource("DarkMenuItem");
-
-        MenuItem Item(string header, string gesture, Action act)
-        {
-            var mi = new MenuItem { Header = header, InputGestureText = gesture, Style = itemStyle };
-            mi.Click += (_, _) => act();
-            return mi;
-        }
-
-        menu.Items.Add(Item("Bring to Front", "Ctrl+Shift+]", () => ReorderSelected(ZMove.Front)));
-        menu.Items.Add(Item("Bring Forward", "Ctrl+]", () => ReorderSelected(ZMove.Forward)));
-        menu.Items.Add(Item("Send Backward", "Ctrl+[", () => ReorderSelected(ZMove.Backward)));
-        menu.Items.Add(Item("Send to Back", "Ctrl+Shift+[", () => ReorderSelected(ZMove.Back)));
-        menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Delete", "Del", DeleteSelected));
-        return menu;
-    }
-
     /// <summary>Nudges the selected annotation by a keyboard delta as one undoable move.</summary>
     private void NudgeSelected(double dx, double dy)
     {
-        if (_selected is null || _movingSelection || _draggingCurveHandle) return;
+        if (_selected is null || _movingSelection || _draggingCurveHandle || SelectionLocked()) return;
         var moved = SelectionList().ToArray();
-        foreach (UIElement el in moved)
-            MoveElement(el, dx, dy);
-        // Same page constraint the pointer move commit applies, so a held arrow key cannot
-        // walk an annotation off the screenshot.
-        Vector fix = ClampSelectionToSurface(moved);
-        if (fix.X != 0 || fix.Y != 0)
-        {
-            foreach (UIElement el in moved) MoveElement(el, fix.X, fix.Y);
-            dx += fix.X;
-            dy += fix.Y;
-        }
+        // Same page clamp as the pointer move (rule 3), so a held arrow key stops at the
+        // image edge and never walks a mark off the screenshot.
+        Vector step = ClampMoveToSurface(moved, default, new Vector(dx, dy));
+        dx = step.X;
+        dy = step.Y;
+        if (dx != 0 || dy != 0)
+            foreach (UIElement el in moved)
+                MoveElement(el, dx, dy);
         if (dx == 0 && dy == 0) { UpdateSelectionVisual(); return; }
         UpdateSelectionVisual();
         Push(new EditorAction(
@@ -2113,52 +2503,18 @@ public partial class EditorWindow : Window
     }
 
     /// <summary>Maps a single-letter shortcut to a tool, mirroring the toolbar toggle. Returns false if unmapped.</summary>
-    /// <summary>
-    /// Survey's letter chain (PDFViewer.jsx:23322-23437): V, P, H, E, Shift+E, T, Q, L, A, C —
-    /// C is the COUNTER (:23425-23437), matching its shortcuts overlay.
-    /// E is the eraser and leaves its mode alone; Shift+E is the eraser forced to partial.
-    /// Survey has an ellipse tool but no key for it, so E belongs to the eraser here too.
-    /// R (rectangle), X (redact), K (crop) and M (magnify) are WinShot-only extensions on
-    /// keys Survey leaves free; crop moves off C so C can keep Survey's counter meaning.
-    /// B and I are one-shot image actions, not tools.
-    /// </summary>
     private bool TrySelectToolByKey(Key key, bool shift = false)
     {
-        if (shift)
-        {
-            if (key != Key.E) return false;
-            CheckToolButton(EditorTool.Eraser);
-            SetEraserPartial(true);
-            return true;
-        }
-        // B and I are not tools at all: they run the two image ACTIONS. B is where the
-        // background composer has always lived in WinShot, which is what freed it when the
-        // redaction rework took blur off it.
-        if (key == Key.B) { OnAddBackground(this, new RoutedEventArgs()); return true; }
-        if (key == Key.I) { OnAddImage(this, new RoutedEventArgs()); return true; }
-
-        EditorTool? tool = key switch
-        {
-            Key.V => EditorTool.Select,
-            Key.A => EditorTool.Arrow,
-            Key.R => EditorTool.Rectangle,
-            Key.E => EditorTool.Eraser,
-            Key.L => EditorTool.Line,
-            Key.T => EditorTool.Text,
-            Key.P => EditorTool.Freehand, // Pen / Draw
-            Key.H => EditorTool.Highlighter,
-            Key.C => EditorTool.Step,   // Survey's counter key
-            // Survey's B was Blur; blur is a redaction STYLE now, so the letter goes back to
-            // WinShot's background composer (handled with the other one-shot keys) and the
-            // redaction takes X. Crop moves to K, the only free letter next to it.
-            Key.X => EditorTool.Redact,
-            Key.K => EditorTool.Crop,
-            Key.M => EditorTool.Magnifier,
-            Key.Q => EditorTool.Callout,
-            _ => null,
-        };
-        if (tool is not EditorTool t) return false;
+        // The letters live in EditorToolKeys so the tooltips and the shortcut list can't drift
+        // from what the handler answers.
+        if (EditorToolKeys.Resolve(key, shift) is not ToolKey entry) return false;
+        // B and I are not tools at all: they run the two image ACTIONS.
+        if (entry.Action == EditorToolKeys.ActionBackground) { OnAddBackground(this, new RoutedEventArgs()); return true; }
+        if (entry.Action == EditorToolKeys.ActionAddImage) { OnAddImage(this, new RoutedEventArgs()); return true; }
+        if (entry.Tool is not EditorTool t) return false;
         CheckToolButton(t);
+        // E leaves the eraser's mode alone; Shift+E forces partial.
+        if (t == EditorTool.Eraser && shift) SetEraserPartial(true);
         return true;
     }
 
@@ -2216,6 +2572,8 @@ public partial class EditorWindow : Window
     private void PlaceRotationPill()
     {
         if (RotationPill is null || _rotateThumb is not { Visibility: Visibility.Visible }) return;
+        // The angle box edits ONE mark's turn; a group's grip turns by dragging only.
+        if (_selection.Count > 1) { HideRotationPill(); return; }
         Vector dir = _gripContent - _gripAnchorContent;
         if (dir.Length < 0.001) dir = new Vector(0, -1);
         dir.Normalize();
@@ -2242,6 +2600,7 @@ public partial class EditorWindow : Window
         _pillHideTimer?.Stop();
         _pillShowTimer?.Stop();
         RotationPill.Visibility = Visibility.Visible;
+        QueueQuickBarUpdate();   // the bar steps clear of the degree box while it is up
     }
 
     /// <summary>
@@ -2298,6 +2657,7 @@ public partial class EditorWindow : Window
         if (_closed || RotationPill is null || RotationInput is null) return;
         if (RotationInput.IsKeyboardFocused || RotationPill.IsMouseOver || _activeHandle == RotateHandleIndex) return;
         RotationPill.Visibility = Visibility.Collapsed;
+        QueueQuickBarUpdate();
     }
 
     private void HideRotationPill()

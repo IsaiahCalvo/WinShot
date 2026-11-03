@@ -1,0 +1,168 @@
+name: render-evidence
+
+# Renders every non-editor surface (selector, corner card, pin, history, settings, recording
+# HUD, scrolling chrome, video editor, the WPF and WinForms visual audits) to PNGs on a real
+# Windows desktop and uploads them, so a polish pass can look at hover, focus and disabled
+# states, spacing and DPI without a PC at hand. Runs only on PRs labelled `render-evidence`.
+
+on:
+  pull_request:
+    branches: ['main']
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    if: contains(github.event.pull_request.labels.*.name, 'render-evidence')
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}\render-out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install Windows 10 SDK 10.0.19041 (UAP Platform.xml for CsWinRT)
+        shell: pwsh
+        run: choco install windows-sdk-10-version-2004-all -y --no-progress
+      - name: Render
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $o = $env:OUT
+          New-Item -ItemType Directory -Force $o | Out-Null
+          $env:WINSHOT_RENDER_QUICK_ACCESS = '1'
+          $env:WINSHOT_RENDER_SELECTOR = '1'
+          $env:WINSHOT_RENDER_PIN = '1'
+          $env:WINSHOT_RENDER_PIN_CORNERS = '1'
+          $env:WINSHOT_RENDER_OUT = "$o\out"
+          $env:WINSHOT_HISTORY_RENDER = '1'
+          $env:WINSHOT_HISTORY_RENDER_DIR = "$o\history"
+          $env:WINSHOT_RENDER = '1'
+          $env:WINSHOT_RENDER_DIR = "$o\settings"
+          $env:WINSHOT_VISUAL_AUDIT = '1'
+          $env:WINSHOT_VISUAL_AUDIT_OUT = "$o\visual-audit"
+          $env:WINSHOT_WINFORMS_AUDIT = '1'
+          $env:WINSHOT_WINFORMS_AUDIT_OUT = "$o\winforms-audit"
+          $env:WINSHOT_RECORDING_RENDER_DIR = "$o\recording"
+          $env:WINSHOT_SCROLL_RENDER_DIR = "$o\scroll"
+          $env:WINSHOT_VIDEO_EDITOR_RENDER_DIR = "$o\video-editor"
+          $env:WINSHOT_MINIMAL_UI_OUT = "$o\minimal-ui"
+          foreach ($d in 'out','history','settings','visual-audit','winforms-audit','recording','scroll','video-editor','minimal-ui') {
+            New-Item -ItemType Directory -Force "$o\$d" | Out-Null
+          }
+          $classes = 'QuickAccessOverlayRenderHarness','SelectorRenderHarness','PinRenderHarness','HistoryRenderHarness','SettingsRenderHarness','WinFormsAuditHarness','RecordingHudRenderTests','RecordingIntegrationRenderHarness','ScrollingChromeRenderHarness','VideoEditorRenderHarness','SelectorMinimalUiTests'
+          $filter = ($classes | ForEach-Object { "FullyQualifiedName~$_" }) -join '|'
+          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --filter $filter --blame-hang-timeout 150s --blame-hang-dump-type none --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt"
+          # The WPF ink audit sweeps ~30 windows at four DPIs and is by far the slowest; it
+          # runs on its own afterwards so a slow or stuck surface cannot cost the rest.
+          dotnet test tests/WinShot.Tests/WinShot.Tests.csproj -c Release --nologo --no-build --filter "FullyQualifiedName~VisualAuditHarness" --blame-hang-timeout 600s --blame-hang-dump-type none --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath "$o\test-output.txt" -Append
+      - name: Print audit findings
+        if: always()
+        shell: pwsh
+        run: |
+          $o = $env:OUT
+          # Least important first: the log tail is what gets read.
+          Write-Host "== files per folder"
+          Get-ChildItem -Recurse -File $o | Group-Object { $_.Directory.FullName.Substring($o.Length) } | ForEach-Object { Write-Host ("DIR " + $_.Name + " " + $_.Count) }
+          Write-Host "== last visual-audit renders"
+          Get-ChildItem -File (Join-Path $o "visual-audit") -Filter *.png -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 6 | ForEach-Object { Write-Host ("LAST " + $_.Name + " " + $_.LastWriteTime.ToString("HH:mm:ss")) }
+          foreach ($f in "winforms-audit\noscale.tsv","visual-audit\states.tsv") {
+            $p = Join-Path $o $f
+            if (Test-Path $p) {
+              $rows = Get-Content $p
+              $bad = $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1].Trim() -notin @('', 'ok') }
+              Write-Host "== $f : $($rows.Count - 1) rows, $(@($bad).Count) not ok"
+              Write-Host $rows[0]
+              $bad | ForEach-Object { Write-Host "TSV $_" }
+            }
+          }
+          foreach ($f in "visual-audit\audit.tsv","winforms-audit\audit.tsv") {
+            $p = Join-Path $o $f
+            if (-not (Test-Path $p)) { Write-Host "== $f missing"; continue }
+            $rows = Get-Content $p
+            $flagged = $rows | Select-Object -Skip 1 | Where-Object { ($_ -split "`t")[-1].Trim() -notin @('', 'ok') }
+            Write-Host "== $f : $($rows.Count - 1) rows, $(@($flagged).Count) flagged"
+            Write-Host $rows[0]
+            $flagged | ForEach-Object { Write-Host "AUDIT $_" }
+          }
+          $t = Join-Path $o "test-output.txt"
+          if (Test-Path $t) {
+            Write-Host "== failed tests"
+            Select-String -Path $t -Pattern '^\s+Failed |hang|Aborted|blame' -Context 0,8 | ForEach-Object { Write-Host "FAIL $($_.Line)"; $_.Context.PostContext | ForEach-Object { Write-Host "FAIL   $_" } }
+          }
+      # The artifact zip cannot always be fetched by whoever reads the run, so the frames
+      # named in .github/render-peek.txt (paths under render-out, one per line) are printed
+      # as text pictures: "PEEK <name> <w>x<h>" then "ART |...|" rows, one character per cell
+      # from dark to light. Each picture is stretched to its own darkest and lightest cells, so
+      # light text on the dark theme still shows. An optional "x y w h" after the path crops
+      # that box first (with its own column count as a fifth number) to read a small area.
+      - name: Peek renders
+        if: always()
+        shell: pwsh
+        run: |
+          $list = Join-Path $env:GITHUB_WORKSPACE ".github\render-peek.txt"
+          if (-not (Test-Path $list)) { exit 0 }
+          Add-Type -AssemblyName System.Drawing
+          $ramp = " .:-=+*#%@"
+          foreach ($entry in Get-Content $list) {
+            $entry = $entry.Trim()
+            if ($entry -eq '' -or $entry.StartsWith('#')) { continue }
+            $parts = $entry -split '\s+'
+            $rel = $parts[0]
+            $p = Join-Path $env:OUT $rel
+            if (-not (Test-Path $p)) { Write-Host "PEEK-MISSING $rel"; continue }
+            $src = [System.Drawing.Image]::FromFile($p)
+            $box = New-Object System.Drawing.Rectangle 0, 0, $src.Width, $src.Height
+            $cols = 140
+            if ($parts.Count -ge 5) {
+              $box = New-Object System.Drawing.Rectangle ([int]$parts[1]), ([int]$parts[2]), ([int]$parts[3]), ([int]$parts[4])
+              $box.Intersect((New-Object System.Drawing.Rectangle 0, 0, $src.Width, $src.Height))
+              if ($parts.Count -ge 6) { $cols = [int]$parts[5] }
+            }
+            if ($box.Width -le 0 -or $box.Height -le 0) { Write-Host "PEEK-EMPTYBOX $entry"; $src.Dispose(); continue }
+            $rows = [int][Math]::Max(1, [Math]::Round($box.Height * $cols / $box.Width / 2.1))
+            $bmp = New-Object System.Drawing.Bitmap $cols, $rows
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = 'HighQualityBicubic'
+            $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $cols, $rows), $box, [System.Drawing.GraphicsUnit]::Pixel)
+            $g.Dispose()
+            Write-Host "PEEK $entry $($src.Width)x$($src.Height)"
+            $src.Dispose()
+            $lum = New-Object 'double[,]' $cols, $rows
+            $lo = 1.0; $hi = 0.0
+            for ($y = 0; $y -lt $rows; $y++) {
+              for ($x = 0; $x -lt $cols; $x++) {
+                $c = $bmp.GetPixel($x, $y)
+                $l = (0.2126 * $c.R + 0.7152 * $c.G + 0.0722 * $c.B) / 255.0
+                $lum[$x, $y] = $l
+                if ($l -lt $lo) { $lo = $l }
+                if ($l -gt $hi) { $hi = $l }
+              }
+            }
+            $span = [Math]::Max(0.04, $hi - $lo)
+            Write-Host ("PEEK-RANGE {0:N2}..{1:N2}" -f $lo, $hi)
+            for ($y = 0; $y -lt $rows; $y++) {
+              $line = New-Object System.Text.StringBuilder
+              for ($x = 0; $x -lt $cols; $x++) {
+                $n = ($lum[$x, $y] - $lo) / $span
+                [void]$line.Append($ramp[[Math]::Min(9, [Math]::Max(0, [int]($n * 10)))])
+              }
+              Write-Host ("ART |" + $line.ToString() + "|")
+            }
+            $bmp.Dispose()
+          }
+          Write-Host "PEEK-END"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-evidence
+          path: render-out
+          if-no-files-found: warn

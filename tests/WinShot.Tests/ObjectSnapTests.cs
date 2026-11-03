@@ -105,4 +105,43 @@ public class ObjectSnapTests
         Assert.Equal(0, v.X, 9);
         Assert.Equal(0, v.Y, 9);
     }
+
+    [Fact]
+    public void AnEdgeDoesNotSnapToACentre()
+    {
+        // Survey (Drawboard): edges meet edges and centres meet centres. The neighbour's
+        // middle is x=140; a left edge at 142 must not pull onto it.
+        Vector v = ObjectSnap.Adjust(new Rect(142, 300, 10, 20), new[] { Neighbour });
+        Assert.Equal(0, v.X, 6);
+    }
+
+    [Fact]
+    public void ALinedUpEdgeDrawsOneGuideAcrossBothBoxes()
+    {
+        var (lines, points) = ObjectSnap.Guides(new Rect(100, 300, 20, 20), new[] { Neighbour });
+        var g = Assert.Single(lines);
+        Assert.True(g.AxisX);
+        Assert.Equal(100, g.Value);
+        Assert.Equal(100, g.Min);   // neighbour's top
+        Assert.Equal(320, g.Max);   // moving box's bottom
+        Assert.Equal(4, points.Count); // both boxes' left corners
+    }
+
+    [Fact]
+    public void ACentreGuideRunsCentreToCentre()
+    {
+        var (lines, points) = ObjectSnap.Guides(new Rect(130, 300, 20, 20), new[] { Neighbour });
+        var g = Assert.Single(lines);
+        Assert.Equal(140, g.Value);
+        Assert.Equal(120, g.Min);
+        Assert.Equal(310, g.Max);
+        Assert.Equal(2, points.Count);
+    }
+
+    [Fact]
+    public void NothingLinedUpDrawsNothing()
+    {
+        var (lines, _) = ObjectSnap.Guides(new Rect(103, 303, 20, 20), new[] { Neighbour });
+        Assert.Empty(lines);
+    }
 }

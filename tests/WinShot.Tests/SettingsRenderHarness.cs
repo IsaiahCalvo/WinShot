@@ -111,8 +111,12 @@ public class SettingsRenderHarness
     private static void RenderToPng(Window w, string path, double dpi)
     {
         double scale = dpi / 96d;
-        int width = (int)Math.Ceiling(w.ActualWidth * scale);
-        int height = (int)Math.Ceiling(w.ActualHeight * scale);
+        // Window.ActualWidth/Height include the system frame, which RenderTargetBitmap does not
+        // draw, so sizing by them left an empty black band down the right and along the bottom.
+        // The client content is what the user sees inside the frame.
+        FrameworkElement client = w.Content as FrameworkElement ?? w;
+        int width = (int)Math.Ceiling(client.ActualWidth * scale);
+        int height = (int)Math.Ceiling(client.ActualHeight * scale);
         if (width <= 0 || height <= 0) return;
 
         var rtb = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);

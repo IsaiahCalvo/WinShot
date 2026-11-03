@@ -106,7 +106,7 @@
                         <Button x:Name="CropUtilityBtn" Style="{StaticResource CompactToolIconButton}"
                                 Click="OnCropClick" ToolTip="Crop"
                                 AutomationProperties.Name="Crop and resize"
-                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut C.">
+                                AutomationProperties.HelpText="Crop the image. Does not deselect Pan or Select. Shortcut Shift+C.">
                             <ContentControl Content="{StaticResource SurveyIcon.Crop}"/>
                         </Button>
                         <Button x:Name="RotateCwBtn" Style="{StaticResource CompactToolIconButton}"
@@ -184,9 +184,9 @@
 
                         <Button x:Name="ImageGroupBtn" Style="{StaticResource ToolIconButton}"
                                 Click="OnImageGroupClick" Tag="Image" ToolTip="Image"
-                                Content="{StaticResource SurveyIcon.Crop}"
+                                Content="{StaticResource SurveyIcon.Photo}"
                                 AutomationProperties.Name="Image tools"
-                                AutomationProperties.HelpText="Crop, add an image or another capture, add a background, extract text, export a before/after GIF."/>
+                                AutomationProperties.HelpText="Add an image or another capture, add a background, extract text, export a before/after GIF."/>
 
 
                         <RadioButton x:Name="CurvedArrowToolBtn" Style="{StaticResource SurveyIconToggle}" GroupName="Tool"
@@ -224,10 +224,376 @@
                     <Canvas Grid.Column="2" Width="0" HorizontalAlignment="Left"
                             VerticalAlignment="Stretch">
                     <Grid Height="{Binding ActualHeight, ElementName=ToolbarPrimaryRow}">
-                    <StackPanel HorizontalAlignment="Left"
+                    <StackPanel x:Name="EditorToolSlot" HorizontalAlignment="Left"
                                 Orientation="Horizontal" VerticalAlignment="Center">
-                        <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
-                            <Rectangle Style="{StaticResource ToolbarDivider}"/>
+                        <!-- Survey (RULED 2026-09-26, w44 "flip rows"): right of the group chips the
+                             tool bar shows the TOOLS inside the chosen group, behind the same rule
+                             as the one on the cluster's left. Select with nothing picked shows its
+                             Box / Lasso modes here instead (w46). The settings live in row 2. -->
+                        <Rectangle x:Name="ToolSlotDivider" Style="{StaticResource ToolbarDivider}" Margin="4,0,6,0"/>
+                        <StackPanel x:Name="SelectModePanel" Orientation="Horizontal">
+                            <RadioButton x:Name="SelectBoxModeBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="SelectMode"
+                                         IsChecked="True" Checked="OnSelectModeChecked" Tag="Box" ToolTip="Box select"
+                                         AutomationProperties.Name="Box select"
+                                         AutomationProperties.HelpText="Drag a box to pick every mark it touches. Shortcut V."
+                                         Content="{StaticResource SurveyIcon.SelectBox}"/>
+                            <RadioButton x:Name="SelectLassoModeBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="SelectMode"
+                                         Checked="OnSelectModeChecked" Tag="Lasso" ToolTip="Lasso select"
+                                         AutomationProperties.Name="Lasso select"
+                                         AutomationProperties.HelpText="Draw a loop round the marks to pick. Shortcut Alt+V."
+                                         Content="{StaticResource SurveyIcon.Lasso}"/>
+                        </StackPanel>
+                        <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                            <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen"
+                                         AutomationProperties.Name="Pen"
+                                         AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
+                                         Content="{StaticResource SurveyIcon.Pen}"/>
+                            <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter"
+                                         AutomationProperties.Name="Highlighter"
+                                         AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
+                                         Content="{StaticResource SurveyIcon.Highlighter}"/>
+                            <!-- Survey PASS 7 (board 13): the eraser's kind is the Partial / Whole
+                                 toggle in the settings row, so the button carries no menu. -->
+                            <Grid Margin="3,0">
+                                <RadioButton x:Name="EraserToolBtn" Style="{StaticResource StripToolButton}" GroupName="Tool"
+                                             Tag="Eraser" Checked="OnToolChecked" ToolTip="Eraser"
+                                             AutomationProperties.Name="Eraser"
+                                             AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits. Shortcut E; Shift+E forces partial erase."
+                                             Content="{StaticResource SurveyIcon.Eraser}"/>
+                            </Grid>
+                        </StackPanel>
+                        <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                            <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Rectangle" Checked="OnToolChecked"
+                                         ToolTip="Rectangle" AutomationProperties.Name="Rectangle"
+                                         AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
+                                         Content="{StaticResource SurveyIcon.Rect}"/>
+                            <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse"
+                                         AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse. Shortcut O."
+                                         Content="{StaticResource SurveyIcon.Ellipse}"/>
+                            <!-- Survey puts Polygon and Polyline between the closed shapes and the
+                                 open ones (PDFViewer.jsx:34035-34045) because that is what they
+                                 bridge. Both are CLICK-TO-PLACE, not drag-out: each click drops a
+                                 vertex and the run is finished explicitly. -->
+                            <RadioButton x:Name="PolygonToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Polygon" Checked="OnToolChecked" ToolTip="Polygon"
+                                         AutomationProperties.Name="Polygon"
+                                         AutomationProperties.HelpText="Click to place each corner. Click the first corner, or press Enter, to close the shape. Escape cancels. Shortcut G."
+                                         Content="{StaticResource SurveyIcon.Polygon}"/>
+                            <!-- Survey's Shape row: Cloud is Rectangle with the Cloud line style
+                                 (Drawboard Shape > Cloud, utils/cloudShapeTool.js). It shows pressed
+                                 exactly while Rectangle is armed with the cloud border, and Rectangle
+                                 never shows pressed then. -->
+                            <RadioButton x:Name="CloudToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Cloud" Checked="OnCloudToolChecked" ToolTip="Cloud"
+                                         AutomationProperties.Name="Cloud"
+                                         AutomationProperties.HelpText="Draw a revision cloud: a rectangle with the cloud border."
+                                         Content="{StaticResource SurveyIcon.ShapeCloud}"/>
+                            <RadioButton x:Name="PolylineToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Polyline" Checked="OnToolChecked" ToolTip="Polyline"
+                                         AutomationProperties.Name="Polyline"
+                                         AutomationProperties.HelpText="Click to place each point. Press Enter to finish the run open, or click the first point to close it into a polygon. Escape cancels. Shortcut K."
+                                         Content="{StaticResource SurveyIcon.Polyline}"/>
+                            <RadioButton x:Name="LineToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Line" Checked="OnToolChecked" ToolTip="Line"
+                                         AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
+                                         Content="{StaticResource SurveyIcon.Line}"/>
+                            <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow"
+                                         AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
+                                         Content="{StaticResource SurveyIcon.Arrow}"/>
+                            <RadioButton x:Name="StepToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Step" Checked="OnToolChecked" ToolTip="Counter"
+                                         AutomationProperties.Name="Counter"
+                                         AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut C."
+                                         Content="{StaticResource SurveyIcon.Counter}"/>
+                        </StackPanel>
+                        <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                            <RadioButton x:Name="TextToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Text" Checked="OnToolChecked" ToolTip="Text"
+                                         AutomationProperties.Name="Text"
+                                         AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
+                                         Content="{StaticResource SurveyIcon.TextBox}"/>
+                            <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Callout" Checked="OnToolChecked" ToolTip="Callout"
+                                         AutomationProperties.Name="Callout"
+                                         AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
+                                         Content="{StaticResource SurveyIcon.Callout}"/>
+                        </StackPanel>
+                        <!-- Survey's Effects group. Its two separate Pixelate and Blur tools are
+                             gone: they are two of the four STYLES of the one re-editable redaction
+                             mark, which can be moved, resized and restyled after it is drawn. -->
+                        <StackPanel x:Name="EffectsGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                            <RadioButton x:Name="RedactToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Redact" Content="{StaticResource SurveyIcon.Pixelate}" Checked="OnToolChecked" ToolTip="Redact (X)"
+                                         AutomationProperties.Name="Redact"
+                                         AutomationProperties.HelpText="Cover a dragged region with a movable, re-styleable redaction. Shortcut X."/>
+                            <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Spotlight" Checked="OnToolChecked" ToolTip="Spotlight"
+                                         AutomationProperties.Name="Spotlight"
+                                         AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
+                                         Content="{StaticResource SurveyIcon.Spotlight}"/>
+                            <RadioButton x:Name="MagnifierToolBtn" Style="{StaticResource StripToolButton}" Margin="3,0" GroupName="Tool"
+                                         Tag="Magnifier" Content="{StaticResource SurveyIcon.Magnifier}" Checked="OnToolChecked" ToolTip="Magnify (Shift+M)"
+                                         AutomationProperties.Name="Magnify"
+                                         AutomationProperties.HelpText="Drag a bubble that shows a piece of the picture blown up. Drag its ring to aim it somewhere else. Shortcut M."/>
+                        </StackPanel>
+
+                        <!-- The fifth group: the one-shot things that act on the IMAGE rather
+                             than adding a mark. Survey has no counterpart — its equivalents are
+                             scattered through the "more" menu — but a group is where a WinShot
+                             user already looks for a tool, and it keeps the top row from
+                             growing a second overflow. -->
+                        <StackPanel x:Name="ImageGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
+                            <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.AddImage}"
+                                    Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
+                                    AutomationProperties.Name="Add screenshot or image"
+                                    AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
+                            <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.AddCapture}"
+                                    Click="OnAddCapture" ToolTip="Add capture…"
+                                    AutomationProperties.Name="Add capture"
+                                    AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
+                            <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.Background}"
+                                    Click="OnAddBackground" ToolTip="Add background (B)"
+                                    AutomationProperties.Name="Add background"
+                                    AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>
+                            <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.ExtractText}"
+                                    Click="OnExtractText" ToolTip="Extract text"
+                                    AutomationProperties.Name="Extract text"
+                                    AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
+                            <!-- Appears only once there is an added image to flip between. A
+                                 before/after GIF of one frame is a PNG. -->
+                            <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="3,0" Content="{StaticResource SurveyIcon.Gif}"
+                                    Click="OnExportGif" ToolTip="Export before/after GIF…"
+                                    Visibility="Collapsed"
+                                    AutomationProperties.Name="Export before and after GIF"
+                                    AutomationProperties.HelpText="Save a two-frame animation flipping between the picture without the added images and with them."/>
+                        </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                    </Grid>
+                    </Canvas>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Grid.Column="0">
+            <!-- Survey's #chrome-sub-toolbar-host is `position:absolute; top:0` inside the
+                 centre column so the sub-row OVERLAYS the canvas without pushing it down —
+                 "the viewer underneath keeps its full height" (AppShell.jsx:2727-2740).
+                 One row, EditorGroupBar declared after Viewport so it paints on top. -->
+                <Grid x:Name="Viewport" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
+              MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
+              MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
+              AutomationProperties.Name="Annotation canvas"
+              AutomationProperties.HelpText="Source-resolution image canvas. Hold Space or middle-drag to pan; Ctrl+mouse wheel zooms.">
+            <Canvas x:Name="SurfaceHost">
+                <!-- Survey's page carries `box-shadow: 0 2px 14px rgba(0,0,0,0.45)` and NO border
+                     ring; the desktop page div leaves boxShadow undefined so the canvas shadow is
+                     the only edge treatment (PdfjsViewerContainer.jsx:351, :2236-2238). The
+                     geometry below is Survey's, unchanged — only the ground it falls on moved. -->
+                <Border x:Name="CaptureShadow" IsHitTestVisible="False" Visibility="Collapsed"
+                        Background="#FF000000">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="14" ShadowDepth="2" Direction="270"
+                                          Opacity="0.45" Color="#FF000000" RenderingBias="Performance"/>
+                    </Border.Effect>
+                </Border>
+                <!-- THE SHEET'S SECOND EDGE, and the one thing in this window that is not
+                     Survey's. A screenshot editor is the one design problem where the
+                     CONTENT'S VALUE IS UNKNOWN AT DESIGN TIME: Isaiah captures a white spec
+                     PDF and his own dark IDE in the same minute. A drop shadow separates a
+                     bright sheet from the desk and disappears entirely under a dark one — so
+                     on half of what this app captures, the shadow above is the only edge
+                     treatment and it is invisible.
+
+                     This is already the house answer to that exact problem, everywhere else:
+                     the crop thirds-guides are "a dark hairline one screen pixel under a light
+                     one, so the guides read over a white region as well as a dark one", the
+                     scroll indicators pair the same way, and so does the selector's loupe
+                     frame. Every piece of chrome in this app that sits over arbitrary picture
+                     content is two-tone — except, until now, the frame around the picture.
+
+                     So the sheet gets both halves, each quiet where the other is working: the
+                     shadow lifts a bright capture, this hairline bounds a dark one. It is
+                     BorderBrush — the SAME 12%-white token as the top bar's bottom rule, the
+                     rail's left rule and the bottom bar's top rule, so one token draws every
+                     edge in the window, chrome and content alike. (BorderStrong was the first
+                     draft and measures 7.0:1 against the desk, which is a drawn box, not an
+                     edge.) SyncCaptureShadow sizes it one DIP PROUD of the image on every
+                     side, so the stroke lands entirely on the desk and never covers the
+                     outermost row of the user's own pixels. -->
+                <Border x:Name="CaptureEdge" IsHitTestVisible="False" Visibility="Collapsed"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
+                      Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="ViewScale"/>
+                            <TranslateTransform x:Name="ViewTranslate"/>
+                        </TransformGroup>
+                    </Grid.RenderTransform>
+                    <Grid x:Name="CanvasHost">
+                        <StackPanel x:Name="BaseTiles" Orientation="Vertical" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                        <Canvas x:Name="AnnotationCanvas" Background="Transparent" ClipToBounds="True"/>
+                    </Grid>
+                    <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
+                        <Path x:Name="CropDim" Fill="{StaticResource GuideStrokeShadowBrush}" Visibility="Collapsed"/>
+                        <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
+                                   StrokeDashArray="4 3" Fill="{StaticResource AccentWashBrush}" Visibility="Collapsed"/>
+                        <!-- Survey's hover halo (SVGAnnotationLayer.jsx:4415-4421 etc.): the mark's
+                             OWN geometry restroked in #4a90e2 at 0.4 opacity, so a pre-click
+                             preview traces the shape instead of boxing it. -->
+                        <Path x:Name="HoverHalo" Stroke="{StaticResource InfoBrush}" Opacity="0.4" Fill="{x:Null}"
+                              StrokeLineJoin="Round" Visibility="Collapsed"/>
+                        <!-- An arrow's own silhouette, thickened and translucent: the shape
+                             says what is selected, where a dashed box around a diagonal
+                             line never did. -->
+                        <Path x:Name="ArrowSelectionGlow" Visibility="Collapsed" IsHitTestVisible="False"/>
+                        <!-- Rubber band. Stroke/fill are set per drag: blue solid dragging
+                             right (window), green dashed dragging left (crossing). -->
+                        <Rectangle x:Name="MarqueeRect" StrokeThickness="1" Visibility="Collapsed"/>
+                        <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
+                                CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Rectangle x:Name="EyedropColorRect" Width="14" Height="14" RadiusX="2" RadiusY="2"
+                                           Stroke="#88FFFFFF" StrokeThickness="1"/>
+                                <TextBlock x:Name="EyedropHexText" Foreground="{StaticResource TextPrimaryBrush}"
+                                           FontSize="{StaticResource TextCaption}" Margin="6,0,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <!-- Magnified eyedropper loupe: the selector's nearest-neighbour grid,
+                             pointed at the source bitmap instead of the screen. -->
+                        <Canvas x:Name="EyedropLoupe" Visibility="Collapsed" IsHitTestVisible="False"/>
+                        <!-- Rule-of-thirds guides inside the crop rectangle. Two-tone: a dark
+                             hairline one screen pixel under a light one, so the guides read
+                             over a white region as well as a dark one. -->
+                        <Canvas x:Name="CropGuides" Visibility="Collapsed" IsHitTestVisible="False">
+                            <Line x:Name="ThirdV1Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdV2Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdH1Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdH2Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
+                            <Line x:Name="ThirdV1" Stroke="{StaticResource GuideStrokeBrush}"/>
+                            <Line x:Name="ThirdV2" Stroke="{StaticResource GuideStrokeBrush}"/>
+                            <Line x:Name="ThirdH1" Stroke="{StaticResource GuideStrokeBrush}"/>
+                            <Line x:Name="ThirdH2" Stroke="{StaticResource GuideStrokeBrush}"/>
+                        </Canvas>
+                    </Canvas>
+                    <!-- Selection chrome: the frame, the eight grabbers, the rotate button,
+                         the lock badge and the magnifier's focus ring. NOT clipped to the image,
+                         unlike InteractionCanvas and AnnotationCanvas: a grabber on a mark at the
+                         image edge draws whole over the desk and is grabbed there (handle hits
+                         are geometric, HitTestHandle), as in Drawboard PDF and Survey.
+                         Page-edge rules, docs/PAGE-EDGE-RULES.md, rule 1. -->
+                    <Canvas x:Name="ChromeCanvas" IsHitTestVisible="False" ClipToBounds="False">
+                        <!-- Survey SVGSelectionOverlay.jsx:129-147: #4a90e2, strokeWidth 2,
+                             strokeDasharray '4,4' in absolute px. WPF dash units are multiples
+                             of StrokeThickness, so "2 2" at a 2px stroke is the same 4/4 rhythm. -->
+                        <Rectangle x:Name="SelectionRect" Stroke="#4A90E2" StrokeThickness="2"
+                                   StrokeDashArray="2 2" Visibility="Collapsed"/>
+                        <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
+                                 Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
+                        <!-- Union frame around a marquee group; softer than a single selection. -->
+                        <Rectangle x:Name="GroupRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
+                                   StrokeDashArray="4 3" Opacity="0.6" Visibility="Collapsed"/>
+                        <!-- What a selected magnifier callout is looking at. Hollow, so the
+                             pixels it is pointing at stay visible under it, and joined to
+                             the bubble by a leader so the pair reads as one mark. -->
+                        <Line x:Name="MagnifierLeader" Stroke="{StaticResource InfoBrush}" StrokeThickness="1"
+                              StrokeDashArray="3 3" Opacity="0.8" Visibility="Collapsed"/>
+                        <Ellipse x:Name="MagnifierFocusHandle" Width="12" Height="12"
+                                 Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
+                                 Fill="Transparent" Visibility="Collapsed"/>
+                        <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
+                    </Canvas>
+                </Grid>
+            </Canvas>
+            <!-- Where you are in a zoomed-in image. Indicators, never controls: the
+                 editor pans an infinite canvas, so there is no track to drag. -->
+            <Canvas x:Name="ScrollOverlay" IsHitTestVisible="False" Opacity="0">
+                <!-- The ground under these is the user's screenshot, not a theme surface, so
+                     a light bar alone composites to nothing over a white region. Same pairing
+                     the thirds guides use: a dark bar one pixel down-right, under the light one. -->
+                <Rectangle x:Name="ScrollBarHShadow" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource GuideStrokeShadowBrush}"/>
+                <Rectangle x:Name="ScrollBarVShadow" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource GuideStrokeShadowBrush}"/>
+                <Rectangle x:Name="ScrollBarH" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource TextSecondaryBrush}"/>
+                <Rectangle x:Name="ScrollBarV" RadiusX="2" RadiusY="2" Visibility="Collapsed"
+                           Fill="{StaticResource TextSecondaryBrush}"/>
+            </Canvas>
+
+            <Canvas x:Name="OverlayCanvas">
+                <!-- Survey's eraser ring (FabricEraserCanvas.jsx:2435-2450): rgba(255,255,255,.18)
+                     fill, 1px rgba(17,24,39,.9) border, 1px rgba(255,255,255,.72) outer halo.
+                     Both rings stay hairlines at any zoom; only the diameter scales. -->
+                <Ellipse x:Name="EraserCursorHalo" Width="22" Height="22" IsHitTestVisible="False" Visibility="Collapsed"
+                         Fill="Transparent" Stroke="#B8FFFFFF" StrokeThickness="1"/>
+                <Ellipse x:Name="EraserCursor" Width="20" Height="20" IsHitTestVisible="False" Visibility="Collapsed"
+                         Fill="#2EFFFFFF" Stroke="#E6000000" StrokeThickness="1"/>
+                <!-- Survey RotationInputField.jsx:563-640: 60x28, bg #181c24, radius 6,
+                     boxShadow '0 4px 12px rgba(0,0,0,0.3)', 1px border #2a3140 that swaps to
+                     #4A9EFF on focus (the only focus affordance — the input's outline is none),
+                     centred 13px/500 value in #e8e2d4 with a 12px #8d96a6 degree suffix, gap 4. -->
+                <Border x:Name="RotationPill" Width="60" Height="28" Background="{StaticResource ChromeBgBrush}"
+                        BorderBrush="{StaticResource ChromeHairlineBrush}"
+                        BorderThickness="1" CornerRadius="6" Visibility="Collapsed"
+                        AutomationProperties.Name="Rotation angle">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource Self}}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="12" ShadowDepth="4" Direction="270" Opacity="0.3"/>
+                    </Border.Effect>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBox x:Name="RotationInput" Width="32" Height="20" Background="Transparent" BorderThickness="0"
+                                 Foreground="{StaticResource ChromeTextBrush}" CaretBrush="{StaticResource ChromeTextBrush}"
+                                 FontSize="{StaticResource TextBodyLg}" FontWeight="Medium" TextAlignment="Center" Padding="0" VerticalContentAlignment="Center"
+                                 PreviewTextInput="OnRotationInputText" PreviewKeyDown="OnRotationInputKey"
+                                 GotKeyboardFocus="OnRotationInputFocus" LostKeyboardFocus="OnRotationInputBlur"
+                                 AutomationProperties.Name="Rotation degrees"/>
+                        <TextBlock Text="°" Foreground="{StaticResource ChromeTextMutedBrush}" FontSize="{StaticResource TextBody}" Margin="4,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+            </Canvas>
+        </Grid>
+                <!-- Row 2, the SETTINGS row (Survey RULED 2026-09-26 w44 "flip rows"): the armed
+                     tool's colours, width, line style, ends and Aa — or, under Select, the picked
+                     mark's. 34px, ChromeBg, a 1px hairline at the bottom. It lies OVER the canvas
+                     (utils/viewerTopOverlay.js), so the picture does not move when it comes and
+                     goes, and it is only on screen when it has settings to show: Pan, and Select
+                     with nothing picked, have none (toolbarRows.js showsFormatRow). The text
+                     formatting sits IN this row after Aa (Survey first-run walk 2026-10-21 #10),
+                     not in a third bar. -->
+                <Border x:Name="EditorGroupBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                        Height="34" Visibility="Collapsed"
+                        Margin="0" Padding="0" CornerRadius="0"
+                        Background="{StaticResource ChromeBgBrush}"
+                        BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
+                        TextElement.Foreground="{StaticResource ChromeTextBrush}"
+                        AutomationProperties.Name="Tool settings"
+                        AutomationProperties.HelpText="Colour, width and style for the armed tool or the picked mark.">
+                    <!-- Centred under the group chips (Survey w48 "rows 2/3 centred"). WinShot has
+                         only the right rail, so a 48px left margin puts the centre of this row on
+                         the centre of the window, where the chips are. -->
+                    <Grid Margin="48,0,0,0">
+                    <Border x:Name="EditorRichTextHost" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="Collapsed"/>
+                    <Border x:Name="EditorFormatHost" HorizontalAlignment="Center" Visibility="Collapsed">
+                    <StackPanel x:Name="EditorFormatRow" HorizontalAlignment="Center"
+                                Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel x:Name="SecondaryToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
                             <StackPanel x:Name="EditorColorBar" Orientation="Horizontal" VerticalAlignment="Center">
                                                     <StackPanel x:Name="ColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <!-- `.ctx-color-swatch` (styles.css:1613-1637): a full 24px disc on
@@ -293,6 +659,7 @@
                                                                         <!-- Survey's segmented grid/spectrum toggle (CompactColorPicker.jsx:322-365):
                                                                              a #2a3140 pill whose active half fills #5a6473. -->
                                                                         <Style x:Key="PickerModeToggle" TargetType="RadioButton">
+                                                                            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
                                                                             <Setter Property="Cursor" Value="Hand"/>
                                                                             <Setter Property="Template">
                                                                                 <Setter.Value>
@@ -480,54 +847,50 @@
                             <Grid x:Name="SizeEffectHost" MinWidth="52" VerticalAlignment="Center" Margin="0,0,8,0">
                             <StackPanel x:Name="ThicknessPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock x:Name="ThicknessLabel" Text="Stroke" Style="{StaticResource FieldLabel}" Margin="0,0,6,0" Visibility="Collapsed"/>
-                                                        <!-- AnnotationSizeControl: a 43px editable number input welded to a
-                                                             24x22 chevron cell, opening a 126px preset popover whose rows
-                                                             preview the stroke thickness (AnnotationSizeControl.css:1-136). -->
-                                                        <Border x:Name="SizeField" Height="24" CornerRadius="5" BorderThickness="1"
-                                                                Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent"
+                                                        <!-- Survey AnnotationSizeControl variant="pill" (PASS 7, owner 2026-10-26/28):
+                                                             a 72x20 setting pill that reads "2 pt" with a 9px chevron. It opens
+                                                             a 232px card: the typed number with its unit, then the quick picks
+                                                             as a six-column grid, each a short line of its weight (a dot for the
+                                                             counter and eraser sizes) over its number. The current pick is accent. -->
+                                                        <Border x:Name="SizeField" Height="20" Width="72" CornerRadius="10"
                                                                 SnapsToDevicePixels="True">
-                                                            <Border.Style>
-                                                                <Style TargetType="Border">
-                                                                    <Style.Triggers>
-                                                                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                                                                            <Setter Property="BorderBrush" Value="{StaticResource ChromeAccentBrush}"/>
-                                                                        </Trigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </Border.Style>
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <TextBox x:Name="SizeInput" Style="{StaticResource SizeFieldInput}"
-                                                                         PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnSizeInputKey"
-                                                                         LostKeyboardFocus="OnSizeInputBlur"
-                                                                         AutomationProperties.Name="Annotation size"
-                                                                         AutomationProperties.HelpText="Type a whole number, or pick a preset from the chevron."/>
-                                                                <ToggleButton x:Name="SizePresetsBtn" Style="{StaticResource SizeFieldTrigger}"
-                                                                              ToolTip="Width presets" AutomationProperties.Name="Width presets"/>
-                                                            </StackPanel>
+                                                            <ToggleButton x:Name="SizePresetsBtn" Style="{StaticResource ChromePillToggle}"
+                                                                          ToolTip="Width" AutomationProperties.Name="Width">
+                                                                <TextBlock x:Name="SizePillLabel" Text="2 pt" TextTrimming="CharacterEllipsis"/>
+                                                            </ToggleButton>
                                                         </Border>
                                                         <Popup x:Name="SizePresetsPopup" PlacementTarget="{Binding ElementName=SizeField}"
                                                                Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True"
-                                                               Opened="OnSizePresetsPopupOpened"
+                                                               PopupAnimation="Fade" Opened="OnSizePresetsPopupOpened"
                                                                IsOpen="{Binding IsChecked, ElementName=SizePresetsBtn, Mode=TwoWay}">
-                                                            <StackPanel>
-                                                            <!-- Survey draws a Popover.Arrow filled #3a4252 pointing at the trigger
-                                                                 (AnnotationSizeControl.jsx:184, .css:142-144). The 36px right margin
-                                                                 below is shadow room, so match it here to centre on the 126px body. -->
-                                                            <Path HorizontalAlignment="Center" Margin="0,0,36,0" Data="M0,5 L5,0 L10,5 Z"
-                                                                  Fill="{StaticResource ChromeControlBrush}"/>
-                                                            <Border Style="{StaticResource PopoverCard}" Width="126" Padding="5" Margin="0,0,36,36">
+                                                            <Border Style="{StaticResource PopoverCard}" Width="232" Padding="8" Margin="0,0,36,36">
                                                                 <StackPanel>
-                                                                    <TextBlock x:Name="SizePresetsHeading" Text="WIDTH" Padding="7,7,9,8"
-                                                                               FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextCaption}" FontWeight="Bold"
-                                                                               Foreground="{StaticResource ChromeTextMutedBrush}"/>
-                                                                    <Border Height="1" Background="{StaticResource ChromeHairlineBrush}"/>
-                                                                    <ScrollViewer MaxHeight="420" Margin="0,4,0,0"
-                                                                                  HorizontalScrollBarVisibility="Disabled">
-                                                                        <StackPanel x:Name="SizePresetList"/>
-                                                                    </ScrollViewer>
+                                                                    <TextBlock x:Name="SizePresetsHeading" Visibility="Collapsed"/>
+                                                                    <Border Height="24" CornerRadius="5" BorderThickness="1" Padding="8,0"
+                                                                            Background="{StaticResource ChromeControlBrush}" BorderBrush="Transparent">
+                                                                        <Border.Style>
+                                                                            <Style TargetType="Border">
+                                                                                <Style.Triggers>
+                                                                                    <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                                                        <Setter Property="BorderBrush" Value="{StaticResource ChromeTextMutedBrush}"/>
+                                                                                    </Trigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </Border.Style>
+                                                                        <DockPanel LastChildFill="True">
+                                                                            <TextBlock x:Name="SizeUnitLabel" DockPanel.Dock="Right" Text="pt" VerticalAlignment="Center"
+                                                                                       FontSize="{StaticResource TextCaption}" Foreground="{StaticResource ChromeTextMutedBrush}"/>
+                                                                            <TextBox x:Name="SizeInput" Style="{StaticResource SizeFieldInput}"
+                                                                                     Width="Auto" Padding="0" TextAlignment="Left"
+                                                                                     PreviewTextInput="OnSizeInputText" PreviewKeyDown="OnSizeInputKey"
+                                                                                     LostKeyboardFocus="OnSizeInputBlur"
+                                                                                     AutomationProperties.Name="Annotation size"
+                                                                                     AutomationProperties.HelpText="Type a number, or pick one below. Up and Down step it."/>
+                                                                        </DockPanel>
+                                                                    </Border>
+                                                                    <UniformGrid x:Name="SizePresetList" Columns="6" Margin="0,6,0,0"/>
                                                                 </StackPanel>
                                                             </Border>
-                                                            </StackPanel>
                                                         </Popup>
                                                     </StackPanel>
                                                     <!-- Survey's LIGHT / MEDIUM / STRONG combo is gone with its two tools: the
@@ -546,34 +909,24 @@
                                                     
 
                                                     <StackPanel x:Name="ArrowStylePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <!-- Width 112 is Survey's own trigger size, measured on the running app
-                                                             2026-09-17. Letting the ComboBox size itself to its widest row made it
-                                                             257 DIP, and a control more than twice as wide as it should be is what
-                                                             pushed the arrowhead into the overflow flyout at a 1400 DIP window. -->
-                                                        <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="1"
-                                                                  Width="112"
+                                                        <!-- Survey's chrome-field-w-arrowhead: the pill and its card are both 90 DIP
+                                                             (AppShell.jsx width / contentWidth). Six heads, then Both ends, nothing else. -->
+                                                        <ComboBox x:Name="ArrowStyleBox" Style="{StaticResource SurveyDropdown}" Tag="ARROWHEAD" SelectedIndex="4"
+                                                                  Width="90"
                                                                   SelectionChanged="OnArrowStyleChanged" AutomationProperties.Name="Arrowhead">
+                                                            <!-- Survey PASS 7 (board 15) offers SIX heads, in board order, each drawn as the head it puts on
+                                                                 the line, with the short words of ARROWHEAD_SHORT_LABELS ("Filled", not "Solid triangle").
+                                                                 Triangle, Diamond and Slash only ever arrive on an imported or older mark: they stay
+                                                                 hidden and the menu prepends whichever one is live (AppShell.jsx:4386-4389). -->
+                                                            <ComboBoxItem Content="Triangle" Tag="openTriangle" Visibility="Collapsed"/>
+                                                            <ComboBoxItem Content="Diamond" Tag="diamond" Visibility="Collapsed"/>
+                                                            <ComboBoxItem Content="Slash" Tag="slash" Visibility="Collapsed"/>
                                                             <ComboBoxItem Content="None" Tag="none"/>
-                                                            <ComboBoxItem Content="Solid triangle" Tag="solidTriangle"/>
-                                                            <ComboBoxItem Content="V-shape" Tag="vShape"/>
-                                                            <ComboBoxItem Content="Open circle" Tag="openCircle"/>
-                                                            <ComboBoxItem Content="Open triangle" Tag="openTriangle"/>
-                                                            <!-- Survey's vocabulary is these NINE ARROWHEAD_STYLE_LABELS: one head,
-                                                                 at the end point. It was six when this was ported; Diamond, Slash and
-                                                                 Square are PDF /LE endings Survey has offered since its line-endings
-                                                                 work, verified on the running app 2026-09-17. The old CleanShot
-                                                                 "Double" entry had no Survey counterpart; the geometry still loads
-                                                                 old .winshot files. -->
-                                                            <ComboBoxItem Content="Horizontal line" Tag="horizontalLine"/>
-                                                            <ComboBoxItem Content="Diamond" Tag="diamond"/>
-                                                            <ComboBoxItem Content="Slash" Tag="slash"/>
+                                                            <ComboBoxItem Content="Filled" Tag="solidTriangle"/>
+                                                            <ComboBoxItem Content="Open" Tag="vShape"/>
+                                                            <ComboBoxItem Content="Circle" Tag="openCircle"/>
                                                             <ComboBoxItem Content="Square" Tag="square"/>
-                                                            <!-- Survey's six are HEADS on a stroked shaft. WinShot's two are whole-arrow
-                                                                 looks, so they live under them in the same menu rather than in a second
-                                                                 control: Fancy is one filled silhouette, Curved arms the curved tool. -->
-                                                            <Separator/>
-                                                            <ComboBoxItem Content="Fancy" Tag="Fancy"/>
-                                                            <ComboBoxItem Content="Curved" Tag="Curved"/>
+                                                            <ComboBoxItem Content="Bar" Tag="horizontalLine"/>
                                                         </ComboBox>
                                                         <!-- Survey's "Both ends" toggle (AppShell.jsx:2747-2782): one ending picker
                                                              plus a toggle that MIRRORS the picked ending onto the start, rather than
@@ -770,16 +1123,16 @@
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="StepModePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
-                                                        <!-- Survey's counter row is `Counter colors[24x24] Counter series[136x24] Size presets`
-                                                             (measured on the running app 2026-09-17), so the series picker is the FIRST thing
-                                                             after the colour well. 136 is its trigger width there. The rows are built in code
+                                                        <!-- Survey's counter row: pin swatch | series pill (chrome-field-w-series, 80) | Size,
+                                                             and Start only while a counter is picked (AppShell.jsx 'series' / 'start' slots).
+                                                             Survey has no Numbers/Letters mode and no Reset; "New" in the series menu starts over. The rows are built in code
                                                              from the pins actually on the canvas — see EditorWindow.Counters.cs. -->
                                                         <ComboBox x:Name="CounterSeriesBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER SERIES"
-                                                                  Width="136" Margin="0,0,6,0"
+                                                                  Width="80" Margin="0,0,6,0"
                                                                   SelectionChanged="OnCounterSeriesChanged"
                                                                   AutomationProperties.Name="Counter series"
                                                                   AutomationProperties.HelpText="Start a new count, or continue an existing one. Each count is numbered on its own. Right-click a count to continue or delete it."/>
-                                                        <ComboBox x:Name="StepModeBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER" SelectedIndex="0" Margin="0,0,6,0"
+                                                        <ComboBox x:Name="StepModeBox" Style="{StaticResource SurveyDropdown}" Tag="COUNTER" SelectedIndex="0" Margin="0,0,6,0" Visibility="Collapsed"
                                                                   SelectionChanged="OnStepModeChanged"
                                                                   AutomationProperties.Name="Counter mode"
                                                                   AutomationProperties.HelpText="Number badges or letter badges.">
@@ -788,6 +1141,7 @@
                                                         </ComboBox>
                                                         <!-- Survey's Start field (AppShell.jsx:2510-2566): 11px #8d96a6 label,
                                                              42x20 input on #3a4252, radius 5, 12px, centred, >= 1. -->
+                                                        <StackPanel x:Name="StepStartPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
                                                         <TextBlock Text="Start" Margin="0,0,4,0" VerticalAlignment="Center"
                                                                    FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextCaption}"
                                                                    Foreground="{StaticResource ChromeTextMutedBrush}"/>
@@ -800,8 +1154,7 @@
                                                                      LostKeyboardFocus="OnStepStartBlur"
                                                                      AutomationProperties.Name="Start number"/>
                                                         </Border>
-                                                        <Button Style="{StaticResource PillButtonSecondary}" Content="Reset" ToolTip="Reset counter"
-                                                                Click="OnResetStepCounter" AutomationProperties.Name="Reset counter"/>
+                                                        </StackPanel>
                                                     </StackPanel>
 
                                                     <StackPanel x:Name="FillPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,8,0">
@@ -924,378 +1277,6 @@
                             </Border>
                         </Popup>
                         </StackPanel>
-                    </StackPanel>
-                    </Grid>
-                    </Canvas>
-                </Grid>
-            </StackPanel>
-        </Border>
-
-        <Grid Grid.Row="1" Grid.Column="0">
-            <!-- Survey's #chrome-sub-toolbar-host is `position:absolute; top:0` inside the
-                 centre column so the sub-row OVERLAYS the canvas without pushing it down —
-                 "the viewer underneath keeps its full height" (AppShell.jsx:2727-2740).
-                 One row, EditorGroupBar declared after Viewport so it paints on top. -->
-                <Grid x:Name="Viewport" Background="{StaticResource WindowBgBrush}" ClipToBounds="True"
-              MouseWheel="OnViewportMouseWheel" MouseDown="OnViewportMouseDown" MouseMove="OnViewportMouseMove"
-              MouseUp="OnViewportMouseUp" MouseRightButtonUp="OnViewportRightClick"
-              AutomationProperties.Name="Annotation canvas"
-              AutomationProperties.HelpText="Source-resolution image canvas. Hold Space or middle-drag to pan; Ctrl+mouse wheel zooms.">
-            <Canvas x:Name="SurfaceHost">
-                <!-- Survey's page carries `box-shadow: 0 2px 14px rgba(0,0,0,0.45)` and NO border
-                     ring; the desktop page div leaves boxShadow undefined so the canvas shadow is
-                     the only edge treatment (PdfjsViewerContainer.jsx:351, :2236-2238). The
-                     geometry below is Survey's, unchanged — only the ground it falls on moved. -->
-                <Border x:Name="CaptureShadow" IsHitTestVisible="False" Visibility="Collapsed"
-                        Background="#FF000000">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="14" ShadowDepth="2" Direction="270"
-                                          Opacity="0.45" Color="#FF000000" RenderingBias="Performance"/>
-                    </Border.Effect>
-                </Border>
-                <!-- THE SHEET'S SECOND EDGE, and the one thing in this window that is not
-                     Survey's. A screenshot editor is the one design problem where the
-                     CONTENT'S VALUE IS UNKNOWN AT DESIGN TIME: Isaiah captures a white spec
-                     PDF and his own dark IDE in the same minute. A drop shadow separates a
-                     bright sheet from the desk and disappears entirely under a dark one — so
-                     on half of what this app captures, the shadow above is the only edge
-                     treatment and it is invisible.
-
-                     This is already the house answer to that exact problem, everywhere else:
-                     the crop thirds-guides are "a dark hairline one screen pixel under a light
-                     one, so the guides read over a white region as well as a dark one", the
-                     scroll indicators pair the same way, and so does the selector's loupe
-                     frame. Every piece of chrome in this app that sits over arbitrary picture
-                     content is two-tone — except, until now, the frame around the picture.
-
-                     So the sheet gets both halves, each quiet where the other is working: the
-                     shadow lifts a bright capture, this hairline bounds a dark one. It is
-                     BorderBrush — the SAME 12%-white token as the top bar's bottom rule, the
-                     rail's left rule and the bottom bar's top rule, so one token draws every
-                     edge in the window, chrome and content alike. (BorderStrong was the first
-                     draft and measures 7.0:1 against the desk, which is a drawn box, not an
-                     edge.) SyncCaptureShadow sizes it one DIP PROUD of the image on every
-                     side, so the stroke lands entirely on the desk and never covers the
-                     outermost row of the user's own pixels. -->
-                <Border x:Name="CaptureEdge" IsHitTestVisible="False" Visibility="Collapsed"
-                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
-                <Grid x:Name="EditorSurface" HorizontalAlignment="Left" VerticalAlignment="Top"
-                      Background="Transparent" Cursor="Cross" RenderTransformOrigin="0,0">
-                    <Grid.RenderTransform>
-                        <TransformGroup>
-                            <ScaleTransform x:Name="ViewScale"/>
-                            <TranslateTransform x:Name="ViewTranslate"/>
-                        </TransformGroup>
-                    </Grid.RenderTransform>
-                    <Grid x:Name="CanvasHost">
-                        <StackPanel x:Name="BaseTiles" Orientation="Vertical" HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                        <Canvas x:Name="AnnotationCanvas" Background="Transparent" ClipToBounds="True"/>
-                    </Grid>
-                    <Canvas x:Name="InteractionCanvas" IsHitTestVisible="False" ClipToBounds="True">
-                        <Path x:Name="CropDim" Fill="{StaticResource GuideStrokeShadowBrush}" Visibility="Collapsed"/>
-                        <Rectangle x:Name="DragRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 3" Fill="{StaticResource AccentWashBrush}" Visibility="Collapsed"/>
-                        <!-- Survey SVGSelectionOverlay.jsx:129-147: #4a90e2, strokeWidth 2,
-                             strokeDasharray '4,4' in absolute px. WPF dash units are multiples
-                             of StrokeThickness, so "2 2" at a 2px stroke is the same 4/4 rhythm. -->
-                        <Rectangle x:Name="SelectionRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
-                                   StrokeDashArray="2 2" Visibility="Collapsed"/>
-                        <Ellipse x:Name="CurveHandle" Width="10" Height="10" Fill="{StaticResource InfoBrush}"
-                                 Stroke="White" StrokeThickness="1.5" Visibility="Collapsed"/>
-                        <!-- Survey's hover halo (SVGAnnotationLayer.jsx:4415-4421 etc.): the mark's
-                             OWN geometry restroked in #4a90e2 at 0.4 opacity, so a pre-click
-                             preview traces the shape instead of boxing it. -->
-                        <Path x:Name="HoverHalo" Stroke="{StaticResource InfoBrush}" Opacity="0.4" Fill="{x:Null}"
-                              StrokeLineJoin="Round" Visibility="Collapsed"/>
-                        <!-- An arrow's own silhouette, thickened and translucent: the shape
-                             says what is selected, where a dashed box around a diagonal
-                             line never did. -->
-                        <Path x:Name="ArrowSelectionGlow" Visibility="Collapsed" IsHitTestVisible="False"/>
-                        <!-- Rubber band. Stroke/fill are set per drag: blue solid dragging
-                             right (window), green dashed dragging left (crossing). -->
-                        <Rectangle x:Name="MarqueeRect" StrokeThickness="1" Visibility="Collapsed"/>
-                        <!-- Union frame around a marquee group; softer than a single selection. -->
-                        <Rectangle x:Name="GroupRect" Stroke="{StaticResource InfoBrush}" StrokeThickness="1.5"
-                                   StrokeDashArray="4 3" Opacity="0.6" Visibility="Collapsed"/>
-                        <!-- What a selected magnifier callout is looking at. Hollow, so the
-                             pixels it is pointing at stay visible under it, and joined to
-                             the bubble by a leader so the pair reads as one mark. -->
-                        <Line x:Name="MagnifierLeader" Stroke="{StaticResource InfoBrush}" StrokeThickness="1"
-                              StrokeDashArray="3 3" Opacity="0.8" Visibility="Collapsed"/>
-                        <Ellipse x:Name="MagnifierFocusHandle" Width="12" Height="12"
-                                 Stroke="{StaticResource InfoBrush}" StrokeThickness="2"
-                                 Fill="Transparent" Visibility="Collapsed"/>
-                        <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
-                        <Border x:Name="EyedropSwatch" Visibility="Collapsed" Background="{StaticResource FloatingBgBrush}"
-                                CornerRadius="4" Padding="5" RenderTransformOrigin="0,0">
-                            <StackPanel Orientation="Horizontal">
-                                <Rectangle x:Name="EyedropColorRect" Width="14" Height="14" RadiusX="2" RadiusY="2"
-                                           Stroke="#88FFFFFF" StrokeThickness="1"/>
-                                <TextBlock x:Name="EyedropHexText" Foreground="{StaticResource TextPrimaryBrush}"
-                                           FontSize="{StaticResource TextCaption}" Margin="6,0,0,0"/>
-                            </StackPanel>
-                        </Border>
-                        <!-- Magnified eyedropper loupe: the selector's nearest-neighbour grid,
-                             pointed at the source bitmap instead of the screen. -->
-                        <Canvas x:Name="EyedropLoupe" Visibility="Collapsed" IsHitTestVisible="False"/>
-                        <!-- Rule-of-thirds guides inside the crop rectangle. Two-tone: a dark
-                             hairline one screen pixel under a light one, so the guides read
-                             over a white region as well as a dark one. -->
-                        <Canvas x:Name="CropGuides" Visibility="Collapsed" IsHitTestVisible="False">
-                            <Line x:Name="ThirdV1Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
-                            <Line x:Name="ThirdV2Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
-                            <Line x:Name="ThirdH1Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
-                            <Line x:Name="ThirdH2Shadow" Stroke="{StaticResource GuideStrokeShadowBrush}"/>
-                            <Line x:Name="ThirdV1" Stroke="{StaticResource GuideStrokeBrush}"/>
-                            <Line x:Name="ThirdV2" Stroke="{StaticResource GuideStrokeBrush}"/>
-                            <Line x:Name="ThirdH1" Stroke="{StaticResource GuideStrokeBrush}"/>
-                            <Line x:Name="ThirdH2" Stroke="{StaticResource GuideStrokeBrush}"/>
-                        </Canvas>
-                    </Canvas>
-                </Grid>
-            </Canvas>
-            <!-- Where you are in a zoomed-in image. Indicators, never controls: the
-                 editor pans an infinite canvas, so there is no track to drag. -->
-            <Canvas x:Name="ScrollOverlay" IsHitTestVisible="False" Opacity="0">
-                <!-- The ground under these is the user's screenshot, not a theme surface, so
-                     a light bar alone composites to nothing over a white region. Same pairing
-                     the thirds guides use: a dark bar one pixel down-right, under the light one. -->
-                <Rectangle x:Name="ScrollBarHShadow" RadiusX="2" RadiusY="2" Visibility="Collapsed"
-                           Fill="{StaticResource GuideStrokeShadowBrush}"/>
-                <Rectangle x:Name="ScrollBarVShadow" RadiusX="2" RadiusY="2" Visibility="Collapsed"
-                           Fill="{StaticResource GuideStrokeShadowBrush}"/>
-                <Rectangle x:Name="ScrollBarH" RadiusX="2" RadiusY="2" Visibility="Collapsed"
-                           Fill="{StaticResource TextSecondaryBrush}"/>
-                <Rectangle x:Name="ScrollBarV" RadiusX="2" RadiusY="2" Visibility="Collapsed"
-                           Fill="{StaticResource TextSecondaryBrush}"/>
-            </Canvas>
-
-            <Canvas x:Name="OverlayCanvas">
-                <!-- Survey's eraser ring (FabricEraserCanvas.jsx:2435-2450): rgba(255,255,255,.18)
-                     fill, 1px rgba(17,24,39,.9) border, 1px rgba(255,255,255,.72) outer halo.
-                     Both rings stay hairlines at any zoom; only the diameter scales. -->
-                <Ellipse x:Name="EraserCursorHalo" Width="22" Height="22" IsHitTestVisible="False" Visibility="Collapsed"
-                         Fill="Transparent" Stroke="#B8FFFFFF" StrokeThickness="1"/>
-                <Ellipse x:Name="EraserCursor" Width="20" Height="20" IsHitTestVisible="False" Visibility="Collapsed"
-                         Fill="#2EFFFFFF" Stroke="#E6000000" StrokeThickness="1"/>
-                <!-- Survey RotationInputField.jsx:563-640: 60x28, bg #181c24, radius 6,
-                     boxShadow '0 4px 12px rgba(0,0,0,0.3)', 1px border #2a3140 that swaps to
-                     #4A9EFF on focus (the only focus affordance — the input's outline is none),
-                     centred 13px/500 value in #e8e2d4 with a 12px #8d96a6 degree suffix, gap 4. -->
-                <Border x:Name="RotationPill" Width="60" Height="28" Background="{StaticResource ChromeBgBrush}"
-                        BorderBrush="{StaticResource ChromeHairlineBrush}"
-                        BorderThickness="1" CornerRadius="6" Visibility="Collapsed"
-                        AutomationProperties.Name="Rotation angle">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource Self}}" Value="True">
-                                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="12" ShadowDepth="4" Direction="270" Opacity="0.3"/>
-                    </Border.Effect>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <TextBox x:Name="RotationInput" Width="32" Height="20" Background="Transparent" BorderThickness="0"
-                                 Foreground="{StaticResource ChromeTextBrush}" CaretBrush="{StaticResource ChromeTextBrush}"
-                                 FontSize="{StaticResource TextBodyLg}" FontWeight="Medium" TextAlignment="Center" Padding="0" VerticalContentAlignment="Center"
-                                 PreviewTextInput="OnRotationInputText" PreviewKeyDown="OnRotationInputKey"
-                                 GotKeyboardFocus="OnRotationInputFocus" LostKeyboardFocus="OnRotationInputBlur"
-                                 AutomationProperties.Name="Rotation degrees"/>
-                        <TextBlock Text="°" Foreground="{StaticResource ChromeTextMutedBrush}" FontSize="{StaticResource TextBody}" Margin="4,0,0,0" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Border>
-            </Canvas>
-        </Grid>
-                <!-- PDFViewer.jsx:32014-32032: 34px, #181c24, 1px #2a3140 bottom
-                     hairline, border-box (so the hairline eats into the 34). Survey
-                     PORTALS this strip in only while a category is open
-                     (PDFViewer.jsx:32015 `activeCategoryDropdown &&`), so it starts
-                     collapsed and UpdateContextPanels mounts/unmounts it. -->
-                <Border x:Name="EditorGroupBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
-                        Height="34" Visibility="Collapsed"
-                        Margin="0" Padding="0" CornerRadius="0"
-                        Background="{StaticResource ChromeBgBrush}"
-                        BorderBrush="{StaticResource ChromeHairlineBrush}" BorderThickness="0,0,0,1"
-                        AutomationProperties.Name="Group tools"
-                        AutomationProperties.HelpText="Tools in the selected Draw, Shapes, or Text group.">
-                    <!-- Survey's sub-row centres on the WINDOW, not on the canvas: it is centred
-                         (PDFViewer.jsx:32026 `justifyContent:'center'`) inside the centre column,
-                         and that column is symmetric because BOTH rails are 48px (AppShell.jsx:2692
-                         left, :2841 right). WinShot has only the right rail, so centring inside the
-                         canvas column would land 24px left of the top bar's own centred cluster
-                         (AppShell.jsx:1344). A 48px left margin restores the symmetry:
-                         48 + (W-48-48)/2 = W/2. EditorGroupBar itself stays Stretch so its bottom
-                         hairline still terminates into the rail's left hairline, as Survey's does. -->
-                    <Grid Margin="48,0,0,0">
-                    <!-- Survey's category portal suppresses itself while a rich-text editor
-                         is live and the formatting strip takes the sub-row instead
-                         (AppShell.jsx:1756-1772). -->
-                    <Border x:Name="EditorRichTextHost" HorizontalAlignment="Center" VerticalAlignment="Center"
-                            Visibility="Collapsed"/>
-                    <Border x:Name="EditorGroupToolsHost" HorizontalAlignment="Center" Visibility="Collapsed">
-                    <StackPanel x:Name="EditorGroupTools" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <StackPanel x:Name="DrawGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="FreehandToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Freehand" Checked="OnToolChecked" ToolTip="Pen"
-                                     AutomationProperties.Name="Pen"
-                                     AutomationProperties.HelpText="Draw a smoothed freehand line. Shortcut P."
-                                     Content="{StaticResource SurveyIcon.Pen}"/>
-                        <RadioButton x:Name="HighlighterToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Highlighter" Checked="OnToolChecked" ToolTip="Highlighter"
-                                     AutomationProperties.Name="Highlighter"
-                                     AutomationProperties.HelpText="Draw a translucent freehand highlight. Shortcut H."
-                                     Content="{StaticResource SurveyIcon.Highlighter}"/>
-                        <!-- Survey's eraser carries its mode menu INSIDE the button: a 12px
-                             #8d96a6 chevron offset +12px from centre opens a 142px popup with
-                             an "Eraser Type" header and the two modes
-                             (PDFViewer.jsx:32095-32135, 32150-32274). -->
-                        <Grid Margin="4,0">
-                            <RadioButton x:Name="EraserToolBtn" Style="{StaticResource StripToolButton}" GroupName="Tool"
-                                         Tag="Eraser" Checked="OnToolChecked" ToolTip="Partial erase"
-                                         AutomationProperties.Name="Partial erase"
-                                         AutomationProperties.HelpText="Partial erase subtracts from pen and highlighter ink and deletes any other annotation whole. Full stroke erase deletes every annotation the eraser hits. Shortcut E; Shift+E forces partial erase."
-                                         Content="{StaticResource SurveyIcon.Eraser}"/>
-                            <Button x:Name="EraserCaretBtn" Click="OnEraserCaretClick" Padding="2" Width="16" Height="16"
-                                    HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,0,0,0"
-                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                    Foreground="{StaticResource ChromeTextMutedBrush}"
-                                    ToolTip="Eraser type" AutomationProperties.Name="Eraser type">
-                                <Button.Template>
-                                    <ControlTemplate TargetType="Button">
-                                        <Border Background="Transparent" Padding="{TemplateBinding Padding}">
-                                            <ContentPresenter/>
-                                        </Border>
-                                    </ControlTemplate>
-                                </Button.Template>
-                                <Viewbox Width="12" Height="12"><ContentControl Content="{StaticResource SurveyIcon.ChevronDown}"/></Viewbox>
-                            </Button>
-                            <Popup x:Name="EraserModePopup" PlacementTarget="{Binding ElementName=EraserToolBtn}"
-                                   Placement="Bottom" VerticalOffset="6" StaysOpen="False" AllowsTransparency="True">
-                                <Border Style="{StaticResource PopoverCard}" MinWidth="142" Padding="4" Margin="0,0,36,36">
-                                    <StackPanel>
-                                        <TextBlock Text="ERASER TYPE" Padding="8,4" Margin="0,0,0,4"
-                                                   FontFamily="{StaticResource SurveyArialFont}" FontSize="{StaticResource TextMicro}" FontWeight="SemiBold"
-                                                   Foreground="{StaticResource ChromeTextMutedBrush}"/>
-                                        <Border Height="1" Background="{StaticResource ChromeHairlineBrush}" Margin="0,0,0,4"/>
-                                        <Button x:Name="EraserPartialItem" Style="{StaticResource ChromeMenuItem}" Tag="Partial"
-                                                Content="Partial erase" Click="OnEraserModeRowClick"
-                                                AutomationProperties.Name="Partial erase"/>
-                                        <Button x:Name="EraserFullItem" Style="{StaticResource ChromeMenuItem}" Tag="Full"
-                                                Content="Full stroke erase" Click="OnEraserModeRowClick"
-                                                AutomationProperties.Name="Full stroke erase"/>
-                                    </StackPanel>
-                                </Border>
-                            </Popup>
-                        </Grid>
-                    </StackPanel>
-                    <StackPanel x:Name="ShapeGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="RectangleToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Rectangle" Checked="OnToolChecked"
-                                     ToolTip="Rectangle" AutomationProperties.Name="Rectangle"
-                                     AutomationProperties.HelpText="Draw a rectangle. Fill and border are independent. Shortcut R."
-                                     Content="{StaticResource SurveyIcon.Rect}"/>
-                        <RadioButton x:Name="EllipseToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Ellipse" Checked="OnToolChecked" ToolTip="Ellipse"
-                                     AutomationProperties.Name="Ellipse" AutomationProperties.HelpText="Draw an ellipse."
-                                     Content="{StaticResource SurveyIcon.Ellipse}"/>
-                        <!-- Survey puts Polygon and Polyline between the closed shapes and the
-                             open ones (PDFViewer.jsx:34035-34045) because that is what they
-                             bridge. Both are CLICK-TO-PLACE, not drag-out: each click drops a
-                             vertex and the run is finished explicitly. -->
-                        <RadioButton x:Name="PolygonToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Polygon" Checked="OnToolChecked" ToolTip="Polygon"
-                                     AutomationProperties.Name="Polygon"
-                                     AutomationProperties.HelpText="Click to place each corner. Click the first corner, or press Enter, to close the shape. Escape cancels."
-                                     Content="{StaticResource SurveyIcon.Polygon}"/>
-                        <RadioButton x:Name="PolylineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Polyline" Checked="OnToolChecked" ToolTip="Polyline"
-                                     AutomationProperties.Name="Polyline"
-                                     AutomationProperties.HelpText="Click to place each point. Press Enter to finish the run open, or click the first point to close it into a polygon. Escape cancels."
-                                     Content="{StaticResource SurveyIcon.Polyline}"/>
-                        <RadioButton x:Name="LineToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Line" Checked="OnToolChecked" ToolTip="Line"
-                                     AutomationProperties.Name="Line" AutomationProperties.HelpText="Draw a straight line. Shortcut L."
-                                     Content="{StaticResource SurveyIcon.Line}"/>
-                        <RadioButton x:Name="ArrowToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Arrow" Checked="OnToolChecked" ToolTip="Arrow"
-                                     AutomationProperties.Name="Arrow" AutomationProperties.HelpText="Draw an arrow. Six Survey arrowheads. Shortcut A."
-                                     Content="{StaticResource SurveyIcon.Arrow}"/>
-                        <RadioButton x:Name="StepToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Step" Checked="OnToolChecked" ToolTip="Counter"
-                                     AutomationProperties.Name="Counter"
-                                     AutomationProperties.HelpText="Place sequential number or letter badges. Shortcut S."
-                                     Content="{StaticResource SurveyIcon.Counter}"/>
-                    </StackPanel>
-                    <StackPanel x:Name="TextGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="TextToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Text" Checked="OnToolChecked" ToolTip="Text"
-                                     AutomationProperties.Name="Text"
-                                     AutomationProperties.HelpText="Place styled text. Enter commits and Escape cancels. Shortcut T."
-                                     Content="{StaticResource SurveyIcon.TextBox}"/>
-                        <RadioButton x:Name="CalloutToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Callout" Checked="OnToolChecked" ToolTip="Callout"
-                                     AutomationProperties.Name="Callout"
-                                     AutomationProperties.HelpText="Drag from the arrow tip to the text box. Shortcut Q."
-                                     Content="{StaticResource SurveyIcon.Callout}"/>
-                    </StackPanel>
-                    <!-- Survey's Effects group. Its two separate Pixelate and Blur tools are
-                         gone: they are two of the four STYLES of the one re-editable redaction
-                         mark, which can be moved, resized and restyled after it is drawn. -->
-                    <StackPanel x:Name="EffectsGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="RedactToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Redact" Content="{StaticResource SurveyIcon.Pixelate}" Checked="OnToolChecked" ToolTip="Redact (X)"
-                                     AutomationProperties.Name="Redact"
-                                     AutomationProperties.HelpText="Cover a dragged region with a movable, re-styleable redaction. Shortcut X."/>
-                        <RadioButton x:Name="SpotlightToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Spotlight" Checked="OnToolChecked" ToolTip="Spotlight"
-                                     AutomationProperties.Name="Spotlight"
-                                     AutomationProperties.HelpText="Dim the image outside a dragged rectangular focus area."
-                                     Content="{StaticResource SurveyIcon.Spotlight}"/>
-                        <RadioButton x:Name="MagnifierToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Magnifier" Content="{StaticResource SurveyIcon.Magnifier}" Checked="OnToolChecked" ToolTip="Magnify (M)"
-                                     AutomationProperties.Name="Magnify"
-                                     AutomationProperties.HelpText="Drag a bubble that shows a piece of the picture blown up. Drag its ring to aim it somewhere else. Shortcut M."/>
-                    </StackPanel>
-
-                    <!-- The fifth group: the one-shot things that act on the IMAGE rather
-                         than adding a mark. Survey has no counterpart — its equivalents are
-                         scattered through the "more" menu — but a group is where a WinShot
-                         user already looks for a tool, and it keeps the top row from
-                         growing a second overflow. -->
-                    <StackPanel x:Name="ImageGroupPanel" Orientation="Horizontal" Visibility="Collapsed">
-                        <RadioButton x:Name="CropToolBtn" Style="{StaticResource StripToolButton}" Margin="4,0" GroupName="Tool"
-                                     Tag="Crop" Content="{StaticResource SurveyIcon.Crop}" Checked="OnToolChecked"
-                                     ToolTip="Crop &amp; resize (C)"
-                                     AutomationProperties.Name="Crop and resize"
-                                     AutomationProperties.HelpText="Crop the image. Rotate, flip and Image size live on the crop bar. Shortcut C."/>
-                        <Button x:Name="AddImageBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddImage}"
-                                Click="OnAddImage" ToolTip="Add screenshot or image… (I)"
-                                AutomationProperties.Name="Add screenshot or image"
-                                AutomationProperties.HelpText="Insert one or more local image files as movable annotations. Shortcut I."/>
-                        <Button x:Name="AddCaptureBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.AddCapture}"
-                                Click="OnAddCapture" ToolTip="Add capture…"
-                                AutomationProperties.Name="Add capture"
-                                AutomationProperties.HelpText="Hide the editor, take another region capture, and add it to this canvas."/>
-                        <Button x:Name="AddBackgroundBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Background}"
-                                Click="OnAddBackground" ToolTip="Add background (B)"
-                                AutomationProperties.Name="Add background"
-                                AutomationProperties.HelpText="Open the local background composer with the current edited image. Shortcut B."/>
-                        <Button x:Name="OcrRegionBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.ExtractText}"
-                                Click="OnExtractText" ToolTip="Extract text"
-                                AutomationProperties.Name="Extract text"
-                                AutomationProperties.HelpText="Read the text in the crop region, or the whole image, and copy it to the clipboard."/>
-                        <!-- Appears only once there is an added image to flip between. A
-                             before/after GIF of one frame is a PNG. -->
-                        <Button x:Name="ExportGifBtn" Style="{StaticResource CompactToolIconButton}" Margin="4,0" Content="{StaticResource SurveyIcon.Gif}"
-                                Click="OnExportGif" ToolTip="Export before/after GIF…"
-                                Visibility="Collapsed"
-                                AutomationProperties.Name="Export before and after GIF"
-                                AutomationProperties.HelpText="Save a two-frame animation flipping between the picture without the added images and with them."/>
-                    </StackPanel>
                     </StackPanel>
                     </Border>
                     </Grid>
@@ -1457,6 +1438,25 @@
                                 </StackPanel>
                             </Border>
                         </Popup>
+                        <!-- Survey's snapping switch (AppShell.jsx:5320-5334, SnappingToggle.jsx): the rail
+                             footer's magnet, bright while snapping is on, dim with a slash while it is off.
+                             Owner 2026-10-22 in Survey, Isaiah 2026-11-02 here: "need to be able to turn on
+                             snapping"; Shift+S alone was not findable. -->
+                        <Button x:Name="SnappingBtn" Style="{StaticResource RailButton}" Click="OnSnappingToggleClick"
+                                AutomationProperties.Name="Snapping"
+                                ToolTipService.Placement="Left" ToolTipService.HorizontalOffset="-8">
+                            <Viewbox Width="16" Height="16">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M5 3h5v9a2 2 0 0 0 4 0V3h5v9a7 7 0 0 1-14 0V3Z" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <Path Data="M5 7h5M14 7h5" StrokeThickness="1.5"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                    <Path x:Name="SnappingOffSlash" Data="M3 21 21 3" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Visibility="Collapsed"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
                     </StackPanel>
                 </Border>
             </Border>

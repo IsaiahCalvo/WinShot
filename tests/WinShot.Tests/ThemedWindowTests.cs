@@ -106,6 +106,17 @@ public class ThemedWindowTests
                 BackgroundFromEditorSmoke(editor);
                 editor.Close();
 
+                // App launch warms the editor off screen: it must leave no window behind.
+                int windowsBefore = app.Windows.Count;
+                EditorWindow.Prewarm(settings, history);
+                Assert.Equal(windowsBefore, app.Windows.Count);
+
+                var clickEditor = new EditorWindow(NewBitmap(), settings, history);
+                clickEditor.Show();
+                EditorEveryButtonClicksCleanly(clickEditor);
+                clickEditor.Close();
+                TextAndCalloutCloudBorderSmoke();
+
                 var composer = new BackgroundComposerWindow(NewBitmap(), settings, history);
                 composer.Show();
                 composer.Close();
@@ -120,6 +131,19 @@ public class ThemedWindowTests
             catch (Exception ex)
             {
                 failure = ex;
+            }
+            finally
+            {
+                // A smoke that fails part-way must not leave its windows on this thread: once
+                // the thread ends, the next message to one of those HWNDs kills the whole
+                // test host, and the real failure message is lost with it.
+                try
+                {
+                    foreach (Window w in Application.Current?.Windows.Cast<Window>().ToList() ?? new List<Window>())
+                        w.Close();
+                }
+                catch (Exception) { }
+                Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
         });
 
@@ -277,6 +301,35 @@ public class ThemedWindowTests
             list.SelectedItem = items[1];
             Assert.False(window.HandleKey(Key.C, ModifierKeys.Control));
             Assert.False(window.HandleKey(Key.C, ModifierKeys.None));
+
+            // Ctrl+A takes every tile (switching to selection mode to do it), and Escape then
+            // backs out of the selection rather than closing History with it.
+            Assert.True(window.HandleKey(Key.A, ModifierKeys.Control));
+            Assert.Equal(SelectionMode.Extended, list.SelectionMode);
+            Assert.Equal(items.Count, list.SelectedItems.Count);
+            Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.Equal(SelectionMode.Single, list.SelectionMode);
+            Assert.True(window.IsVisible, "Escape in selection mode should leave History open");
+
+            // Search narrows the grid by what a capture is called, where it came from and what
+            // kind it is; Escape clears it before it would close History.
+            // ApplySearch is called directly rather than waiting out the typing delay: pumping
+            // the dispatcher here lets the window's own on-show reload replace the fixtures.
+            var search = (TextBox)window.FindName("SearchBox");
+            var applySearch = typeof(HistoryWindow).GetMethod("ApplySearch", NP)!;
+            search.Text = "video";
+            applySearch.Invoke(window, null);
+            Assert.Equal(1, list.Items.Count);
+            Assert.Same(items[1], list.Items[0]);
+            Assert.True(window.HandleKey(Key.Escape, ModifierKeys.None));
+            Assert.Equal(string.Empty, search.Text);
+            Assert.Equal(items.Count, list.Items.Count);
+            Assert.True(window.IsVisible, "Escape with a search should clear it, not close History");
+            search.Text = "no-such-capture";
+            applySearch.Invoke(window, null);
+            Assert.Equal(0, list.Items.Count);
+            search.Clear();
+            Assert.Equal(items.Count, list.Items.Count);
 
             // Rotate, Rename, Print and Open-with are only on the tile's context menu, and that
             // menu hangs off the card inside the item template - so the Menu key, which looks up
@@ -1042,7 +1095,7 @@ public class ThemedWindowTests
         foreach (string name in new[]
         {
             "SelectToolBtn", "PanToolBtn", "RectangleToolBtn", "RedactToolBtn",
-            "SpotlightToolBtn", "MagnifierToolBtn", "CropToolBtn", "EyedropperToolBtn",
+            "SpotlightToolBtn", "MagnifierToolBtn", "EyedropperToolBtn",
         })
         {
             if (editor.FindName(name) is not RadioButton rb) continue;
@@ -1234,7 +1287,7 @@ public class ThemedWindowTests
             "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "EyedropperToolBtn",
-            "CropUtilityBtn", "CropToolBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
             "OcrRegionBtn", "ExportGifBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "SnapToEdgesCheck", "RedactTextOnlyCheck", "MagnifySlider",
@@ -1243,6 +1296,7 @@ public class ThemedWindowTests
             "FillNoneBtn", "FillQuarterBtn", "FillSolidBtn",
             "BtnSave", "BtnDone", "BtnPin", "BtnCopy", "BtnCenter",
             "BtnZoomIn", "BtnZoomOut", "FitMenuBtn", "FitPageItem", "FitWidthItem", "FitHeightItem",
+            "SnappingBtn",
         };
         foreach (string name in namedControls)
         {
@@ -1260,7 +1314,7 @@ public class ThemedWindowTests
             "RedactToolBtn", "SpotlightToolBtn", "MagnifierToolBtn",
             "StepToolBtn", "FreehandToolBtn", "HighlighterToolBtn", "EraserToolBtn",
             "EyedropperToolBtn",
-            "CropUtilityBtn", "CropToolBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
+            "CropUtilityBtn", "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn",
             "OcrRegionBtn", "ExportGifBtn",
             "RotateCcwBtn", "RotateCwBtn", "FlipHorizontalBtn", "FlipVerticalBtn", "ResizeImageBtn",
             "SnapToEdgesCheck", "RedactTextOnlyCheck",
@@ -1289,9 +1343,11 @@ public class ThemedWindowTests
 
         Assert.Null(editor.FindName("EditorStyleBar"));
         var groupBar = (Border)editor.FindName("EditorGroupBar")!;
-        // Survey PORTALS the 34px sub-row in only while a category is open
-        // (PDFViewer.jsx:32015) and OVERLAYS it on the canvas (AppShell.jsx:2727-2740).
-        var groupHost = (FrameworkElement)editor.FindName("EditorGroupToolsHost")!;
+        // Survey (RULED 2026-09-26 w44 "flip rows"): row 1 holds the group's TOOLS right of
+        // the chips; row 2 — the 34px band that OVERLAYS the canvas — holds the settings, and
+        // is only on screen when there are settings to show.
+        var groupHost = (FrameworkElement)editor.FindName("EditorFormatHost")!;
+        var formatRow = (FrameworkElement)editor.FindName("EditorFormatRow")!;
         var groupTools = (StackPanel)editor.FindName("EditorGroupTools")!;
         var colorBar = (StackPanel)editor.FindName("EditorColorBar")!;
         var formatBar = (StackPanel)editor.FindName("EditorFormatBar")!;
@@ -1309,7 +1365,7 @@ public class ThemedWindowTests
         var sizeInput = (TextBox)editor.FindName("SizeInput")!;
         var sizeField = (Border)editor.FindName("SizeField")!;
         var sizeHeading = (TextBlock)editor.FindName("SizePresetsHeading")!;
-        var sizePresets = (StackPanel)editor.FindName("SizePresetList")!;
+        var sizePresets = (Panel)editor.FindName("SizePresetList")!;
         var viewport = (Grid)editor.FindName("Viewport")!;
         var topToolbar = (Border)editor.FindName("TopToolbar")!;
         var secondary = (FrameworkElement)editor.FindName("SecondaryToolPanel")!;
@@ -1346,20 +1402,27 @@ public class ThemedWindowTests
         Assert.Equal(10d, divider.Margin.Left + select.Margin.Right);
         Assert.Equal(12d, divider.Margin.Right + panSelect.Margin.Right
             + ((Button)editor.FindName("DrawGroupBtn")!).Margin.Left);
-        Assert.True(IsLogicalDescendant(topToolbar, formatBar),
-            "Format chrome must sit on the primary row next to color and size, like Survey.");
+        Assert.True(IsLogicalDescendant(groupBar, formatBar),
+            "The settings sit in row 2, the band under the tool bar, like Survey (w44).");
+        Assert.True(IsLogicalDescendant(groupBar, secondary),
+            "Colour and width sit in row 2 with the rest of the settings.");
+        Assert.True(IsLogicalDescendant(topToolbar, groupTools),
+            "A group's tools sit in the tool bar right of the chips, like Survey (w44).");
         Assert.False(IsLogicalDescendant(topToolbar, groupBar),
-            "Group tools sit in a chrome strip over the canvas so they do not shrink the image.");
+            "Row 2 lies over the canvas so it does not shrink the image.");
         Assert.True(IsLogicalDescendant(topToolbar, undo), "Undo must live on the top toolbar, not over the image.");
-        Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
-            "Rotate must live next to Crop, not over the image.");
+        Assert.True(IsLogicalDescendant(groupBar, (DependencyObject)editor.FindName("RotateCcwBtn")!),
+            "Rotate is one of Crop's settings, so it sits in row 2 with them.");
         Assert.DoesNotContain(((Grid)viewport.Parent).Children.OfType<FrameworkElement>(),
             el => el.Name is "EditorStyleBar");
 
-        // The pointer tool has no controls of its own, so the sub-row disappears entirely.
+        // The pointer tool has no settings of its own, so row 2 disappears entirely, and
+        // row 1 shows Select's Box / Lasso modes where a group's tools go (Survey w46).
         ((RadioButton)editor.FindName("SelectToolBtn")!).IsChecked = true;
         editor.UpdateLayout();
         Assert.Equal(Visibility.Collapsed, groupHost.Visibility);
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("SelectModePanel")!).Visibility);
+        Assert.True(IsLogicalDescendant(topToolbar, (DependencyObject)editor.FindName("SelectModePanel")!));
         // No category open -> no band and no hairline at all: the top bar butts straight
         // onto the canvas, which is why both are #181c24 in Survey.
         Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
@@ -1384,34 +1447,31 @@ public class ThemedWindowTests
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupHost.Visibility);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
-        // AppShell.jsx:1637-1641: the chip is a TOGGLE — clicking the ACTIVE category
-        // closes the sub-row and leaves the tool alone; the derive-from-tool effect
-        // (PDFViewer.jsx:4535-4555) does not re-open it because the tool never changed.
+        // Survey (UX 2026-09-22): a second click on the LIT chip is a no-op. While one of a
+        // group's tools is armed its tools stay on screen, so the armed tool is never live
+        // and unseeable; Pan, Select or Escape is how it is put down.
         var shapeChip = (Button)editor.FindName("ShapeGroupBtn")!;
-        shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        editor.UpdateLayout();
-        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
-        Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
-        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
-            "Opening or closing the sub-row must not resize the canvas — it overlays it.");
         shapeChip.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         editor.UpdateLayout();
         PackEditorFormat(editor);
         Assert.Equal(Visibility.Visible, groupBar.Visibility);
-        // Survey's sub-row centres on the WINDOW, not on the canvas column: the strip is
-        // justifyContent:'center' (PDFViewer.jsx:32026) inside a centre column that is
-        // symmetric because BOTH rails are 48px (AppShell.jsx:2692/:2841), so it lands on
-        // the same x as the top bar's centred cluster (AppShell.jsx:1344) and the sub-row
-        // tools sit under the chip that opened them. WinShot has only the right rail, so
-        // the sub-row host carries a 48px left margin to restore that symmetry — which
-        // means the strip is NOT centred in its own bar; it is centred on the chips.
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
+        Assert.True(((RadioButton)editor.FindName("ArrowToolBtn")!).IsChecked);
+        Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
+            "Row 2 coming and going must not resize the canvas — it overlays it.");
+        // Row 1: the group's tools hang off the chips' right edge, so the chips never move.
         double arrowToolsW = groupTools.ActualWidth;
-        double arrowToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X
-            + arrowToolsW / 2;
+        double chipsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor).X;
+        Assert.True(groupTools.TranslatePoint(new Point(0, 0), editor).X >= chipsRight - 0.5,
+            "The group's tools must sit right of the chips, not over them.");
+        // Row 2 is centred under the chips (Survey w48 "rows 2/3 centred"). WinShot has only
+        // the right rail, so the band's host carries a 48px left margin to put its centre on
+        // the window's centre, where the chips are.
         double chipsCentre = primary.TranslatePoint(new Point(0, 0), editor).X
             + primary.ActualWidth / 2;
-        Assert.True(Math.Abs(arrowToolsCentre - chipsCentre) < 1,
-            $"Shape sub-row is not under the chips that opened it: sub-row={arrowToolsCentre:0.##} chips={chipsCentre:0.##}");
+        double arrowRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
+        Assert.True(Math.Abs(arrowRowCentre - chipsCentre) < 1,
+            $"Row 2 is not centred under the chips: row={arrowRowCentre:0.##} chips={chipsCentre:0.##}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Arrow vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
         Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("ShapeGroupPanel")!).Visibility);
@@ -1426,11 +1486,11 @@ public class ThemedWindowTests
         Assert.Equal("WIDTH", sizeHeading.Text);
 
         Assert.Null(editor.FindName("EraserPartialBtn"));
-        // Survey keeps eraser mode in the tool's OWN split menu inside the Draw sub-row
-        // (PDFViewer.jsx:32095-32135), not in a top-row combo.
+        // Survey PASS 7 (board 13): the eraser's kind is a Partial / Whole toggle in row 2,
+        // not a combo and not a chevron menu inside the eraser button.
         Assert.Null(editor.FindName("EraserModeBox"));
-        Assert.NotNull(editor.FindName("EraserModePopup"));
-        Assert.NotNull(editor.FindName("EraserCaretBtn"));
+        Assert.Null(editor.FindName("EraserCaretBtn"));
+        Assert.Null(editor.FindName("EraserModePopup"));
         typeof(EditorWindow).GetMethod("FitEditorCombos",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .Invoke(editor, null);
@@ -1501,18 +1561,21 @@ public class ThemedWindowTests
         Assert.Equal(Visibility.Collapsed, fontSizeBox.Visibility);
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, thickness.Visibility);
-        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
-        // Same rule as the Shape sub-row above: centred on the top bar's chips, not on the bar.
+        // Survey's Style pill sits on the text tool and styles the box border (AppShell.jsx
+        // 'style' slot lists contextTool 'text').
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("LineStylePanel")!).Visibility);
+        // Same rule as the Shape row above: row 2 centred under the chips.
         double textToolsW = groupTools.ActualWidth;
-        double textToolsCentre = groupTools.TranslatePoint(new Point(0, 0), editor).X + textToolsW / 2;
-        Assert.True(Math.Abs(textToolsCentre - chipsCentre) < 1,
-            $"Text sub-row is not under the chips that opened it: sub-row={textToolsCentre:0.##} chips={chipsCentre:0.##}");
+        double textRowCentre = formatRow.TranslatePoint(new Point(0, 0), editor).X + formatRow.ActualWidth / 2;
+        Assert.True(Math.Abs(textRowCentre - chipsCentre) < 1,
+            $"Text row 2 is not centred under the chips: row={textRowCentre:0.##} chips={chipsCentre:0.##}");
         Assert.True(textToolsW < arrowToolsW - 8,
             $"Text group still occupies the Shapes-width blank slot: text={textToolsW:0} shapes={arrowToolsW:0}");
         var well = (FrameworkElement)editor.FindName("ColorWellBtn")!;
         Point wellOrigin = well.TranslatePoint(new Point(0, 0), editor);
         Point sizeOrigin = sizeField.TranslatePoint(new Point(0, 0), editor);
-        Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 16,
+        // Survey's rule between the colour and the width sits in this gap (showsColourRule).
+        Assert.True(sizeOrigin.X - (wellOrigin.X + well.ActualWidth) < 24,
             $"Color well and size field have a gap: wellRight={wellOrigin.X + well.ActualWidth:0} size={sizeOrigin.X:0}");
         Assert.True(Math.Abs(viewport.ActualHeight - viewportHSelect) < 0.5,
             $"Viewport shrank Text vs Select: {viewportHSelect:0.##} → {viewport.ActualHeight:0.##}");
@@ -1566,7 +1629,8 @@ public class ThemedWindowTests
         Point doneOrigin = done.TranslatePoint(new Point(0, 0), editor);
         Assert.True(doneOrigin.X + done.ActualWidth <= editor.ActualWidth + 0.5,
             $"Done overflows the window: done={doneOrigin.X}+{done.ActualWidth} win={editor.ActualWidth}");
-        Assert.Equal(Visibility.Visible, overflowBtn.Visibility);
+        // Row 2 has the whole band to itself, so the callout's settings may well all fit; if
+        // anything did go into "...", it is never the B / I / U / S letters.
         Assert.DoesNotContain(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name is "TextFormatButtons" or "BoldBtn");
         Assert.True(IsLogicalDescendant(formatBar, textButtons));
@@ -1592,12 +1656,12 @@ public class ThemedWindowTests
         // annotation is merely selected (AppShell.jsx:1756 gates on bottomToolbarApi.richTextEditor).
         Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextStylePanel")!).Visibility);
         Assert.Equal(Visibility.Visible, color.Visibility);
-        // The 34px category strip follows the ARMED tool only: `activeCategoryDropdown` starts
-        // null and is force-cleared whenever activeTool becomes pan/select/text-select
-        // (PDFViewer.jsx:4340, :4558-4568) — selecting a committed mark never re-opens it. The
-        // format chrome above still follows the selection (contextTool), hence color stays up.
-        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
-        Assert.Equal(Visibility.Collapsed, groupBar.Visibility);
+        // Survey toolbarRows.js: in Select mode a picked mark brings ITS group's tools into
+        // row 1 and its settings into row 2, so a picked text box reads Text / Callout up top
+        // and its colour and width below. Box / Lasso give way to them.
+        Assert.Equal(Visibility.Visible, ((StackPanel)editor.FindName("TextGroupPanel")!).Visibility);
+        Assert.Equal(Visibility.Collapsed, ((StackPanel)editor.FindName("SelectModePanel")!).Visibility);
+        Assert.Equal(Visibility.Visible, groupBar.Visibility);
         // No category chip is gold under Select either (AppShell.jsx:1647/1666/1685/1719).
         Assert.Equal(
             ((SolidColorBrush)editor.FindResource("ChromeTextBrush")).Color,
@@ -1673,9 +1737,6 @@ public class ThemedWindowTests
             $"Apply crop runs off the top bar: apply={applyOrigin.X}+{applyCrop.ActualWidth} save={cropSave.X}");
         Assert.Contains(overflowPanel.Children.OfType<FrameworkElement>(),
             el => el.Name == "CropCancelBtn");
-        Point toolsRight = primary.TranslatePoint(new Point(primary.ActualWidth, 0), editor);
-        Assert.True(applyOrigin.X + 0.5 >= toolsRight.X - 8,
-            $"Apply crop covers tools: apply={applyOrigin.X:0} toolsRight={toolsRight.X:0}");
 
         // A group chip opens its own strip and arms that strip's first tool; Image is the
         // one that arms nothing, so clicking it cannot drop the user into a crop.
@@ -1859,9 +1920,13 @@ public class ThemedWindowTests
         {
             // The narrowest real case: a 1920x1080 display at 200 % is 960 DIP.
             editor.MinWidth = 400;
-            editor.Width = 700;
+            // Survey's leaner rows (90 px arrowhead pill, no counter Mode / Reset) fit far
+            // more at 700 DIP than they used to, so the narrower pass is what reaches the
+            // packing case.
+            foreach (double rowWidth in new[] { 700.0, 520.0 })
             foreach (EditorTool tool in Enum.GetValues<EditorTool>())
             {
+                editor.Width = rowWidth;
                 check.Invoke(editor, new object[] { tool });
                 editor.UpdateLayout();
                 PackEditorFormat(editor);
@@ -1880,7 +1945,7 @@ public class ThemedWindowTests
 
             // Otherwise the assertion above is true of a row that always fits, and the case
             // this method exists for was never reached.
-            Assert.True(overflowed > 0, "no tool overflowed a 700 DIP row, so nothing was tested.");
+            Assert.True(overflowed > 0, "no tool overflowed a 700 or 520 DIP row, so nothing was tested.");
         }
         finally
         {
@@ -2239,8 +2304,6 @@ public class ThemedWindowTests
     /// </summary>
     private static void EditorGrowLandsOnItsTargetSmoke(SettingsService settings, HistoryService history)
     {
-        const System.Reflection.BindingFlags NS =
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
 
         var animations = Motion.AnimationsEnabled;
         Motion.AnimationsEnabled = () => false; // the tween applies its end frame inline
@@ -2256,10 +2319,12 @@ public class ThemedWindowTests
 
             double scale = RecordingMonitorDpi.ScaleFor(origin);
             SD.Rectangle work = WF.Screen.FromRectangle(origin).WorkingArea;
-            double wantW = (double)typeof(EditorWindow).GetField("DefaultWidthDip", NS)!.GetRawConstantValue()!;
-            double wantH = (double)typeof(EditorWindow).GetField("DefaultHeightDip", NS)!.GetRawConstantValue()!;
+            // The editor asks for a size that wraps its capture (DesiredWindowDip), not a fixed one.
+            var want = (Size)typeof(EditorWindow).GetMethod("DesiredWindowDip",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(editor, null)!;
             SD.Rectangle target = EditorGrowLayout.Target(
-                work, new Size(wantW, wantH), scale, new Size(minWidth, minHeight));
+                work, want, scale, new Size(minWidth, minHeight));
 
             GetWindowRect(new System.Windows.Interop.WindowInteropHelper(editor).Handle, out RECT r);
             var landed = new SD.Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
@@ -2668,6 +2733,170 @@ public class ThemedWindowTests
         PumpDispatcherOnce();
         window.RestoreSectionDefaults(1);
         Assert.Equal(new Settings().HotkeyCaptureRegion, settings.Current.HotkeyCaptureRegion);
+    }
+
+    /// <summary>
+    /// "Every button works": presses every button, toggle and radio in the editor (the
+    /// tool rows, sub-toolbars, format bar, colour picker, fit menu, popups) the way a
+    /// mouse click does, and fails on the first one whose handler throws, either right
+    /// away or on the dispatcher afterwards. Buttons that open a file dialog, a modal
+    /// window, the clipboard, OCR or close the editor are left out; their own smokes
+    /// cover them.
+    /// </summary>
+    private static void EditorEveryButtonClicksCleanly(EditorWindow editor)
+    {
+        var skip = new HashSet<string>
+        {
+            "BtnSave", "BtnDone", "BtnDragOut", "BtnPin", "BtnCopy",
+            "AddImageBtn", "AddCaptureBtn", "AddBackgroundBtn", "ExportGifBtn",
+            "ResizeImageBtn", "OcrRegionBtn",
+        };
+        var buttons = new List<ButtonBase>();
+        var popups = new List<Popup>();
+        void Walk(object node)
+        {
+            if (node is ButtonBase b) buttons.Add(b);
+            if (node is Popup p) popups.Add(p);
+            if (node is DependencyObject d)
+                foreach (object child in LogicalTreeHelper.GetChildren(d)) Walk(child);
+        }
+        Walk(editor);
+
+        // A keyboard user tabbing the toolbar must see where they are. WPF's fallback focus
+        // visual is a dotted black box, which on the dark chrome is nothing at all.
+        var systemFocus = editor.TryFindResource(SystemParameters.FocusVisualStyleKey) as Style;
+        var noRing = buttons
+            .Where(b => b.Focusable && (b.FocusVisualStyle is null || ReferenceEquals(b.FocusVisualStyle, systemFocus)))
+            // A template with its own FocusRing part draws the ring itself.
+            .Where(b => !(b.FocusVisualStyle is null && b.ApplyTemplate() is var _ && b.Template?.FindName("FocusRing", b) is not null))
+            .Select(b => string.IsNullOrEmpty(b.Name) ? $"{b.GetType().Name}[{b.Style?.GetHashCode()}] '{b.ToolTip ?? b.Content}'" : b.Name)
+            .ToList();
+        Assert.True(noRing.Count == 0, "No keyboard focus ring: " + string.Join(", ", noRing));
+
+        var sourcesBefore = PresentationSource.CurrentSources.Cast<PresentationSource>().ToHashSet();
+        for (int i = 0; i < 4; i++) PumpDispatcherOnce();
+
+        Exception? late = null;
+        void OnUnhandled(object s, DispatcherUnhandledExceptionEventArgs e)
+        {
+            late ??= e.Exception;
+            e.Handled = true;
+        }
+        var onClick = typeof(ButtonBase).GetMethod("OnClick",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        editor.Dispatcher.UnhandledException += OnUnhandled;
+        var snappingOn = typeof(EditorWindow).GetProperty("SnappingOn",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        bool snapBefore = (bool)snappingOn.GetValue(editor)!;
+        int pressed = 0;
+        try
+        {
+            foreach (var button in buttons)
+            {
+                string label = string.IsNullOrEmpty(button.Name)
+                    ? $"{button.GetType().Name} '{button.ToolTip ?? button.Content}'"
+                    : button.Name;
+                if (skip.Contains(button.Name)) continue;
+                try
+                {
+                    onClick.Invoke(button, null);
+                    PumpDispatcherOnce();
+                }
+                catch (System.Reflection.TargetInvocationException ex)
+                {
+                    throw new Xunit.Sdk.XunitException($"pressing {label} threw: {ex.InnerException}");
+                }
+                if (late is not null)
+                    throw new Xunit.Sdk.XunitException($"pressing {label} threw later: {late}");
+                pressed++;
+            }
+            // The fit items persist the chosen fit mode in settings, and Fit height was the
+            // last one pressed. Put Fit page back so the editors opened after this one start
+            // the way a user's would.
+            onClick.Invoke((ButtonBase)editor.FindName("FitPageItem")!, null);
+            PumpDispatcherOnce();
+            // The rail's snapping switch flips a saved setting; one press must flip it, and a
+            // second puts it back for the editors that follow.
+            Assert.NotEqual(snapBefore, (bool)snappingOn.GetValue(editor)!);
+            onClick.Invoke((ButtonBase)editor.FindName("SnappingBtn")!, null);
+            PumpDispatcherOnce();
+            Assert.Equal(snapBefore, (bool)snappingOn.GetValue(editor)!);
+        }
+        finally
+        {
+            editor.Dispatcher.UnhandledException -= OnUnhandled;
+            // Leave nothing behind: a popup or window still open when this STA thread ends
+            // keeps an HWND whose next message lands on a dead dispatcher and kills the
+            // test host at shutdown.
+            // Rotate / flip / crop finish on a worker and come back to this dispatcher; let
+            // them land before the window goes.
+            var busy = typeof(EditorWindow).GetField("_sourceOperationActive",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            for (int i = 0; i < 400 && (bool)busy.GetValue(editor)!; i++)
+            {
+                PumpDispatcherOnce();
+                Thread.Sleep(10);
+            }
+            foreach (var popup in popups) popup.IsOpen = false;
+            foreach (Window owned in editor.OwnedWindows.Cast<Window>().ToList()) owned.Close();
+            PumpDispatcherOnce();
+            foreach (var source in PresentationSource.CurrentSources.Cast<PresentationSource>().ToList())
+            {
+                if (sourcesBefore.Contains(source) || source.IsDisposed) continue;
+                if (source.RootVisual is Window w)
+                {
+                    if (!ReferenceEquals(w, editor)) w.Close();
+                }
+                else if (source is System.Windows.Interop.HwndSource hwnd)
+                {
+                    hwnd.Dispose();
+                }
+            }
+            for (int i = 0; i < 4; i++) PumpDispatcherOnce();
+        }
+        Assert.True(pressed > 60, $"only {pressed} editor buttons found to press");
+    }
+
+    /// <summary>
+    /// Survey w43: a text box and a callout box take a Cloud border. The box keeps its fill
+    /// and its whole-box hit area, a scalloped path draws the edge and follows a resize, and
+    /// a callout's leader stays a straight line.
+    /// </summary>
+    private static void TextAndCalloutCloudBorderSmoke()
+    {
+        var red = new SolidColorBrush(Colors.Red);
+        var label = (Grid)AnnotationFactory.CreateStyledTextLabel(
+            "Cloud", Brushes.Black, 16, TextStyle.Plain, AnnotationFactory.DefaultTextFontFamily,
+            false, false, false, false, TextAlignment.Left, "top", 200, 60,
+            Colors.Transparent, 2, LineBorderStyle.Cloud, red);
+        var chrome = label.Children.OfType<System.Windows.Shapes.Rectangle>().Single();
+        var cloud = label.Children.OfType<System.Windows.Shapes.Path>().Single();
+        Assert.Equal(Colors.Transparent, ((SolidColorBrush)chrome.Stroke).Color);
+        Assert.Same(red, cloud.Stroke);
+        Assert.Equal(2, cloud.StrokeThickness);
+        Rect first = cloud.Data.Bounds;
+        Assert.True(first.Width > 150 && first.Width <= 200.5, $"cloud does not fit the box: {first}");
+        Assert.IsType<TextBlock>(label.Children[label.Children.Count - 1]);
+
+        label.Width = 320;
+        label.Measure(new Size(320, 60));
+        label.Arrange(new Rect(0, 0, 320, 60));
+        label.UpdateLayout();
+        Assert.True(cloud.Data.Bounds.Width > first.Width + 80, $"cloud did not follow the resize: {cloud.Data.Bounds}");
+
+        AnnotationFactory.SyncTextCloud(label, cloud: false, AnnotationFactory.DefaultTextCloudIntensity);
+        Assert.Empty(label.Children.OfType<System.Windows.Shapes.Path>());
+        Assert.Same(red, chrome.Stroke);
+
+        var layout = CalloutLayout.FromDrag(new Point(0, 0), new Point(120, 80), descender: 4);
+        var callout = AnnotationFactory.CreateCallout(layout, "Note", Colors.Blue, Colors.Transparent, 2,
+            ArrowheadStyle.SolidTriangle, LineBorderStyle.Cloud, 14);
+        var paths = callout.Children.OfType<System.Windows.Shapes.Path>()
+            .Where(p => p.Visibility == Visibility.Visible && p.Data is { } d && !d.IsEmpty() && p.Stroke is SolidColorBrush { Color.A: > 0 })
+            .ToList();
+        Assert.Equal(Colors.Transparent, ((SolidColorBrush)callout.Box.Stroke).Color);
+        Assert.Contains(paths, p => p.StrokeDashArray is null or { Count: 0 } && p.Data.Bounds.Width >= layout.Box.Width * 0.75
+            && Math.Abs(Canvas.GetLeft(p) - layout.Box.X) < 0.5 && Math.Abs(Canvas.GetTop(p) - layout.Box.Y) < 0.5);
     }
 
     private static void PumpDispatcherOnce()

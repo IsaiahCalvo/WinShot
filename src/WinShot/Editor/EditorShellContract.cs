@@ -110,12 +110,16 @@ internal static class EditorShellContract
         EditorToolCategory.Shapes => new[]
         {
             // Survey's order (PDFViewer.jsx:34035-34045): Polygon and Polyline sit between
-            // the closed shapes and the open ones because that is what they bridge.
-            "Rectangle", "Ellipse", "Polygon", "Polyline", "Line", "Arrow", "Step",
+            // the closed shapes and the open ones because that is what they bridge. Cloud is
+            // Rectangle with the cloud border (Drawboard Shape > Cloud), a second button for
+            // the Rectangle tool, right after Polygon as Survey has it.
+            "Rectangle", "Ellipse", "Polygon", "Cloud", "Polyline", "Line", "Arrow", "Step",
         },
         EditorToolCategory.Text => new[] { "Text", "Callout" },
         EditorToolCategory.Redact => new[] { "Redact", "Spotlight", "Magnifier" },
-        EditorToolCategory.Image => new[] { "Crop" },
+        // The Image row holds one-shot actions (add image, add capture, background, OCR,
+        // GIF), not tools. Crop is the single crop button in the top bar, beside Undo.
+        EditorToolCategory.Image => Array.Empty<string>(),
         _ => Array.Empty<string>(),
     };
 
@@ -288,22 +292,24 @@ internal static class EditorShellContract
             EditorContextControls.CloudBump,
         EditorTool.Freehand or EditorTool.Highlighter =>
             EditorContextControls.Color | EditorContextControls.Thickness | EditorContextControls.Opacity,
-        // The curved arrow wears the straight arrow's controls, style menu included: Curved
-        // is a ROW of that menu, so hiding the menu while a curved arrow is armed would take
-        // away the only control that can turn it back into a straight one.
+        // A curved arrow (older projects only; the tool is no longer offered) wears the
+        // straight arrow's controls.
         EditorTool.Arrow or EditorTool.CurvedArrow =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
             EditorContextControls.LineStyle,
+        // Survey's 'style' slot includes the text box (AppShell.jsx: contextTool === 'text'):
+        // it styles the box border.
         EditorTool.Text =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.TextStyle | EditorContextControls.Opacity |
-            EditorContextControls.FillStrokeTabs,
+            EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
+            EditorContextControls.CloudBump, // w43: the box border can be a cloud
         EditorTool.Callout =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.ArrowStyle | EditorContextControls.Opacity |
             EditorContextControls.FillStrokeTabs | EditorContextControls.LineStyle |
-            EditorContextControls.TextStyle,
+            EditorContextControls.TextStyle | EditorContextControls.CloudBump,
         EditorTool.Step =>
             EditorContextControls.Color | EditorContextControls.Thickness |
             EditorContextControls.StepMode | EditorContextControls.Opacity,
