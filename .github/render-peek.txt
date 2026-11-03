@@ -1,7 +1,4 @@
 # Frames to print into the render-evidence log (paths under render-out).
 # "path" prints the whole frame; "path x y w h [cols]" crops that box first.
-winforms-audit\toast-success-96.png
-winforms-audit\toast-action-96.png
-winforms-audit\recording-bar-96.png
-winforms-audit\countdown-3-96.png
-winforms-audit\pin-chrome-hover-96.png
+out\dark-idle.png
+out\dark-hover.png

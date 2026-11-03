@@ -1232,6 +1232,8 @@ public sealed class FastQuickActionsWindow : WF.Form
             using var clip = GdiPaths.RoundedRect(_cardRect, _cornerRadius);
             using var attributes = new ImageAttributes();
             attributes.SetColorMatrix(new ColorMatrix { Matrix33 = (float)Math.Clamp(alpha, 0d, 1d) });
+            // Same reason as CreateBlurred: without it the edge pixels fade toward clear.
+            attributes.SetWrapMode(WrapMode.TileFlipXY);
             GraphicsState state = g.Save();
             try
             {
@@ -2880,16 +2882,24 @@ public sealed class FastQuickActionsWindow : WF.Form
     }
 
     /// <summary>Cheap frosted blur: downscale to ~1/12 then upscale with bilinear smoothing.</summary>
-    private static SD.Bitmap CreateBlurred(SD.Bitmap src)
+    /// <remarks>
+    /// Both passes mirror the image at its edges. GDI+ blends a resampled image's outer pixels
+    /// with transparent by default, and blown back up twelve times that half-pixel became a
+    /// band about six pixels wide that let the dark card fill through, so hovering drew a
+    /// heavy dark border around the capture that the sharp card does not have.
+    /// </remarks>
+    internal static SD.Bitmap CreateBlurred(SD.Bitmap src)
     {
         int dw = Math.Max(1, src.Width / 12);
         int dh = Math.Max(1, src.Height / 12);
+        using var mirror = new ImageAttributes();
+        mirror.SetWrapMode(WrapMode.TileFlipXY);
         using var small = new SD.Bitmap(dw, dh, PixelFormat.Format32bppPArgb);
         using (var g = SD.Graphics.FromImage(small))
         {
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(src, new SD.Rectangle(0, 0, dw, dh));
+            g.DrawImage(src, new SD.Rectangle(0, 0, dw, dh), 0, 0, src.Width, src.Height, SD.GraphicsUnit.Pixel, mirror);
         }
 
         var blurred = new SD.Bitmap(src.Width, src.Height, PixelFormat.Format32bppPArgb);
@@ -2897,7 +2907,7 @@ public sealed class FastQuickActionsWindow : WF.Form
         {
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(small, new SD.Rectangle(0, 0, src.Width, src.Height));
+            g.DrawImage(small, new SD.Rectangle(0, 0, src.Width, src.Height), 0, 0, dw, dh, SD.GraphicsUnit.Pixel, mirror);
         }
         return blurred;
     }
