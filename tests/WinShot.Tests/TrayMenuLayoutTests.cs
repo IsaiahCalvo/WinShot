@@ -59,6 +59,26 @@ public class TrayMenuLayoutTests
     }
 
     [Fact]
+    public void CaptureAndRecordRowsKeepTheirGlyphs()
+    {
+        WinShot.App.TrayMenuParts parts = WinShot.App.BuildTrayMenu(new Settings(), _ => () => { });
+        using WF.ContextMenuStrip menu = parts.Menu;
+
+        // Groups after the version header: 1 is the captures, 2 is record/OCR/scrolling.
+        var missing = new List<string>();
+        int group = 0;
+        foreach (WF.ToolStripItem item in menu.Items)
+        {
+            if (item is WF.ToolStripSeparator) { group++; continue; }
+            if (group is not (1 or 2) || item is not WF.ToolStripMenuItem row) continue;
+            if (row.Tag is not string { Length: > 0 }) missing.Add(row.Text ?? "");
+            foreach (WF.ToolStripItem sub in row.DropDownItems)
+                if (sub.Tag is not string { Length: > 0 }) missing.Add(sub.Text ?? "");
+        }
+        Assert.True(missing.Count == 0, "capture rows with no glyph: " + string.Join(", ", missing));
+    }
+
+    [Fact]
     public void RarerVerbsSitOneLevelDown()
     {
         var settings = new Settings { HotkeyPinLast = "Ctrl+Shift+P" };

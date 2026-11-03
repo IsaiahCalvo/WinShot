@@ -34,7 +34,7 @@ public class GlyphLiteralTests
     public void EveryTrayCaptureVerbHasAGlyph()
     {
         string app = File.ReadAllText(Path.Combine(TestPaths.RepoRoot(), "src", "WinShot", "App.xaml.cs"));
-        var emptied = Regex.Matches(app, @"MenuItem\(""(?<name>[^""]+)""[^\n]*, """"\)\);")
+        var emptied = Regex.Matches(app, @"(?:MenuItem|Row)\(""(?<name>[^""]+)""[^\n]*, """"\)\)?;")
             .Select(m => m.Groups["name"].Value)
             .ToList();
         Assert.True(emptied.Count == 0, "tray rows with an empty glyph: " + string.Join(", ", emptied));
