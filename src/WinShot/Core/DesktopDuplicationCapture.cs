@@ -76,6 +76,7 @@ internal static class DesktopDuplicationCapture
         // inside a native call for a long time, and blocking here would stall the hotkey.
         if (!Monitor.TryEnter(Gate))
             return false;
+        bool rebuild = false;
         try
         {
             if (!HasWarmDisplaysFor(screenRect))
@@ -83,6 +84,16 @@ internal static class DesktopDuplicationCapture
 
             bitmap = CaptureRegionCore(screenRect);
             return true;
+        }
+        catch (DuplicationLostException ex)
+        {
+            // Building a device costs ~150 ms, too long to spend here on the hotkey's
+            // thread. This open takes the deferred path, and the rebuild runs behind it.
+            Log.Info($"{ex.Message} Rebuilding it; this capture opens deferred.");
+            Reset();
+            bitmap = null;
+            rebuild = true;
+            return false;
         }
         catch (Exception ex)
         {
@@ -97,6 +108,8 @@ internal static class DesktopDuplicationCapture
         finally
         {
             Monitor.Exit(Gate);
+            if (rebuild)
+                StartBackgroundProbe(screenRect);
         }
     }
 
@@ -106,6 +119,17 @@ internal static class DesktopDuplicationCapture
     /// self-throttles, so repeat calls are free.
     /// </summary>
     public static void Prewarm(Rectangle screenRect) => StartBackgroundProbe(screenRect);
+
+    /// <summary>
+    /// Drops the devices and builds them again off the user path. For the moments Windows is
+    /// known to take duplication away (display change, unlock, resume): probing the old
+    /// devices then only re-read their last copies, so the rebuild never happened.
+    /// </summary>
+    public static void Rebuild(Rectangle screenRect, int waitMs = 1000)
+    {
+        ReleaseResources(waitMs);
+        StartBackgroundProbe(screenRect);
+    }
 
     /// <summary>True when every display overlapping <paramref name="screenRect"/> already has
     /// a cached duplication whose bounds still match. Caller holds <see cref="Gate"/>.</summary>
@@ -230,8 +254,18 @@ internal static class DesktopDuplicationCapture
         {
             try
             {
-                Bitmap bitmap = CaptureRegionCore(screenRect);
-                return bitmap;
+                try
+                {
+                    return CaptureRegionCore(screenRect);
+                }
+                catch (DuplicationLostException ex)
+                {
+                    // Rebuild and go again once: a fresh duplication of the same screen
+                    // has a real frame, where the lost one only had an old copy.
+                    Log.Info($"{ex.Message} Rebuilding it and capturing again.");
+                    Reset();
+                    return CaptureRegionCore(screenRect);
+                }
             }
             catch (Exception ex)
             {
@@ -278,6 +312,13 @@ internal static class DesktopDuplicationCapture
 
     private static void DisableTemporarily(int cooldownMs) =>
         Interlocked.Exchange(ref _disabledUntilTick, Environment.TickCount64 + cooldownMs);
+
+    /// <summary>
+    /// Whether a failed AcquireNextFrame leaves the frame already held still true. Only a
+    /// wait timeout does: the screen simply has not changed. Every other failure means this
+    /// duplication will never deliver again and must be rebuilt.
+    /// </summary>
+    internal static bool KeepsLastFrame(uint hresult) => hresult == DxgiErrorWaitTimeout;
 
     private static bool IsWaitTimeout(Exception ex) =>
         unchecked((uint)ex.HResult) == DxgiErrorWaitTimeout ||
@@ -375,9 +416,12 @@ internal static class DesktopDuplicationCapture
         private readonly int _height;
         private bool _hasFrame;
 
+        private readonly string _deviceName;
+
         public DisplayCapture(WF.Screen screen)
         {
             ScreenBounds = screen.Bounds;
+            _deviceName = screen.DeviceName;
 
             D3D11CreateDevice(
                 null!,
@@ -484,6 +528,14 @@ internal static class DesktopDuplicationCapture
 
                 if (result.Failure)
                 {
+                    // Only "nothing new since the last frame" keeps the copy we already hold.
+                    // Anything else means Windows took this screen's duplication away (a mode
+                    // or refresh-rate switch, sleep, the lock screen, a full-screen app), and
+                    // no frame will ever arrive on it again. Keeping the old copy then served
+                    // that screen's last picture for every capture after it: a desktop from
+                    // hours ago, with no Start menu or open windows in it.
+                    if (!KeepsLastFrame(unchecked((uint)result.Code)))
+                        throw new DuplicationLostException(screenName: _deviceName, unchecked((uint)result.Code));
                     if (_hasFrame)
                         return;
                     result.CheckError();
@@ -523,6 +575,19 @@ internal static class DesktopDuplicationCapture
             _duplication.Dispose();
             _context.Dispose();
             _device.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A screen's duplication is gone for good and has to be built again. Not a failure of
+    /// duplication as such, so it does not start a cooldown.
+    /// </summary>
+    internal sealed class DuplicationLostException : Exception
+    {
+        public DuplicationLostException(string screenName, uint hresult)
+            : base($"Desktop duplication for {screenName} was lost (0x{hresult:X8}).")
+        {
+            HResult = unchecked((int)hresult);
         }
     }
 

@@ -207,6 +207,9 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             PrewarmDimmedSlices();
         SelectorFreeze.Unpark(this, _panes, entry);
 
+        // Focus waits for a deferred frame, so the Start menu or an open menu is still on
+        // screen when it is grabbed — see SelectorFreeze.HoldFocusMaxMs.
+        _holdFocus = SelectorFreeze.HoldsFocusUntilFrozen(entry);
         Show();
         foreach (var pane in _panes)
             pane.Show();
@@ -224,15 +227,13 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             {
                 if (_completion != session || IsDisposed) return;
                 TryRestoreLastRegion();
-                Activate();
-                Focus();
-                SelectorForeground.Restore(this);
+                if (!_holdFocus)
+                    TakeFocus();
             }));
         }));
 
-        Activate();
-        Focus();
-        SelectorForeground.Restore(this);
+        if (!_holdFocus)
+            TakeFocus();
         _lastCtrlDown = false;
         _magnifierOn = _options.ShowMagnifier;
         _altLatched = false;
@@ -251,7 +252,11 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         SD.Bitmap? snapshot = null;
         try
         {
-            snapshot = await Task.Run(CaptureService.CaptureFreezeFrame);
+            Task<SD.Bitmap> grab = Task.Run(SelectorFreeze.DeferredGrab);
+            if (await Task.WhenAny(grab, Task.Delay(SelectorFreeze.HoldFocusMaxMs)) != grab &&
+                _completion == session && !IsDisposed)
+                ReleaseFocusHold();
+            snapshot = await grab;
         }
         catch (Exception ex)
         {
@@ -263,6 +268,8 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
             snapshot?.Dispose(); // stale: touch nothing shared
             return;
         }
+
+        ReleaseFocusHold();
 
         DisposeFrozen();
         _frozen = snapshot;
@@ -283,6 +290,28 @@ public sealed class FastAllInOneSelectorDialog : WF.Form
         PrewarmDimmedSlices();
         _freezeFade = SelectorFreeze.FadeToFrozen(this, _panes);
     }
+
+    private void TakeFocus()
+    {
+        Activate();
+        Focus();
+        SelectorForeground.Restore(this);
+    }
+
+    /// <summary>Ends a deferred open's focus hold and takes focus, once.</summary>
+    private void ReleaseFocusHold()
+    {
+        if (!_holdFocus)
+            return;
+        _holdFocus = false;
+        if (!IsDisposed && Visible)
+            TakeFocus();
+    }
+
+    // True while a deferred open waits for its frame before taking focus.
+    private bool _holdFocus;
+
+    protected override bool ShowWithoutActivation => _holdFocus;
 
     /// <summary>Bakes every surface's dimmed frozen slice — see the region selector's copy.</summary>
     private void PrewarmDimmedSlices()

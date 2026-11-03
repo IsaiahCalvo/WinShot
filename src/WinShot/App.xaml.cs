@@ -393,7 +393,7 @@ public partial class App : Application
                 Interlocked.Exchange(ref _rewarmPending, 0);
                 if (_recording is { IsRecording: true })
                     return;
-                CaptureService.PrewarmFreezeSource();
+                CaptureService.RebuildFreezeSource();
             }
             catch (Exception ex)
             {
@@ -2445,7 +2445,12 @@ public partial class App : Application
             PerfLog.TrackFirstShown(selector, "ocr selector");
             try
             {
-                if (await selector.ShowAsync() == WF.DialogResult.OK && selector.SelectedRegionPx is SD.Rectangle region)
+                // The same selector as Capture region, element and window hover included, so
+                // a click reads the paragraph, panel or window under the pointer. It used to
+                // open a bare drag-only selector: nothing lit up under the pointer, a click
+                // did nothing, and it felt like a different tool.
+                if (await selector.ShowAsync(FastRegionSelectorDialog.SelectorMode.Area, elementHover: true) == WF.DialogResult.OK &&
+                    selector.SelectedRegionPx is SD.Rectangle region)
                 {
                     // Screen center of the selection, so the confirmation HUD pops over it.
                     var vs = CaptureService.VirtualScreen;

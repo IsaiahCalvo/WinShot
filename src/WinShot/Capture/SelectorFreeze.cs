@@ -60,6 +60,15 @@ internal static class SelectorFreeze
     /// <summary>Layered-window alpha of a surface showing its own dimmed frozen slice.</summary>
     public const byte FrozenAlpha = 255;
 
+    /// <summary>
+    /// How long a deferred open waits for its frame before it takes keyboard focus anyway.
+    /// Focus is held back because taking it closes the Start menu, a context menu or a
+    /// tooltip before the frame is grabbed, so the frozen shot lost exactly what the user
+    /// opened the selector for. A deferred grab lands in 85-160 ms; past this bound the user
+    /// would notice keys not reaching the selector, so it gives up waiting.
+    /// </summary>
+    public const int HoldFocusMaxMs = 400;
+
     /// <summary>The ramp from live to frozen. One surface arriving on screen for the first
     /// time — the vocabulary's own name for exactly this — rather than a new number.</summary>
     public const int FadeDurationMs = Motion.EnterDurationMs;
@@ -99,7 +108,17 @@ internal static class SelectorFreeze
     /// duplication device was cold, and the caller opens transparent and ramps instead.
     /// </summary>
     public static SD.Bitmap? TryGrabBeforeShow(bool freezeScreen) =>
-        freezeScreen ? CaptureService.TryCaptureFreezeFrameWarm() : null;
+        freezeScreen ? WarmGrab() : null;
+
+    /// <summary>The warm grab. A seam so tests can open a selector cold on any machine.</summary>
+    internal static Func<SD.Bitmap?> WarmGrab = CaptureService.TryCaptureFreezeFrameWarm;
+
+    /// <summary>The deferred grab, run off the UI thread. A seam like <see cref="WarmGrab"/>.</summary>
+    internal static Func<SD.Bitmap> DeferredGrab = CaptureService.CaptureFreezeFrame;
+
+    /// <summary>Only a deferred open holds focus back; a frame in hand has nothing to lose.</summary>
+    public static bool HoldsFocusUntilFrozen(SelectorEntry entry) =>
+        entry == SelectorEntry.TransparentUntilFrozen;
 
     /// <summary>
     /// Puts every surface at the entry's opening alpha in one pass, coordinator first.
