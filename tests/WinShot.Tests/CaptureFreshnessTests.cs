@@ -221,9 +221,13 @@ public class CaptureFreshnessTests
     {
         private readonly Func<SD.Bitmap?> _warm = SelectorFreeze.WarmGrab;
         private readonly Func<SD.Bitmap> _deferred = SelectorFreeze.DeferredGrab;
+        private readonly Func<bool> _animations = Motion.AnimationsEnabled;
 
         public GrabSeams(ManualResetEventSlim release)
         {
+            // These tests are about focus, not ramps: with animations off every ramp lands
+            // inline, so none is left running on a test thread that is about to end.
+            Motion.AnimationsEnabled = () => false;
             SD.Rectangle vs = CaptureService.VirtualScreen;
             SelectorFreeze.WarmGrab = () => null;
             SelectorFreeze.DeferredGrab = () =>
@@ -239,6 +243,7 @@ public class CaptureFreshnessTests
         public void Dispose()
         {
             Motion.TrackHolders = false;
+            Motion.AnimationsEnabled = _animations;
             SelectorFreeze.WarmGrab = _warm;
             SelectorFreeze.DeferredGrab = _deferred;
         }
