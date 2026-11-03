@@ -1,7 +1,8 @@
 """Port WinShot desktop's Survey tool glyphs (src/WinShot/Theme/SurveyToolIcons.xaml)
 to inline SVG strings for the browser extension, so both editors share one icon set.
 
-Run from the repo root:  python3 browser-extension/tools/port-desktop-icons.py
+Run from the repo root:  python3 browser-extension/tools/port-desktop-icons.py [SurveyToolIcons.xaml]
+(pass a path to port from another branch's copy, e.g. the editor PR's newer glyphs).
 Writes browser-extension/src/icons.js. Re-run whenever the desktop glyphs change.
 """
 import json
@@ -11,7 +12,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "src/WinShot/Theme/SurveyToolIcons.xaml"
+SOURCE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "src/WinShot/Theme/SurveyToolIcons.xaml"
 TARGET = ROOT / "browser-extension/src/icons.js"
 WPF = "{http://schemas.microsoft.com/winfx/2006/xaml/presentation}"
 X = "{http://schemas.microsoft.com/winfx/2006/xaml}"

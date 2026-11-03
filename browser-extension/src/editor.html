@@ -8,104 +8,103 @@
   <link rel="stylesheet" href="editor.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><img src="../icons/32.png" alt="" width="22" height="22"><strong>WinShot</strong></div>
-    <div class="toolbar" id="toolbar" role="toolbar" aria-label="Annotation tools">
-      <button class="icon" id="undo" data-icon="Undo" aria-label="Undo" data-tip="Undo (Ctrl+Z)"></button>
-      <button class="icon" id="redo" data-icon="Redo" aria-label="Redo" data-tip="Redo (Ctrl+Y)"></button>
-      <span class="sep"></span>
-      <button class="icon tool" data-tool="pan" data-icon="Pan" aria-label="Pan" data-tip="Pan (hold Space)"></button>
-      <button class="icon tool" data-tool="select" data-icon="Cursor" aria-label="Select" data-tip="Select (V)"></button>
-      <span class="sep"></span>
-      <button class="category" data-category="draw" data-icon="DrawGroup" data-tip="Draw">Draw</button>
-      <button class="category" data-category="shapes" data-icon="Shapes" data-tip="Shapes">Shapes</button>
-      <button class="category" data-category="text" data-icon="TextGroup" data-tip="Text">Text</button>
-      <button class="category" data-category="effects" data-icon="Effects" data-tip="Effects">Effects</button>
-      <button class="category" data-category="image" data-icon="Crop" data-tip="Image">Image</button>
+  <!-- The desktop editor's frame (EditorWindow.xaml): a 44px top bar, a 34px settings
+       row, the field, a 48px right rail running to the bottom, and the bottom bar. -->
+  <header class="topbar" id="toolbar" role="toolbar" aria-label="Annotation tools">
+    <div class="top-left">
+      <button class="btn" id="undo" data-icon="Undo" aria-label="Undo" data-tip="Undo (Ctrl+Z)"></button>
+      <button class="btn" id="redo" data-icon="Redo" aria-label="Redo" data-tip="Redo (Ctrl+Y)"></button>
+      <span class="divider"></span>
+      <button class="ib tool" data-tool="crop" data-icon="Crop" aria-label="Crop and resize" data-tip="Crop (K)"></button>
     </div>
-    <nav class="nav" aria-label="WinShot pages">
-      <a id="open-history" class="icon-link" href="history.html" data-lucide="history" aria-label="History" data-tip="Capture history"></a>
-      <a id="open-options" class="icon-link" href="options.html" target="_blank" data-lucide="settings" aria-label="Settings" data-tip="Settings"></a>
+    <div class="cluster">
+      <div class="pan-select">
+        <button class="tb tool" data-tool="pan" data-icon="Pan" aria-label="Pan" data-tip="Pan (hold Space)"></button>
+        <button class="tb tool" data-tool="select" data-icon="Cursor" aria-label="Select" data-tip="Select (V)"></button>
+        <span class="divider"></span>
+      </div>
+      <button class="gb" data-category="draw" data-icon="DrawGroup" aria-label="Draw" data-tip="Draw"></button>
+      <button class="gb" data-category="shapes" data-icon="Shapes" aria-label="Shapes" data-tip="Shapes"></button>
+      <button class="gb" data-category="text" data-icon="TextGroup" aria-label="Text" data-tip="Text"></button>
+      <button class="gb" data-category="effects" data-icon="Effects" aria-label="Effects" data-tip="Effects"></button>
+      <div class="tool-slot" id="subbar" role="group" aria-label="Tools in this group"></div>
+    </div>
+    <nav class="top-right" aria-label="WinShot pages">
+      <a id="open-history" class="ib" href="history.html" data-lucide="history" aria-label="History" data-tip="Capture history"></a>
+      <a id="open-options" class="ib" href="options.html" target="_blank" data-lucide="settings" aria-label="Settings" data-tip="Settings"></a>
     </nav>
   </header>
-  <div class="subrow">
-    <div class="subbar" id="subbar" role="toolbar" aria-label="Tools in this group"></div>
-    <div class="context" id="context"></div>
-  </div>
-  <main>
-    <section class="stage" id="stage" aria-label="Capture preview">
-      <div class="viewport-pin"><canvas id="view"></canvas></div>
-      <div id="preview"></div>
-      <textarea id="text-editor" spellcheck="false" hidden></textarea>
-    </section>
-    <aside id="details" class="panel" aria-label="Capture details" aria-hidden="true">
-      <div class="panel-head">
-        <h1 id="title">Loading capture…</h1>
-        <button class="icon" id="close-details" data-lucide="x" aria-label="Hide details" data-tip="Hide details"></button>
-      </div>
-      <div id="state" class="pill">Loading</div>
-      <details class="section" open>
-        <summary>Capture details</summary>
-        <dl id="report"></dl>
-      </details>
-      <details class="section warn" id="warnings" hidden open>
-        <summary>Warnings</summary>
-        <ul></ul>
-      </details>
-      <details class="section" id="pdf-options">
-        <summary>PDF options</summary>
-        <div class="fields">
-          <label for="pdf-layout">Layout</label>
-          <select id="pdf-layout">
-            <option value="multipage">Multiple pages</option>
-            <option value="single">One continuous page</option>
-          </select>
-          <label for="pdf-page-size">Page size</label>
-          <select id="pdf-page-size">
-            <option value="auto">Match capture</option>
-            <option value="a4">A4</option>
-            <option value="letter">Letter</option>
-            <option value="legal">Legal</option>
-            <option value="custom">Custom</option>
-          </select>
-          <div class="custom-size">
-            <label for="pdf-width">Width (in)</label><input id="pdf-width" type="number" min="1" max="200" step="0.1">
-            <label for="pdf-height">Height (in)</label><input id="pdf-height" type="number" min="1" max="200" step="0.1">
-          </div>
-          <label for="pdf-header">Header</label><input id="pdf-header" maxlength="500" placeholder="{title}">
-          <label for="pdf-footer">Footer</label><input id="pdf-footer" maxlength="500" placeholder="Page {page} of {pages}">
-          <label for="pdf-watermark">Watermark</label><input id="pdf-watermark" maxlength="500">
-          <small>Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small>
+  <div class="subrow" id="context" role="toolbar" aria-label="Tool settings"></div>
+  <section class="stage" id="stage" aria-label="Capture preview">
+    <div class="viewport-pin"><canvas id="view"></canvas></div>
+    <div id="preview"></div>
+    <textarea id="text-editor" spellcheck="false" hidden></textarea>
+  </section>
+  <aside id="details" class="panel" aria-label="Capture details" aria-hidden="true">
+    <div class="panel-head">
+      <h1 id="title">Loading capture…</h1>
+      <button class="ib" id="close-details" data-lucide="x" aria-label="Hide details" data-tip="Hide details"></button>
+    </div>
+    <div id="state" class="pill">Loading</div>
+    <details class="section" open>
+      <summary>Capture details</summary>
+      <dl id="report"></dl>
+    </details>
+    <details class="section warn" id="warnings" hidden open>
+      <summary>Warnings</summary>
+      <ul></ul>
+    </details>
+    <details class="section" id="pdf-options">
+      <summary>PDF options</summary>
+      <div class="fields">
+        <label for="pdf-layout">Layout</label>
+        <select id="pdf-layout">
+          <option value="multipage">Multiple pages</option>
+          <option value="single">One continuous page</option>
+        </select>
+        <label for="pdf-page-size">Page size</label>
+        <select id="pdf-page-size">
+          <option value="auto">Match capture</option>
+          <option value="a4">A4</option>
+          <option value="letter">Letter</option>
+          <option value="legal">Legal</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div class="custom-size">
+          <label for="pdf-width">Width (in)</label><input id="pdf-width" type="number" min="1" max="200" step="0.1">
+          <label for="pdf-height">Height (in)</label><input id="pdf-height" type="number" min="1" max="200" step="0.1">
         </div>
-      </details>
-      <p class="privacy">All editing and exports happen in your browser. Your marks are saved with the capture in History.</p>
-    </aside>
-    <nav class="rail" aria-label="View">
-      <div class="rail-top">
-        <button class="rail-button" id="toggle-details" data-lucide="panel-right-open" aria-label="Capture details" aria-expanded="false" data-tip="Capture details and PDF options" data-tip-side="left"><i class="dot" hidden></i></button>
+        <label for="pdf-header">Header</label><input id="pdf-header" maxlength="500" placeholder="{title}">
+        <label for="pdf-footer">Footer</label><input id="pdf-footer" maxlength="500" placeholder="Page {page} of {pages}">
+        <label for="pdf-watermark">Watermark</label><input id="pdf-watermark" maxlength="500">
+        <small>Templates: {title}, {url}, {date}, {time}, {page}, {pages}</small>
       </div>
-      <div class="rail-bottom">
-        <button class="rail-button" id="zoom-in" data-icon="Plus" aria-label="Zoom in" data-tip="Zoom in (Ctrl++)" data-tip-side="left"></button>
-        <button id="zoom-label" data-tip="Fit (Ctrl+1) · 100% (Ctrl+0)" data-tip-side="left">100%</button>
-        <button class="rail-button" id="zoom-out" data-icon="Minus" aria-label="Zoom out" data-tip="Zoom out (Ctrl+-)" data-tip-side="left"></button>
-        <span class="rail-rule"></span>
-        <button class="rail-button" id="zoom-fit" data-lucide="scan" aria-label="Fit" data-tip="Fit to window (Ctrl+1)" data-tip-side="left"></button>
-      </div>
-    </nav>
-  </main>
+    </details>
+    <p class="privacy">All editing and exports happen in your browser. Your marks are saved with the capture in History.</p>
+  </aside>
+  <nav class="rail" aria-label="View">
+    <div class="rail-top">
+      <button class="rb" id="toggle-details" data-lucide="panel-right-open" aria-label="Capture details" aria-expanded="false" data-tip="Capture details and PDF options" data-tip-side="left"><i class="dot" hidden></i></button>
+    </div>
+    <div class="rail-bottom">
+      <button class="rb small" id="zoom-in" data-icon="Plus" aria-label="Zoom in" data-tip="Zoom in (Ctrl++)" data-tip-side="left"></button>
+      <button id="zoom-label" data-tip="Fit (Ctrl+1) · 100% (Ctrl+0)" data-tip-side="left">100%</button>
+      <button class="rb small" id="zoom-out" data-icon="Minus" aria-label="Zoom out" data-tip="Zoom out (Ctrl+-)" data-tip-side="left"></button>
+      <span class="rail-rule"></span>
+      <button class="rb" id="zoom-fit" data-icon="FitPage" aria-label="Fit" data-tip="Fit to window (Ctrl+1)" data-tip-side="left"></button>
+    </div>
+  </nav>
   <footer class="bottombar">
     <div class="actions save" role="group" aria-label="Save as">
-      <button id="save-png" class="primary" data-lucide="download" data-tip="Save as PNG (Ctrl+S)">Save PNG</button>
-      <div class="segmented">
-        <button id="save-jpeg" data-tip="Save as JPEG">JPEG</button>
-        <button id="save-webp" data-tip="Save as WebP">WebP</button>
-        <button id="save-pdf" data-tip="Save as PDF (options in Capture details)">PDF</button>
-      </div>
+      <button id="save-png" class="primary" data-tip="Save as PNG (Ctrl+S)">Save PNG</button>
+      <button id="save-jpeg" class="btn text" data-tip="Save as JPEG">JPEG</button>
+      <button id="save-webp" class="btn text" data-tip="Save as WebP">WebP</button>
+      <button id="save-pdf" class="btn text" data-tip="Save as PDF (options in Capture details)">PDF</button>
     </div>
     <div class="actions tools" role="group" aria-label="Share">
-      <button class="icon big" id="copy-clipboard" data-lucide="copy" aria-label="Copy" data-tip="Copy image (Ctrl+C)"></button>
-      <button class="icon big" id="print-capture" data-lucide="printer" aria-label="Print" data-tip="Print (Ctrl+P)"></button>
-      <button class="icon big" id="open-desktop" data-lucide="square-arrow-out-up-right" aria-label="Open in WinShot" data-tip="Open in the WinShot desktop editor"></button>
+      <button class="ib" id="copy-clipboard" data-lucide="copy" aria-label="Copy" data-tip="Copy image (Ctrl+C)"></button>
+      <button class="ib" id="print-capture" data-lucide="printer" aria-label="Print" data-tip="Print (Ctrl+P)"></button>
+      <button class="ib" id="open-desktop" data-lucide="square-arrow-out-up-right" aria-label="Open in WinShot" data-tip="Open in the WinShot desktop editor"></button>
     </div>
   </footer>
   <dialog id="resize-dialog">

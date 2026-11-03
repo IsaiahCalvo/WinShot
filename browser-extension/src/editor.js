@@ -524,18 +524,15 @@ const CATEGORIES = {
   effects: [
     { tool: "redact", icon: "Pixelate", label: "Redact", key: "X" },
     { tool: "spotlight", icon: "Spotlight", label: "Spotlight", key: "" }
-  ],
-  image: [
-    { tool: "crop", icon: "Crop", label: "Crop", key: "K" },
-    { action: "resize", icon: "FitScreen", label: "Resize…" }
   ]
 };
 
 const TOOL_CATEGORY = Object.fromEntries(Object.entries(CATEGORIES).flatMap(([name, items]) => items.filter((i) => i.tool).map((i) => [i.tool, name])));
 const KEY_TOOLS = Object.fromEntries(Object.values(CATEGORIES).flat().filter((i) => i.key).map((i) => [i.key.toLowerCase(), i.tool]));
 KEY_TOOLS.v = "select";
+KEY_TOOLS.k = "crop";
 const DRAW_TOOLS = new Set(["pen", "highlighter", "rect", "ellipse", "line", "arrow", "step", "redact", "spotlight"]);
-const lastToolIn = { draw: "pen", shapes: "rect", text: "text", effects: "redact", image: "crop" };
+const lastToolIn = { draw: "pen", shapes: "rect", text: "text", effects: "redact" };
 
 function setTool(next) {
   if (tool === "crop" && next !== "crop") cancelCrop();
@@ -561,41 +558,44 @@ function buildSubbar() {
   if (!category) return;
   for (const item of CATEGORIES[category]) {
     const button = document.createElement("button");
-    button.className = "subtool";
+    button.className = "tb";
     button.dataset.icon = item.icon;
-    button.textContent = item.label;
-    if (item.tool) {
-      button.dataset.tool = item.tool;
-      button.dataset.tip = item.key ? `${item.label} (${item.key})` : item.label;
-      button.classList.toggle("active", item.tool === tool);
-      button.addEventListener("click", () => setTool(item.tool));
-    } else {
-      button.dataset.tip = item.label.replace("…", "");
-      button.addEventListener("click", () => runAction(item.action));
-    }
+    button.dataset.tool = item.tool;
+    button.setAttribute("aria-label", item.label);
+    button.dataset.tip = item.key ? `${item.label} (${item.key})` : item.label;
+    button.classList.toggle("active", item.tool === tool);
+    button.addEventListener("click", () => setTool(item.tool));
     subbar.append(button);
   }
-  if (tool === "crop") {
-    const hint = document.createElement("span");
-    hint.className = "hint";
-    hint.id = "crop-size";
-    subbar.append(hint);
-    const grow = document.createElement("span");
-    grow.className = "grow";
-    subbar.append(grow);
-    const reset = document.createElement("button");
-    reset.textContent = "Reset crop";
-    reset.addEventListener("click", () => { cropDraft = null; commit(() => { edits.crop = null; }); setTool("select"); });
-    const cancel = document.createElement("button");
-    cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => setTool("select"));
-    const apply = document.createElement("button");
-    apply.className = "primary";
-    apply.textContent = "Apply crop";
-    apply.addEventListener("click", applyCrop);
-    subbar.append(reset, cancel, apply);
-  }
   paintIcons(subbar);
+}
+
+function textButton(label, onClick, className = "pill-button") {
+  const button = document.createElement("button");
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+// Crop's settings row, as on the desktop: the size, Image size, and the three crop actions.
+function cropControls() {
+  const hint = document.createElement("span");
+  hint.className = "hint";
+  hint.id = "crop-size";
+  const resize = textButton("Image size", () => runAction("resize"));
+  resize.dataset.tip = "Scale the saved image";
+  const reset = textButton("Reset", () => { cropDraft = null; commit(() => { edits.crop = null; }); setTool("select"); });
+  reset.dataset.tip = "Show the whole capture again";
+  const cancel = textButton("Don't crop", () => setTool("select"));
+  const apply = textButton("Apply crop", applyCrop, "primary");
+  contextBar.append(hint, divider(), resize, reset, cancel, apply);
+}
+
+function divider() {
+  const node = document.createElement("span");
+  node.className = "divider";
+  return node;
 }
 
 function cropSizeLabel() {
@@ -644,11 +644,12 @@ function applyStyle(key, value) {
 
 function chipGroup(key, options) {
   const wrap = document.createElement("span");
-  wrap.className = "swatches";
+  wrap.className = "group";
   for (const option of options) {
     const button = document.createElement("button");
-    button.className = "chip";
+    button.className = option.icon ? "tb" : "tb text";
     button.dataset.tip = option.tip || option.label;
+    button.setAttribute("aria-label", option.tip || option.label);
     if (option.icon) button.dataset.icon = option.icon;
     else button.textContent = option.label;
     button.classList.toggle("active", currentValue(key) === option.value);
@@ -660,17 +661,60 @@ function chipGroup(key, options) {
 
 function labeled(text, node) {
   const label = document.createElement("label");
+  label.className = "caption";
   label.textContent = text;
   const wrap = document.createElement("span");
-  wrap.style.display = "inline-flex";
-  wrap.style.alignItems = "center";
-  wrap.style.gap = "5px";
+  wrap.className = "group";
   wrap.append(label, node);
   return wrap;
 }
 
+// The colour well: one ring showing the current colour; the palette opens under it.
+const colorPopover = document.createElement("div");
+colorPopover.className = "popover";
+colorPopover.hidden = true;
+colorPopover.setAttribute("role", "dialog");
+colorPopover.setAttribute("aria-label", "Colour");
+document.body.append(colorPopover);
+document.addEventListener("pointerdown", (event) => {
+  if (!colorPopover.hidden && !colorPopover.contains(event.target) && !event.target.closest?.(".color-well")) colorPopover.hidden = true;
+});
+
+function openColorPopover(anchor) {
+  colorPopover.textContent = "";
+  const grid = document.createElement("div");
+  grid.className = "palette";
+  const current = currentValue("color")?.toLowerCase();
+  for (const color of PALETTE) {
+    const button = document.createElement("button");
+    button.className = "swatch";
+    button.style.background = color;
+    button.dataset.tip = color;
+    button.setAttribute("aria-label", `Colour ${color}`);
+    button.classList.toggle("active", current === color);
+    button.addEventListener("click", () => { colorPopover.hidden = true; applyStyle("color", color); });
+    grid.append(button);
+  }
+  const custom = document.createElement("label");
+  custom.className = "custom";
+  custom.textContent = "Custom";
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = currentValue("color") || "#ff3b30";
+  input.addEventListener("change", () => { colorPopover.hidden = true; applyStyle("color", input.value); });
+  custom.append(input);
+  colorPopover.append(grid, custom);
+  colorPopover.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  const width = colorPopover.offsetWidth;
+  colorPopover.style.left = `${Math.max(8, Math.min(innerWidth - width - 8, rect.left + rect.width / 2 - width / 2))}px`;
+  colorPopover.style.top = `${rect.bottom + 6}px`;
+}
+
 function syncContext() {
   contextBar.textContent = "";
+  colorPopover.hidden = true;
+  if (tool === "crop") { cropControls(); requestRender(); return; }
   const type = activeType();
   if (!type) {
     if (tool === "select" && !selected()) {
@@ -684,25 +728,16 @@ function syncContext() {
   }
   const usesColor = !["redact", "spotlight"].includes(type);
   if (usesColor) {
-    const swatches = document.createElement("span");
-    swatches.className = "swatches";
-    for (const color of PALETTE) {
-      const button = document.createElement("button");
-      button.className = "swatch";
-      button.style.background = color;
-      button.dataset.tip = color;
-      button.setAttribute("aria-label", `Colour ${color}`);
-      button.classList.toggle("active", currentValue("color")?.toLowerCase() === color);
-      button.addEventListener("click", () => applyStyle("color", color));
-      swatches.append(button);
-    }
-    const custom = document.createElement("input");
-    custom.type = "color";
-    custom.value = currentValue("color") || "#ff3b30";
-    custom.dataset.tip = "Custom colour";
-    custom.addEventListener("change", () => applyStyle("color", custom.value));
-    swatches.append(custom);
-    contextBar.append(swatches);
+    const well = document.createElement("button");
+    well.className = "color-well";
+    well.dataset.tip = "Colour";
+    well.setAttribute("aria-label", "Colour");
+    const dot = document.createElement("i");
+    dot.style.background = currentValue("color") || "#ff3b30";
+    well.append(dot);
+    well.addEventListener("click", () => { if (colorPopover.hidden) openColorPopover(well); else colorPopover.hidden = true; });
+    contextBar.append(well);
+    contextBar.append(divider());
   }
   if (["pen", "highlighter", "rect", "ellipse", "line", "arrow"].includes(type)) {
     const width = document.createElement("select");
@@ -720,8 +755,10 @@ function syncContext() {
       width.append(option);
     }
     width.value = String(current);
+    width.dataset.tip = "Line width";
+    width.setAttribute("aria-label", "Line width");
     width.addEventListener("change", () => applyStyle("width", Number(width.value)));
-    contextBar.append(labeled("Width", width));
+    contextBar.append(width);
   }
   if (["rect", "ellipse"].includes(type)) {
     contextBar.append(chipGroup("fill", [
@@ -739,27 +776,31 @@ function syncContext() {
       dash.append(option);
     }
     dash.value = currentValue("dash") || "solid";
+    dash.dataset.tip = "Line style";
+    dash.setAttribute("aria-label", "Line style");
     dash.addEventListener("change", () => applyStyle("dash", dash.value));
-    contextBar.append(labeled("Line", dash));
+    contextBar.append(dash);
   }
   if (["text", "step"].includes(type)) {
     const size = document.createElement("select");
     for (const value of [14, 18, 22, 28, 36, 48, 64, 96]) {
       const option = document.createElement("option");
       option.value = String(value);
-      option.textContent = `${value}`;
+      option.textContent = `${value} pt`;
       size.append(option);
     }
     const current = currentValue("fontSize") || 28;
     if (![...size.options].some((o) => Number(o.value) === current)) {
       const option = document.createElement("option");
       option.value = String(current);
-      option.textContent = String(current);
+      option.textContent = `${current} pt`;
       size.append(option);
     }
     size.value = String(current);
+    size.dataset.tip = "Text size";
+    size.setAttribute("aria-label", "Text size");
     size.addEventListener("change", () => applyStyle("fontSize", Number(size.value)));
-    contextBar.append(labeled("Size", size));
+    contextBar.append(size);
   }
   if (type === "text") {
     contextBar.append(chipGroup("textStyle", [
@@ -799,7 +840,7 @@ function syncContext() {
   }
   if (selected() && tool === "select") {
     const remove = document.createElement("button");
-    remove.className = "icon";
+    remove.className = "ib";
     remove.dataset.icon = "Trash";
     remove.dataset.tip = "Delete (Del)";
     remove.setAttribute("aria-label", "Delete mark");

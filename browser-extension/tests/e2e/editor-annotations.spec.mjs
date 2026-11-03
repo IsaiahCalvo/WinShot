@@ -125,14 +125,14 @@ test("desktop-style markup burns into exports, persists, and supports crop, resi
 
     // Toolbar shows the desktop's tool groups with real icons.
     const toolbar = await editor.evaluate(() => ({
-      categories: [...document.querySelectorAll("[data-category]")].map((node) => node.textContent.trim()),
+      categories: [...document.querySelectorAll("[data-category]")].map((node) => node.getAttribute("aria-label")),
       iconCount: document.querySelectorAll("#toolbar svg").length,
       // Page and share actions are icon buttons (Lucide), as on the desktop bottom bar.
       actionIcons: ["#copy-clipboard", "#print-capture", "#open-desktop", "#open-history", "#open-options", "#toggle-details", "#zoom-fit"]
         .filter((selector) => document.querySelector(`${selector} svg`)).length,
       detailsHidden: !document.querySelector("#details").classList.contains("open")
     }));
-    expect(toolbar.categories).toEqual(["Draw", "Shapes", "Text", "Effects", "Image"]);
+    expect(toolbar.categories).toEqual(["Draw", "Shapes", "Text", "Effects"]);
     expect(toolbar.iconCount).toBeGreaterThanOrEqual(9);
     expect(toolbar.actionIcons).toBe(7);
     // Capture details start tucked into the rail and slide out on demand.
